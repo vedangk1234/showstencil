@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/weekly-digest",
+      "schedule": "0 9 * * 1"
+    },
+    {
+      "path": "/api/cron/refresh-data",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/trend-detection",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}
