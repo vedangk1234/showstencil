@@ -474,7 +474,67 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 1 — Day 2 (2026-04-13, evening session)
+
+**lib/db.ts** — all database operations (single source of truth for Supabase queries)
+* `saveChannelSnapshot(userId, ChannelOverview)` — deletes today's existing snapshot, inserts fresh row in `channel_snapshots`. Derives `estimated_monthly_revenue` as 90-day revenue ÷ 3.
+* `saveVideoData(userId, VideoPerformanceItem[], VideoDetail[])` — merges analytics data (views, duration, ctr, etc.) with public Data API data (title, thumbnail, like count, etc.) by videoId. Deletes existing rows for the affected video IDs then inserts fresh merged rows.
+* `saveCompetitorData(competitorId, CompetitorFullProfile)` — updates competitor channel metadata, replaces all competitor_videos with fresh velocity-scored rows.
+* `getUser(userId)` — fetches a user row by ID, returns null if not found.
+* `updateUserOnboardingStatus(userId, completed)` — sets `onboarding_completed` on the users table.
+* `getChannelSnapshots(userId, days)` — returns last N days of snapshots sorted ascending for charts.
+* `getVideos(userId, limit)` — returns top N videos by view_count for the performance table.
+* Design choice: uses delete + insert pattern instead of upsert to avoid requiring unique constraints on `(user_id, youtube_video_id)`. Only the videos included in the current sync are touched — older videos are preserved.
+
+**app/api/sync/route.ts** — POST `/api/sync`
+* Auth-gated: returns 401 if no session, 400 if no access token stored in DB.
+* Loads OAuth access token from Supabase (not from the JWT session, keeping it server-only).
+* Runs all 5 YouTube Analytics calls in parallel: `getChannelOverview`, `getVideoPerformance(20)`, `getAudienceDemographics`, `getTrafficSources`, `getDailyAnalytics(30)`.
+* After analytics, fetches public video details for the returned video IDs (one batch call).
+* Saves channel snapshot and merged video data via `lib/db.ts`.
+* Returns `{ success, syncedAt, channelSnapshot, videosSynced, message }` with elapsed time.
+* Logs timing in milliseconds for performance monitoring.
+
+**components/sync-context.tsx** — React context for first-time sync state
+* `SyncProvider` — client component that receives `needsSync: boolean` from the server layout. On mount, fires `POST /api/sync` if needsSync is true. Tracks `isSyncing`, `syncComplete`, `syncError` states.
+* `useSyncStatus()` — hook for dashboard pages to read sync state.
+* On sync error, `syncComplete` is still set to true so the UI doesn't stay blocked permanently.
+
+**app/(dashboard)/layout.tsx** — auto-trigger on first login
+* After auth check, fetches user row from DB to read `onboarding_completed`.
+* If false: immediately calls `updateUserOnboardingStatus(userId, true)` server-side (so page refresh doesn't re-trigger), then passes `needsSync={true}` to `SyncProvider`.
+* Wraps all dashboard children in `<SyncProvider>` so any page can read sync state.
+
+**app/(dashboard)/dashboard/page.tsx** — loading state for first sync
+* Client component using `useSyncStatus()`.
+* Shows spinner + "Syncing your channel data..." message while `isSyncing` is true.
+* Shows dashboard content once sync completes (placeholder text for now, data views in Week 2).
+* Shows non-blocking error message if sync failed.
+
+---
+
+### Week 1 — Day 2 (2026-04-13, morning session)
+
+**lib/youtube-analytics.ts** — authenticated YouTube Analytics API v2
+* `getChannelOverview` — 90-day aggregate: views, watch time, avg view duration, sub delta, revenue
+* `getVideoPerformance` — per-video analytics sorted by views, top N results
+* `getAudienceDemographics` — age/gender breakdown + top 10 countries (2 parallel calls)
+* `getTrafficSources` — views + watch time by traffic source type with % share calculated
+* `getDailyAnalytics` — day-by-day metrics for charting (default 30 days)
+* Revenue retry logic: `estimatedRevenue` returns 401 "unauthorized" (not 403) for non-monetized channels — all three revenue functions detect this by checking `reason !== 'authError'` and silently retry without that metric. Revenue fields return 0 rather than crashing.
+* No-channel detection: `getChannelOverview` returns `null` on true 403 / second-attempt failure, with a logged message explaining the cause.
+
+**scripts/refresh-token.ts** — utility to refresh an expired OAuth token using the stored refresh token directly from Supabase, without requiring a browser re-login. Calls `https://oauth2.googleapis.com/token` and writes the new token back to the `users` table.
+
+---
+
 ### Week 1 — Day 1 (2026-04-13, morning session)
+
+**Google OAuth + Supabase auth**
+* NextAuth v5 configured with Google provider, YouTube read scopes, JWT strategy
+* `auth.ts` — signIn callback upserts user to Supabase on every login; jwt callback stores accessToken/refreshToken/expiresAt in JWT; auto-refresh logic calls `oauth2.googleapis.com/token` when token is within 60s of expiry and persists new token to DB
+* Login page (`app/(auth)/login/page.tsx`) and protected dashboard layout built
+* User data (email, name, image, tokens) saved to Supabase `users` table on first login
 
 **Project bootstrap**
 * Next.js 14 project created and running on localhost:3000
@@ -484,6 +544,14 @@ const planLimits = {
 
 **Types**
 * `types/index.ts` — all 10 TypeScript interfaces: `User`, `ChannelSnapshot`, `Video`, `Competitor`, `CompetitorVideo`, `GapScore`, `Digest`, `Trend`, `UserSettings`, `VideoIdea`. Strict mode, no `any`.
+
+**lib/youtube-data.ts** — public YouTube Data API v3 calls (no user auth)
+* `getChannelStats` — channel metadata, keywords, topic categories, subscriber/view counts
+* `getRecentVideos` — two parallel search.list calls (medium + long duration) merged and deduplicated
+* `getVideoDetails` — batch fetch up to 50 videos per call, filters out Shorts (<61s), live streams, kids content
+* `getChannelVideoVelocity` — last 10 videos with viral velocity scores computed
+* `getCompetitorFullProfile` — single function: stats + recent videos + velocity in ~203 quota units
+* `getTopicCoverage` — pure computation (0 quota): tag frequency, category distribution, common title words for gap analysis
 
 **Database**
 * Supabase project created and all 9 tables provisioned from CLAUDE.md schema: `users`, `channel_snapshots`, `videos`, `competitors`, `competitor_videos`, `gap_scores`, `digests`, `trends`, `user_settings`
@@ -510,7 +578,7 @@ const planLimits = {
 
 > Update this section as issues are discovered
 
-None yet.
+**Revenue 401 on non-monetized channels (fixed Day 2 morning):** YouTube Analytics API returns 401 with `reason: "unauthorized"` (not 403) when `estimatedRevenue` is requested for a non-monetized channel. Standard 401 handling (throw TOKEN_EXPIRED) would crash the entire request. Fix: inspect `errors[0].reason` — only throw TOKEN_EXPIRED when `reason === 'authError'`. All other 401s (including `reason === 'unauthorized'`) return null and trigger a silent retry without the revenue metric. Revenue fields return 0 rather than crashing.
 
 \---
 
@@ -541,6 +609,6 @@ None yet.
 
 \---
 
-*Last updated: Day 0 — before first line of code
+*Last updated: 2026-04-13 — Day 2 evening session
 Next update due: End of Week 1*
 

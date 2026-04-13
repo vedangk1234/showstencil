@@ -2,6 +2,8 @@ import { auth, signOut } from '@/auth'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
+import { getUser, updateUserOnboardingStatus } from '@/lib/db'
+import { SyncProvider } from '@/components/sync-context'
 
 const navItems = [
   { href: '/dashboard',   label: 'Dashboard',    Icon: LayoutIcon    },
@@ -18,6 +20,15 @@ export default async function DashboardLayout({
 }) {
   const session = await auth()
   if (!session) redirect('/login')
+
+  // Check if this is the user's first login — if so, trigger an initial sync
+  const user = await getUser(session.user.id)
+  const needsSync = !user?.onboarding_completed
+
+  if (needsSync) {
+    // Mark onboarding complete immediately so a page refresh doesn't re-trigger sync
+    await updateUserOnboardingStatus(session.user.id, true)
+  }
 
   return (
     <div className="flex h-screen bg-zinc-950">
@@ -84,7 +95,9 @@ export default async function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto">
+        <SyncProvider needsSync={needsSync}>{children}</SyncProvider>
+      </main>
 
     </div>
   )
