@@ -12,7 +12,7 @@
 import { createServiceClient } from '@/lib/supabase'
 import type { ChannelOverview, VideoPerformanceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
-import type { User, ChannelSnapshot, Video, CompetitorMetrics } from '@/types'
+import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings } from '@/types'
 
 // ---------------------------------------------------------------------------
 // saveChannelSnapshot
@@ -480,4 +480,70 @@ export async function getCompetitorMetricsFromDB(userId: string): Promise<Compet
   }
 
   return result
+}
+
+// ---------------------------------------------------------------------------
+// getUserSettings
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the user_settings row for a user, or null if none exists.
+ *
+ * @returns UserSettings or null if not found / on error
+ */
+export async function getUserSettings(userId: string): Promise<UserSettings | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('*')
+    .eq('user_id', userId)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getUserSettings error:', error.message)
+    }
+    return null
+  }
+
+  // Normalise alerted_video_ids — DB returns null if column was never set
+  const raw = data as Record<string, unknown>
+  return {
+    ...raw,
+    alerted_video_ids: Array.isArray(raw.alerted_video_ids) ? raw.alerted_video_ids as string[] : [],
+  } as UserSettings
+}
+
+// ---------------------------------------------------------------------------
+// upsertUserSettings
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates or updates a user_settings row. Only the fields provided in
+ * `settings` are written — all other columns are left unchanged on update.
+ *
+ * @returns true on success, false on error
+ */
+export async function upsertUserSettings(
+  userId: string,
+  settings: Partial<Omit<UserSettings, 'id' | 'user_id' | 'created_at'>>,
+): Promise<boolean> {
+  const supabase = createServiceClient()
+
+  const { error } = await supabase.from('user_settings').upsert(
+    {
+      user_id: userId,
+      ...settings,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' },
+  )
+
+  if (error) {
+    console.error('[db] upsertUserSettings error:', error.message)
+    return false
+  }
+
+  return true
 }

@@ -148,12 +148,17 @@ export interface Trend {
 
 // User settings
 export interface UserSettings {
+  id: string;
   user_id: string;
   weekly_digest_enabled: boolean;
   alerts_enabled: boolean;
   alert_threshold_multiplier: number;
-  digest_day: string;
-  timezone: string;
+  last_alert_sent_at: string | null;
+  alerted_video_ids: string[];
+  unsubscribe_token: string | null;
+  digest_day: string | null;
+  timezone: string | null;
+  created_at: string;
   updated_at: string;
 }
 
