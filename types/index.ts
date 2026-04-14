@@ -225,6 +225,27 @@ export interface RevenueEstimate {
   cpmUsed: number;                   // CPM benchmark applied
 }
 
+// Viral video detected in a competitor channel (from trend-detector.ts)
+export interface ViralVideo {
+  videoId: string;
+  title: string;
+  channelId: string;
+  channelName: string;
+  viewCount: number;
+  velocityScore: number;
+  publishedAt: string;
+  thumbnailUrl: string;
+  performanceVsAvg: number; // e.g. 3.2 means 3.2x that channel's average views
+}
+
+// Topic covered by competitors but absent from the user's channel (from trend-detector.ts)
+export interface UncoveredTopic {
+  topic: string;              // e.g. "passive income with index funds"
+  competitorCoverage: number; // how many competitors covered it
+  searchDemandEstimate: 'high' | 'medium' | 'low'; // Claude's estimate
+  suggestedAngle: string;     // Claude's one-line suggestion for the user's take
+}
+
 // Gap scorer — full result
 export interface GapScoreResult {
   overallScore: number;              // 0–100. Higher = bigger gap = more opportunity
