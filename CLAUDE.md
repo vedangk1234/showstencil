@@ -339,23 +339,26 @@ Budget calls carefully. For 100 users with 10 competitors each:
 
 ### Gap Score Calculation (lib/gap-scorer.ts)
 
+Weights below reflect the actual implementation (updated after Day 3 calibration):
+
 ```
-Score 1 — Views gap (weight: 30%)
-  = 100 × (1 - userAvgViews / competitorTier1AvgViews)
-  Capped at 0 minimum (user cannot score negative)
+Score 1 — Views gap (weight: 35%)
+  Piecewise scale: gap <25% → 10-30, <50% → 30-60, <75% → 60-85, 75%+ → 85-100
+  gapPercent = (competitorAvg - userValue) / competitorAvg × 100
 
-Score 2 — CTR gap (weight: 25%)
-  = 100 × (1 - userCTR / nicheBenchmarkCTR)
-  nicheBenchmarkCTR is median of Tier 1 CTRs
+Score 2 — CTR gap (weight: 30%)
+  Same piecewise scale as views
+  Estimated CTR for competitors = (avgViews / subscriberCount) × 0.3, capped at 15%
 
-Score 3 — Watch time gap (weight: 20%)
-  = 100 × (1 - userAvgDuration / competitorAvgDuration)
+Score 3 — Watch time gap (weight: 25%)
+  Same piecewise scale
+  Falls back to niche benchmarks when public data has no duration (finance/education: 720s, gaming: 480s, default: 360s)
 
-Score 4 — Upload frequency gap (weight: 15%)
-  = 100 × abs(userUploadsPerMonth - nicheAvgUploadsPerMonth) / nicheAvgUploadsPerMonth
+Score 4 — Upload frequency gap (weight: 10%)
+  Hard-capped at score 60 — frequency alone cannot dominate the overall score
 
-Score 5 — Topic coverage gap (weight: 10%)
-  = percentage of niche's top 20 topics user has never covered
+Score 5 — Topic coverage gap (weight: 0% for now, stub)
+  Returns 0 until topic analysis is implemented in a future milestone
 
 Overall = weighted sum, rounded to integer 0-100
 Higher score = bigger gap = more opportunity
@@ -470,9 +473,133 @@ const planLimits = {
 
 \---
 
+## Feature Build Status
+
+> Legend: ✅ Done | 🔲 Not started | 🚧 Stub/partial
+
+### Backend / Library layer
+
+| File | Status | Notes |
+|---|---|---|
+| `lib/supabase.ts` | ✅ | createClient (anon) + createServiceClient (service role) |
+| `lib/youtube-analytics.ts` | ✅ | 5 authenticated functions, revenue 401 fix |
+| `lib/youtube-data.ts` | ✅ | 6 public Data API functions, velocity scoring |
+| `lib/niche-engine.ts` | ✅ | detectNiche (Claude), findCompetitors, saveDetectedNiche |
+| `lib/gap-scorer.ts` | ✅ | calculateGapScore, buildCompetitorMetrics, estimateRevenue, saveGapScore |
+| `lib/db.ts` | ✅ | All snapshot/video/competitor CRUD + getCompetitorMetricsFromDB |
+| `lib/trend-detector.ts` | 🔲 | Viral video detection — Day 4 morning |
+| `lib/digest-generator.ts` | 🔲 | Claude API digest generation — Day 4 evening |
+| `lib/idea-generator.ts` | 🔲 | Video idea generation via Claude — Day 4 evening |
+| `lib/email.ts` | 🔲 | Resend email send functions — Day 5 |
+| `lib/stripe.ts` | 🔲 | Stripe client + checkout + webhook helpers — Day 5 |
+| `lib/access.ts` | 🔲 | Plan gating (canAccess function) — Day 5 |
+| `lib/utils.ts` | 🔲 | Shared formatting/date utilities — added as needed |
+
+### API routes
+
+| Route | Status | Notes |
+|---|---|---|
+| `app/api/auth/[...nextauth]/route.ts` | ✅ | NextAuth v5 with Google + YouTube scopes |
+| `app/api/sync/route.ts` | ✅ | Auth-gated, runs all 5 analytics calls in parallel |
+| `app/api/cron/daily/route.ts` | 🚧 | Auth-gated shell; competitor refresh + digest stubs not wired |
+| `app/api/create-checkout-session/route.ts` | 🔲 | Stripe checkout — Day 5 |
+| `app/api/webhooks/stripe/route.ts` | 🔲 | Stripe webhook handler — Day 5 |
+| `app/api/unsubscribe/route.ts` | 🔲 | Email unsubscribe — Day 5 |
+
+### App pages
+
+| Page | Status | Notes |
+|---|---|---|
+| `app/(auth)/login/page.tsx` | ✅ | Google sign-in button |
+| `app/(auth)/callback/page.tsx` | 🔲 | OAuth callback — not yet needed (NextAuth handles it) |
+| `app/(dashboard)/layout.tsx` | ✅ | Auth guard + first-sync trigger |
+| `app/(dashboard)/dashboard/page.tsx` | 🚧 | Sync loading state only; charts/data in Week 2 |
+| `app/(dashboard)/competitors/page.tsx` | 🔲 | Competitor management UI — Week 2 |
+| `app/(dashboard)/digest/page.tsx` | 🔲 | Weekly digest view — Week 2 |
+| `app/(dashboard)/ideas/page.tsx` | 🔲 | Video idea suggestions — Week 2 |
+| `app/(dashboard)/settings/page.tsx` | 🔲 | Settings page — Week 2 |
+| `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Notification preferences — Week 2 |
+| `app/page.tsx` | 🚧 | Placeholder only; full landing page — Week 3 |
+| `app/pricing/page.tsx` | 🔲 | Pricing table — Week 3 |
+| `app/privacy/page.tsx` | 🔲 | Legal — Week 3 |
+| `app/terms/page.tsx` | 🔲 | Legal — Week 3 |
+
+### Components
+
+| Directory | Status | Notes |
+|---|---|---|
+| `components/sync-context.tsx` | ✅ | SyncProvider + useSyncStatus hook |
+| `components/ui/` | 🔲 | Reusable UI primitives — Week 2 |
+| `components/charts/` | 🔲 | Recharts wrappers — Week 2 |
+| `components/dashboard/` | 🔲 | Dashboard-specific components — Week 2 |
+| `components/emails/` | 🔲 | React Email templates — Week 3 |
+
+### Types
+
+| File | Status | Notes |
+|---|---|---|
+| `types/index.ts` | ✅ | All 17 interfaces: User, ChannelSnapshot, Video, Competitor, CompetitorVideo, GapScore, Digest, Trend, UserSettings, VideoIdea, NicheResult, CompetitorCandidate, UserMetrics, CompetitorMetrics, MetricScore, RevenueEstimate, GapScoreResult |
+| `types/next-auth.d.ts` | ✅ | NextAuth session type extensions |
+
+### Scripts / Dev tooling
+
+| Script | Status | Notes |
+|---|---|---|
+| `scripts/refresh-token.ts` | ✅ | Refresh expired OAuth token without browser re-login |
+| `scripts/test-youtube-analytics.ts` | ✅ | Manual test for all 5 Analytics API functions |
+| `scripts/test-youtube-data.ts` | ✅ | Manual test for all 6 Data API functions |
+| `scripts/seed-test-data.ts` | ✅ | Inserts realistic finance creator test data into Supabase |
+| `scripts/test-gap-scorer.ts` | ✅ | End-to-end DB → gap scorer → save pipeline test |
+
+---
+
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 1 — Day 3 (2026-04-14, night session)
+
+**lib/niche-engine.ts** — niche detection and competitor discovery
+* `detectNiche(videoTitles, descriptions, userId?)` — calls `claude-sonnet-4-6` to classify a creator into one of 12 niches. Checks DB cache first (skips Claude if `niche_id` already stored). Low temperature (0.2) for deterministic classification. Saves result to users table automatically when userId is provided.
+* `findCompetitors(nicheId, userSubCount, userChannelId)` — YouTube channel search for competitors in a 0.5x–3x subscriber range. Widens to 0.2x–5x and retries once if no results. Costs 101 YouTube quota units per attempt.
+* `saveDetectedNiche(userId, nicheId)` — persists detected niche + timestamp to users table.
+* 12 valid niche IDs: finance, tech, gaming, cooking, fitness, beauty, travel, education, business, entertainment, diy, vlog.
+
+**lib/gap-scorer.ts** — core gap scoring algorithm
+* `calculateGapScore(userMetrics, competitorMetrics)` — full gap analysis. Returns `GapScoreResult` with per-metric scores, weighted overall score (0–100), plain-English bottleneck label, top competitor name, and revenue gap estimate.
+* `buildCompetitorMetrics(channelProfiles, userSubCount, nicheId?)` — converts raw `CompetitorFullProfile` objects into `CompetitorMetrics` objects. Filters to channels larger than the user. Assigns tier (1 = 1x–3x, 2 = 3x–10x). Estimates CTR from views/subs ratio capped at 15%.
+* `estimateRevenue(avgViewsPerVideo, uploadsPerMonth, nicheId)` — monthly revenue estimate using niche CPM benchmarks. Formula: `(views × uploads × CPM / 1000) × 0.55`.
+* `saveGapScore(userId, result)` — persists `GapScoreResult` to `gap_scores` table.
+* Scoring uses a piecewise non-linear scale: gaps below 25% score 10–30, above 75% score 85–100. Upload frequency hard-capped at 60 to prevent frequency from dominating overall score.
+
+**lib/db.ts additions**
+* `getCompetitorMetricsFromDB(userId)` — fetches active competitors + their stored videos, builds `CompetitorMetrics[]` ready for gap scoring. Resolves user subscriber count from latest snapshot to filter out smaller channels. Assigns tier based on ratio.
+
+**types/index.ts additions** — 7 new interfaces
+* `UserMetrics` — gap scorer input (avgViews, CTR, watchTime, uploads, subs, nicheId, recentTitles)
+* `CompetitorMetrics` — per-competitor metrics for gap scoring (includes tier assignment)
+* `MetricScore` — per-metric result (userValue, competitorAvg, gapPercent, score, label)
+* `RevenueEstimate` — monthly/annual revenue gap with CPM used
+* `GapScoreResult` — full result: overall score, tier scores, breakdown, topCompetitor, primaryBottleneck, revenueGap
+* `NicheResult` — Claude classification output (nicheId, nicheName, confidence, reasoning)
+* `CompetitorCandidate` — YouTube search result (channelId, channelName, subscriberCount, thumbnailUrl)
+
+**scripts/seed-test-data.ts** — Supabase test data seeder
+* Gets real userId from users table (no hardcoded IDs).
+* Inserts: 1 channel snapshot (45K subs, 8,400 avg views, 2.1% CTR), 3 Tier 1 competitors (Finance With Sarah 112K, Money With Marcus 89K, Smart Money Moves 67K), 12 competitor videos (4 per competitor, including 3 viral flagged).
+* Idempotent: cleans existing test rows before inserting.
+* Run: `npx tsx --env-file=.env.local scripts/seed-test-data.ts`
+
+**scripts/test-gap-scorer.ts** (rewritten) — end-to-end DB pipeline test
+* Reads real channel snapshot from DB via `getChannelSnapshots`.
+* Loads competitor metrics via `getCompetitorMetricsFromDB`.
+* Runs `calculateGapScore` and `saveGapScore`.
+* Verifies saved row in `gap_scores` table by querying Supabase directly.
+* Prints a clean human-readable summary with all metric breakdowns and revenue gap.
+* Confirmed output: overall score 58/100, views 81% behind Tier 1, revenue gap $395/month.
+* Run: `npx tsx --env-file=.env.local scripts/test-gap-scorer.ts`
+
+---
 
 ### Week 1 — Day 2 (2026-04-13, evening session)
 
@@ -580,6 +707,12 @@ const planLimits = {
 
 **Revenue 401 on non-monetized channels (fixed Day 2 morning):** YouTube Analytics API returns 401 with `reason: "unauthorized"` (not 403) when `estimatedRevenue` is requested for a non-monetized channel. Standard 401 handling (throw TOKEN_EXPIRED) would crash the entire request. Fix: inspect `errors[0].reason` — only throw TOKEN_EXPIRED when `reason === 'authError'`. All other 401s (including `reason === 'unauthorized'`) return null and trigger a silent retry without the revenue metric. Revenue fields return 0 rather than crashing.
 
+**CTR estimation is a proxy, not real data (known limitation):** The gap scorer estimates competitor CTR as `(avgViews / subscriberCount) × 0.3`, capped at 15%. This is not real CTR data — YouTube doesn't expose it publicly. The 0.3 multiplier is a heuristic. Real CTR is only available through the Analytics API for the user's own channel. This means CTR gap scores for competitors are approximate. This is acceptable for v1 but should be flagged in the UI.
+
+**Gap scorer weights are calibrated for finance niche (Day 3 decision):** The 35/30/25/10 weighting (views/CTR/watchTime/uploads) reflects what matters most for typical niches. Different niches (e.g. gaming where upload frequency matters a lot more) may need adjusted weights in a later milestone. For now all niches use the same weights.
+
+**app/api/cron/daily/route.ts is a stub:** The cron handler has the correct auth guard and structure but the actual competitor refresh loop and digest generation calls are not wired yet — they depend on `lib/trend-detector.ts` and `lib/digest-generator.ts` which are not yet built. The cron will not do meaningful work until Day 4.
+
 \---
 
 ## Key Decisions Made
@@ -591,7 +724,7 @@ const planLimits = {
 * Using Stripe hosted checkout over custom payment form: saves 2+ weeks of work, PCI compliance handled
 * Using Claude Sonnet 4.6 NOT Opus for production digests: 40% cheaper, quality difference negligible for this use case
 * Web app not Chrome extension: extensions require store approval, cannot do server-side processing
-* Three competitor tiers: Tier 1 (0.5x-2x subs), Tier 2 (2x-10x subs), Tier 3 (top 5 in niche)
+* Three competitor tiers: Tier 1 (1x-3x user's subs), Tier 2 (3x-10x), beyond 10x excluded as not actionable. findCompetitors searches 0.5x-3x range but gap scorer filters to larger-than-user only.
 
 \---
 
@@ -609,6 +742,6 @@ const planLimits = {
 
 \---
 
-*Last updated: 2026-04-13 — Day 2 evening session
-Next update due: End of Week 1*
+*Last updated: 2026-04-14 — Day 3 night session
+Next update due: End of Week 1 (after Day 5)*
 
