@@ -579,7 +579,7 @@ const planLimits = {
 * Returns `{ processed, succeeded, failed }`.
 
 *app/api/cron/trend-detection/route.ts*
-* Runs every 6 hours: 0:00, 6:00, 12:00, 18:00 UTC.
+* Runs once daily at 6:00 AM UTC. (Originally every 6 hours — downgraded to daily after Vercel Hobby plan blocks sub-daily crons. See Known Issues.)
 * Queries all active competitors from the competitors table.
 * For each competitor: calls `getRecentVideos(channelId, 5)` + `getVideoDetails(videoIds)` to get view counts, calculates `velocity = viewCount / hoursOld`, checks `velocity > (channelAvgViews / 48) * 3` for viral threshold, upserts `competitor_videos` rows with updated `velocity_score` and `is_viral`.
 * channelAvgViews is read from existing `competitor_videos` rows in DB.
@@ -593,6 +593,12 @@ const planLimits = {
 *vercel.json*
 * Updated from 1 cron (`/api/cron/daily`) to 3 dedicated crons with separate schedules.
 * CRON_SECRET updated to `nixlytics-cron-2026-secure-key-xK9mP3`.
+* Post-deploy fix: trend-detection schedule changed from `0 0,6,12,18 * * *` to `0 6 * * *` — Vercel Hobby plan only allows crons that run once per day maximum.
+
+*Post-deploy fixes (same day)*
+* `lib/trend-detector.ts` — Supabase `select('*, competitors(*)')` returns the joined relation as an array, not a single object. Fixed `detectViralVideos` and `getTrendingInNiche` to cast to `CompetitorRow[] | null` and read `[0]`. TypeScript build was failing on Vercel with this.
+* Google OAuth consent screen submitted for verification with YouTube readonly + Analytics readonly scopes.
+* `.gitignore` updated to exclude additional local artifacts.
 
 *Test results (local)*
 * weekly-digest: `{"processed":0,"succeeded":0,"failed":0}` — correct (no eligible users in test DB)
@@ -789,7 +795,11 @@ const planLimits = {
 
 **Gap scorer weights are calibrated for finance niche (Day 3 decision):** The 35/30/25/10 weighting (views/CTR/watchTime/uploads) reflects what matters most for typical niches. Different niches (e.g. gaming where upload frequency matters a lot more) may need adjusted weights in a later milestone. For now all niches use the same weights.
 
-**app/api/cron/daily/route.ts is a stub:** The cron handler has the correct auth guard and structure but the actual competitor refresh loop and digest generation calls are not wired yet — they are now buildable (trend-detector and digest-generator are complete), but wiring them into the cron is Day 5 work.
+**app/api/cron/daily/route.ts is a stub (superseded):** This route is no longer used. The 3 dedicated cron routes (`weekly-digest`, `refresh-data`, `trend-detection`) replace it entirely. The stub can be deleted in a cleanup pass.
+
+**Vercel Hobby plan: one cron per day maximum:** Hobby plan crons cannot run more than once per day. The trend-detection cron was originally scheduled every 6 hours (`0 0,6,12,18 * * *`) and was downgraded to daily at 6 AM UTC (`0 6 * * *`) to fix Vercel deployment failures. Upgrading to Vercel Pro would allow the original 6-hour cadence.
+
+**Supabase joined relation returns array, not object (fixed Day 5):** When using `select('*, competitors(*)')`, Supabase returns the joined table as an array even when at most one row matches. `lib/trend-detector.ts` was casting the result as a single object, causing a TypeScript build error on Vercel. Fixed by casting to array and reading index 0.
 
 \---
 
@@ -803,6 +813,7 @@ const planLimits = {
 * Using Claude Sonnet 4.6 NOT Opus for production digests: 40% cheaper, quality difference negligible for this use case
 * Web app not Chrome extension: extensions require store approval, cannot do server-side processing
 * Three competitor tiers: Tier 1 (1x-3x user's subs), Tier 2 (3x-10x), beyond 10x excluded as not actionable. findCompetitors searches 0.5x-3x range but gap scorer filters to larger-than-user only.
+* Vercel Hobby plan limits crons to once-per-day — trend detection downgraded from every 6 hours to daily at 6 AM UTC. Upgrade to Pro to restore 6-hour cadence.
 
 \---
 
@@ -820,6 +831,6 @@ const planLimits = {
 
 \---
 
-*Last updated: 2026-04-14 — Day 5 complete
-Next update due: End of Week 1 (after Day 5)*
+*Last updated: 2026-04-14 — Day 5 complete + post-deploy fixes (cron schedule, TypeScript build, Google OAuth submitted)
+Next update due: End of Week 2*
 
