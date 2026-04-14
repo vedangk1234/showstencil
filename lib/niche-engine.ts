@@ -1,0 +1,438 @@
+/**
+ * lib/niche-engine.ts
+ * Niche detection (via Claude) and competitor discovery (via YouTube search).
+ *
+ * Two expensive operations:
+ *   - detectNiche: calls claude-sonnet-4-6, costs ~$0.001 per call. Cached in DB.
+ *   - findCompetitors: 101 YouTube Data API quota units per call (100 search + 1 channels).
+ *
+ * Always pass userId to detectNiche so the result is cached and we skip Claude on repeat calls.
+ */
+
+import Anthropic from '@anthropic-ai/sdk';
+import { createServiceClient } from '@/lib/supabase';
+import type { NicheResult, CompetitorCandidate } from '@/types';
+
+const BASE_URL = 'https://www.googleapis.com/youtube/v3';
+
+function apiKey(): string {
+  const key = process.env.YOUTUBE_API_KEY;
+  if (!key) throw new Error('YOUTUBE_API_KEY is not set');
+  return key;
+}
+
+// ---------------------------------------------------------------------------
+// Niche metadata
+// ---------------------------------------------------------------------------
+
+const VALID_NICHE_IDS = [
+  'finance', 'tech', 'gaming', 'cooking', 'fitness',
+  'beauty', 'travel', 'education', 'business', 'entertainment', 'diy', 'vlog',
+] as const;
+
+type ValidNicheId = (typeof VALID_NICHE_IDS)[number];
+
+function isValidNicheId(id: string): id is ValidNicheId {
+  return VALID_NICHE_IDS.includes(id as ValidNicheId);
+}
+
+const NICHE_DISPLAY_NAMES: Record<ValidNicheId, string> = {
+  finance:       'Personal Finance',
+  tech:          'Technology',
+  gaming:        'Gaming',
+  cooking:       'Cooking',
+  fitness:       'Fitness',
+  beauty:        'Beauty',
+  travel:        'Travel',
+  education:     'Education',
+  business:      'Business',
+  entertainment: 'Entertainment',
+  diy:           'DIY',
+  vlog:          'Vlog',
+};
+
+// Search queries calibrated to find relevant channels, not just the niche keyword.
+const NICHE_SEARCH_QUERIES: Record<ValidNicheId, string> = {
+  finance:       'personal finance investing money tips',
+  tech:          'technology gadgets review channel',
+  gaming:        'gaming gameplay commentary',
+  cooking:       'cooking recipes food channel',
+  fitness:       'fitness workout exercise channel',
+  beauty:        'beauty makeup tutorial channel',
+  travel:        'travel vlog destinations',
+  education:     'educational explainer tutorial channel',
+  business:      'business entrepreneurship startup channel',
+  entertainment: 'entertainment comedy channel',
+  diy:           'diy how to home improvement',
+  vlog:          'daily vlog lifestyle channel',
+};
+
+// ---------------------------------------------------------------------------
+// Function 1 — detectNiche
+// ---------------------------------------------------------------------------
+
+/**
+ * Classifies a YouTube creator into one of 12 niches using Claude.
+ * Pass userId to enable DB caching — the Claude call is skipped if niche_id
+ * is already stored for that user.
+ *
+ * @quota 0 units (YouTube) / ~500 Claude input tokens per call
+ * @param videoTitles  User's last 20 video titles
+ * @param descriptions User's last 20 video descriptions (partial text is fine)
+ * @param userId       If provided: checks DB cache first, saves result after classification
+ */
+export async function detectNiche(
+  videoTitles: string[],
+  descriptions: string[],
+  userId?: string,
+): Promise<NicheResult> {
+  // --- Cache check ---
+  if (userId) {
+    try {
+      const supabase = createServiceClient();
+      const { data } = await supabase
+        .from('users')
+        .select('niche_id')
+        .eq('id', userId)
+        .single();
+
+      if (data?.niche_id && isValidNicheId(data.niche_id)) {
+        console.log(
+          `[niche-engine] detectNiche: cache hit — "${data.niche_id}" for user ${userId}`,
+        );
+        return {
+          nicheId: data.niche_id,
+          nicheName: NICHE_DISPLAY_NAMES[data.niche_id],
+          confidence: 1,
+          reasoning: 'Loaded from cache.',
+        };
+      }
+    } catch (err) {
+      // Cache miss errors are non-fatal — fall through to Claude
+      console.warn('[niche-engine] detectNiche: cache check failed, falling through to Claude:', err);
+    }
+  }
+
+  // --- Build Claude prompt ---
+  const titlesText = videoTitles
+    .slice(0, 20)
+    .map((t, i) => `${i + 1}. ${t}`)
+    .join('\n');
+
+  const descriptionsText = descriptions
+    .slice(0, 5)
+    .map((d, i) => `${i + 1}. ${d.slice(0, 200)}`)
+    .join('\n');
+
+  const prompt = `You are classifying a YouTube channel into exactly one niche based on their video titles and descriptions.
+
+Valid niche IDs — you MUST return exactly one of these 12 values:
+- finance    (personal finance, investing, budgeting, money, stocks, crypto, taxes)
+- tech       (technology, gadgets, software, programming, AI, reviews, unboxing)
+- gaming     (video games, walkthroughs, gaming news, esports, game reviews)
+- cooking    (recipes, food, meal prep, baking, restaurant reviews, cuisine)
+- fitness    (workouts, exercise, gym, nutrition, weight loss, yoga, running)
+- beauty     (makeup, skincare, hair, fashion, style, tutorials, product reviews)
+- travel     (travel vlogs, destinations, hotels, flights, adventures, tourism)
+- education  (tutorials, explainers, how-to, science, history, languages, skills)
+- business   (entrepreneurship, startups, marketing, productivity, career, real estate)
+- entertainment (comedy, skits, reaction videos, news commentary, celebrity)
+- diy        (home improvement, crafts, woodworking, repairs, making things)
+- vlog       (daily life, personal stories, lifestyle, family, behind the scenes)
+
+Example videos per niche to calibrate your judgment:
+- finance: "How I Saved $50K in 2 Years" / "Best Index Funds for Beginners" / "My Roth IRA Strategy"
+- tech: "iPhone 16 Pro Review" / "I Built a PC for $500" / "ChatGPT vs Claude: Full Comparison"
+- gaming: "Elden Ring Full Walkthrough" / "Best Weapons in Fortnite Season 5" / "I Hit Grandmaster in League"
+- cooking: "Gordon Ramsay's Butter Chicken Recipe" / "30 Minute Dinner Ideas" / "I Made Julia Child's Boeuf Bourguignon"
+- fitness: "Full Body Workout No Equipment" / "What I Eat in a Day (Cutting)" / "How I Lost 30 Pounds in 6 Months"
+- beauty: "Full Glam Makeup Tutorial" / "My 10-Step Korean Skincare Routine" / "Drugstore Dupes for High-End Products"
+- travel: "7 Days in Japan on $100/Day" / "Hidden Gems in Southeast Asia" / "Honest Review: Maldives Overwater Bungalow"
+- education: "Why the Roman Empire Actually Fell" / "Learn Python in 1 Hour" / "How Black Holes Actually Work"
+- business: "How I Built a $10K/Month Side Hustle" / "What VCs Actually Look For" / "Best Productivity Apps for 2024"
+- entertainment: "I Tried Every McDonald's Menu Item" / "Reacting to Viral TikToks" / "Worst Movies on Netflix Ranked"
+- diy: "Building a Garden Shed from Scratch" / "How to Rewire a Light Switch" / "Epoxy Resin Table Build"
+- vlog: "Day in My Life as a Software Engineer" / "Moving to NYC: Week 1" / "Our Pregnancy Announcement"
+
+Video titles to classify:
+${titlesText}
+
+Recent descriptions (partial):
+${descriptionsText}
+
+Respond with ONLY a JSON object — no other text, no markdown fences:
+{
+  "nicheId": "<one of the 12 valid niche IDs>",
+  "confidence": <number between 0 and 1>,
+  "reasoning": "<one sentence explaining the classification>"
+}`;
+
+  // --- Call Claude ---
+  try {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 256,
+      temperature: 0.2, // low temperature — this is classification, not creative writing
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const rawText =
+      message.content[0].type === 'text' ? message.content[0].text.trim() : '';
+
+    let parsed: { nicheId: string; confidence: number; reasoning: string };
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      console.error('[niche-engine] detectNiche: failed to parse Claude JSON:', rawText);
+      return defaultNiche('Failed to parse Claude response');
+    }
+
+    // Validate and normalise
+    const nicheId: ValidNicheId = isValidNicheId(parsed.nicheId)
+      ? parsed.nicheId
+      : 'entertainment';
+
+    if (!isValidNicheId(parsed.nicheId)) {
+      console.warn(
+        `[niche-engine] detectNiche: Claude returned unknown nicheId "${parsed.nicheId}", defaulting to "entertainment"`,
+      );
+    }
+
+    const result: NicheResult = {
+      nicheId,
+      nicheName: NICHE_DISPLAY_NAMES[nicheId],
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+      reasoning: parsed.reasoning ?? '',
+    };
+
+    console.log(
+      `[niche-engine] detectNiche: classified as "${nicheId}" (confidence: ${result.confidence})`,
+    );
+
+    // Persist to DB if userId provided
+    if (userId) {
+      await saveDetectedNiche(userId, nicheId);
+    }
+
+    return result;
+  } catch (err) {
+    console.error('[niche-engine] detectNiche: Claude API error:', err);
+    return defaultNiche('Claude API error');
+  }
+}
+
+function defaultNiche(reason: string): NicheResult {
+  return {
+    nicheId: 'entertainment',
+    nicheName: NICHE_DISPLAY_NAMES.entertainment,
+    confidence: 0,
+    reasoning: `Defaulted to entertainment: ${reason}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Function 2 — findCompetitors
+// ---------------------------------------------------------------------------
+
+/**
+ * Finds YouTube channels in the same niche within a subscriber range.
+ * Primary range: 0.5x–3x user's sub count.
+ * If no results, widens to 0.2x–5x and retries once.
+ *
+ * @quota 101 YouTube Data API units per attempt (100 search.list + 1 channels.list)
+ * @param nicheId       One of the 12 valid niche IDs
+ * @param userSubCount  User's current subscriber count
+ * @param userChannelId User's own channel ID (excluded from results)
+ * @returns Up to 5 CompetitorCandidate objects sorted by subscriber count ascending
+ */
+export async function findCompetitors(
+  nicheId: string,
+  userSubCount: number,
+  userChannelId: string,
+): Promise<CompetitorCandidate[]> {
+  const query =
+    isValidNicheId(nicheId) ? NICHE_SEARCH_QUERIES[nicheId] : nicheId;
+
+  const minSubs = Math.round(userSubCount * 0.5);
+  const maxSubs = Math.round(userSubCount * 3);
+
+  console.log(
+    `[niche-engine] findCompetitors: searching "${query}", sub range ${minSubs}–${maxSubs}`,
+  );
+
+  const results = await searchChannelsInRange(query, userChannelId, minSubs, maxSubs);
+
+  if (results.length > 0) return results;
+
+  // Widen and retry once
+  const wideMin = Math.round(userSubCount * 0.2);
+  const wideMax = Math.round(userSubCount * 5);
+  console.log(
+    `[niche-engine] findCompetitors: no results in primary range — widening to ${wideMin}–${wideMax}`,
+  );
+
+  return searchChannelsInRange(query, userChannelId, wideMin, wideMax);
+}
+
+async function searchChannelsInRange(
+  query: string,
+  excludeChannelId: string,
+  minSubs: number,
+  maxSubs: number,
+): Promise<CompetitorCandidate[]> {
+  // Step 1 — search.list: 100 quota units
+  const searchUrl = new URL(`${BASE_URL}/search`);
+  searchUrl.searchParams.set('key', apiKey());
+  searchUrl.searchParams.set('part', 'snippet');
+  searchUrl.searchParams.set('type', 'channel');
+  searchUrl.searchParams.set('q', query);
+  searchUrl.searchParams.set('maxResults', '20');
+  searchUrl.searchParams.set('relevanceLanguage', 'en');
+
+  let channelIds: string[] = [];
+
+  try {
+    const searchRes = await fetch(searchUrl.toString());
+    if (!searchRes.ok) {
+      console.error(
+        `[niche-engine] searchChannelsInRange: search.list HTTP ${searchRes.status}`,
+      );
+      return [];
+    }
+
+    const searchData = await searchRes.json();
+    channelIds = ((searchData.items ?? []) as { id: { channelId: string } }[])
+      .map((item) => item.id.channelId)
+      .filter((id) => id && id !== excludeChannelId);
+  } catch (err) {
+    console.error('[niche-engine] searchChannelsInRange: search.list error:', err);
+    return [];
+  }
+
+  if (channelIds.length === 0) return [];
+
+  // Step 2 — channels.list: 1 quota unit (fetches subscriber counts)
+  const channelsUrl = new URL(`${BASE_URL}/channels`);
+  channelsUrl.searchParams.set('key', apiKey());
+  channelsUrl.searchParams.set('part', 'snippet,statistics');
+  channelsUrl.searchParams.set('id', channelIds.join(','));
+
+  try {
+    const channelsRes = await fetch(channelsUrl.toString());
+    if (!channelsRes.ok) {
+      console.error(
+        `[niche-engine] searchChannelsInRange: channels.list HTTP ${channelsRes.status}`,
+      );
+      return [];
+    }
+
+    const channelsData = await channelsRes.json();
+    const candidates: CompetitorCandidate[] = [];
+
+    for (const item of channelsData.items ?? []) {
+      if (item.id === excludeChannelId) continue;
+
+      const subCount = parseInt(item.statistics?.subscriberCount ?? '0', 10);
+      if (subCount < minSubs || subCount > maxSubs) continue;
+
+      candidates.push({
+        channelId: item.id,
+        channelName: item.snippet?.title ?? '',
+        subscriberCount: subCount,
+        thumbnailUrl: item.snippet?.thumbnails?.default?.url ?? '',
+      });
+    }
+
+    // Sort ascending by subscriber count, return top 5
+    return candidates.sort((a, b) => a.subscriberCount - b.subscriberCount).slice(0, 5);
+  } catch (err) {
+    console.error('[niche-engine] searchChannelsInRange: channels.list error:', err);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Function 3 — saveDetectedNiche
+// ---------------------------------------------------------------------------
+
+/**
+ * Persists a detected niche to the users table.
+ * Called automatically by detectNiche when userId is provided.
+ *
+ * @returns true on success, false on error
+ */
+export async function saveDetectedNiche(userId: string, nicheId: string): Promise<boolean> {
+  const supabase = createServiceClient();
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      niche_id: nicheId,
+      niche_detected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('[niche-engine] saveDetectedNiche error:', error.message);
+    return false;
+  }
+
+  console.log(`[niche-engine] saveDetectedNiche: saved niche "${nicheId}" for user ${userId}`);
+  return true;
+}
+
+// TEST — remove before prod
+// Run via: RUN_NICHE_TEST=true ANTHROPIC_API_KEY=... YOUTUBE_API_KEY=... npx tsx lib/niche-engine.ts
+// Note: requires tsconfig paths plugin (e.g. tsconfig-paths) to resolve @/ aliases.
+if (process.env.RUN_NICHE_TEST === 'true') {
+  (async () => {
+    console.log('=== Niche Engine Test ===\n');
+
+    // Test 1: detectNiche — should return "finance"
+    console.log('--- Test 1: detectNiche (finance titles, no userId) ---');
+    const sampleTitles = [
+      'How I Invested My First $1,000 in Index Funds',
+      'Roth IRA vs Traditional IRA: Which Is Better in 2024?',
+      'I Paid Off $40,000 in Student Loans in 18 Months',
+      'The 50/30/20 Budget Rule Explained',
+      'How to Build a 6-Month Emergency Fund Fast',
+    ];
+    const sampleDescriptions = [
+      'In this video I break down exactly how I started investing with just $1,000...',
+      'The age-old debate: Roth vs Traditional. I run the actual numbers for different income levels...',
+      'My aggressive debt payoff journey — every sacrifice I made and whether it was worth it...',
+      'Simple budgeting that actually works for most people starting from zero...',
+      'Step by step guide to building your emergency fund even on a tight budget...',
+    ];
+
+    const nicheResult = await detectNiche(sampleTitles, sampleDescriptions);
+    console.log('Result:', JSON.stringify(nicheResult, null, 2));
+    console.log(
+      'PASS:',
+      nicheResult.nicheId === 'finance' ? '✓ returned "finance"' : `✗ expected "finance", got "${nicheResult.nicheId}"`,
+    );
+
+    // Test 2: findCompetitors — should return channels with channelId and channelName
+    console.log('\n--- Test 2: findCompetitors("finance", 50000, "fake_channel_id") ---');
+    console.log('(costs 101 YouTube Data API quota units)');
+    const competitors = await findCompetitors('finance', 50000, 'fake_channel_id');
+    console.log(`Found ${competitors.length} competitor(s)`);
+    if (competitors.length > 0) {
+      console.log('First result:', JSON.stringify(competitors[0], null, 2));
+      const first = competitors[0];
+      console.log(
+        'PASS:',
+        first.channelId && first.channelName
+          ? '✓ has channelId and channelName'
+          : '✗ missing channelId or channelName',
+      );
+    } else {
+      console.log('No competitors found — check YOUTUBE_API_KEY and quota, or widen sub range.');
+    }
+
+    console.log('\n=== Test Complete ===');
+  })();
+}

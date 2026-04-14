@@ -12,7 +12,7 @@
 import { createServiceClient } from '@/lib/supabase'
 import type { ChannelOverview, VideoPerformanceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
-import type { User, ChannelSnapshot, Video } from '@/types'
+import type { User, ChannelSnapshot, Video, CompetitorMetrics } from '@/types'
 
 // ---------------------------------------------------------------------------
 // saveChannelSnapshot
@@ -327,4 +327,129 @@ export async function getVideos(userId: string, limit: number = 20): Promise<Vid
   }
 
   return (data ?? []) as Video[]
+}
+
+// ---------------------------------------------------------------------------
+// getCompetitorMetricsFromDB
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches all active competitors for a user and their stored videos, then
+ * builds CompetitorMetrics objects ready for gap scoring.
+ *
+ * Only returns competitors with subscriberCount greater than the user's own
+ * subscriber count — channels smaller than the user are excluded.
+ *
+ * The user's subscriber count is read from their most recent channel snapshot.
+ * If no snapshot exists, all competitors are returned without tier filtering.
+ *
+ * @returns CompetitorMetrics[] — empty array on error or no data
+ */
+export async function getCompetitorMetricsFromDB(userId: string): Promise<CompetitorMetrics[]> {
+  const supabase = createServiceClient()
+
+  // Resolve user's current subscriber count from the latest snapshot
+  const { data: snapshotData } = await supabase
+    .from('channel_snapshots')
+    .select('subscriber_count')
+    .eq('user_id', userId)
+    .order('snapshot_date', { ascending: false })
+    .limit(1)
+    .single()
+
+  const userSubCount: number = snapshotData?.subscriber_count ?? 0
+
+  // Resolve user's niche for watch duration estimation
+  const { data: userData } = await supabase
+    .from('users')
+    .select('niche_id')
+    .eq('id', userId)
+    .single()
+
+  const nicheId: string = userData?.niche_id ?? ''
+
+  // Watch duration benchmark per niche (mirrors gap-scorer.ts)
+  const NICHE_WATCH_DURATION: Record<string, number> = {
+    finance: 720,
+    education: 720,
+    gaming: 480,
+  }
+  const watchDuration = NICHE_WATCH_DURATION[nicheId] ?? 360
+
+  // Fetch active competitors
+  const { data: competitors, error: compError } = await supabase
+    .from('competitors')
+    .select('id, youtube_channel_id, channel_name, subscriber_count')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+
+  if (compError) {
+    console.error('[db] getCompetitorMetricsFromDB competitors error:', compError.message)
+    return []
+  }
+
+  if (!competitors || competitors.length === 0) return []
+
+  const result: CompetitorMetrics[] = []
+
+  for (const comp of competitors) {
+    const subCount: number = comp.subscriber_count ?? 0
+
+    // Only keep channels larger than the user
+    if (userSubCount > 0 && subCount <= userSubCount) continue
+
+    // Determine tier
+    const ratio = userSubCount > 0 ? subCount / userSubCount : 1
+    if (ratio > 10) continue // beyond tier 2 — not actionable
+    const tier: 1 | 2 = ratio <= 3 ? 1 : 2
+
+    // Fetch this competitor's stored videos
+    const { data: videos, error: videoError } = await supabase
+      .from('competitor_videos')
+      .select('title, view_count, published_at')
+      .eq('competitor_id', comp.id)
+      .order('published_at', { ascending: false })
+
+    if (videoError) {
+      console.error(`[db] getCompetitorMetricsFromDB videos error for ${comp.id}:`, videoError.message)
+      continue
+    }
+
+    const videoRows = videos ?? []
+
+    // Average views per video
+    const avgViewsPerVideo =
+      videoRows.length > 0
+        ? Math.round(
+            videoRows.reduce((sum, v) => sum + (v.view_count ?? 0), 0) / videoRows.length,
+          )
+        : 0
+
+    // Uploads per month — stored videos span ~90 days, divide by 3
+    const uploadsPerMonth = Math.round((videoRows.length / 3) * 10) / 10
+
+    // Estimated CTR
+    const estimatedCtr =
+      subCount > 0 ? Math.min((avgViewsPerVideo / subCount) * 0.3, 0.15) : 0
+
+    // Recent video titles (up to 10)
+    const recentVideoTitles = videoRows
+      .slice(0, 10)
+      .map((v) => v.title)
+      .filter((t): t is string => !!t)
+
+    result.push({
+      channelId: comp.youtube_channel_id,
+      channelName: comp.channel_name ?? comp.youtube_channel_id,
+      subscriberCount: subCount,
+      avgViewsPerVideo,
+      estimatedCtr: Math.round(estimatedCtr * 10000) / 10000,
+      avgViewDurationSeconds: watchDuration,
+      uploadsPerMonth,
+      recentVideoTitles,
+      tier,
+    })
+  }
+
+  return result
 }

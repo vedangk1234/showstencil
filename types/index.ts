@@ -166,3 +166,79 @@ export interface VideoIdea {
   thumbnailApproach: string;
   hookDataPoint: string;
 }
+
+// Niche detection result (from Claude classification in niche-engine.ts)
+export interface NicheResult {
+  nicheId: string;       // one of the 12 valid niche IDs
+  nicheName: string;     // human-readable display name
+  confidence: number;    // 0–1 confidence score from Claude
+  reasoning: string;     // one-sentence explanation of the classification
+}
+
+// Competitor candidate (from YouTube channel search in niche-engine.ts)
+export interface CompetitorCandidate {
+  channelId: string;
+  channelName: string;
+  subscriberCount: number;
+  thumbnailUrl: string;
+}
+
+// Gap scorer — user metrics input
+export interface UserMetrics {
+  avgViewsPerVideo: number;
+  ctr: number;                       // decimal (0.031 = 3.1%)
+  avgViewDurationSeconds: number;
+  uploadsPerMonth: number;
+  subscriberCount: number;
+  nicheId: string;
+  recentVideoTitles: string[];       // last 10 video titles for topic analysis
+}
+
+// Gap scorer — competitor metrics input
+export interface CompetitorMetrics {
+  channelId: string;
+  channelName: string;
+  subscriberCount: number;
+  avgViewsPerVideo: number;
+  estimatedCtr: number;              // decimal
+  avgViewDurationSeconds: number;
+  uploadsPerMonth: number;
+  recentVideoTitles: string[];
+  tier: 1 | 2;                       // 1 = 1x-3x subs, 2 = 3x-10x subs
+}
+
+// Gap scorer — per-metric breakdown
+export interface MetricScore {
+  userValue: number;
+  competitorAvg: number;
+  gapPercent: number;                // how far behind as percentage
+  score: number;                     // 0–100 contribution to overall score
+  label: string;                     // e.g. "Your CTR is 42% below Tier 1 average"
+}
+
+// Gap scorer — revenue estimate
+export interface RevenueEstimate {
+  userMonthlyEstimate: number;       // USD
+  tier1AvgMonthly: number;           // Tier 1 competitor average, USD
+  gapMonthly: number;                // how much more they could earn, USD
+  annualGap: number;                 // gapMonthly * 12
+  cpmUsed: number;                   // CPM benchmark applied
+}
+
+// Gap scorer — full result
+export interface GapScoreResult {
+  overallScore: number;              // 0–100. Higher = bigger gap = more opportunity
+  tier1Score: number;                // gap vs Tier 1 only
+  tier2Score: number;                // gap vs Tier 2 only
+  breakdown: {
+    viewsGap: MetricScore;
+    ctrGap: MetricScore;
+    watchTimeGap: MetricScore;
+    uploadFrequencyGap: MetricScore;
+  };
+  topCompetitor: string;             // channelName of best-performing Tier 1 competitor
+  biggestOpportunity: string;        // "views" | "ctr" | "watchTime" | "uploadFrequency"
+  primaryBottleneck: string;         // plain English sentence
+  revenueGap: RevenueEstimate;
+  calculatedAt: string;              // ISO timestamp
+}
