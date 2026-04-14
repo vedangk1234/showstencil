@@ -489,7 +489,8 @@ const planLimits = {
 | `lib/db.ts` | ✅ | All snapshot/video/competitor CRUD + getCompetitorMetricsFromDB |
 | `lib/trend-detector.ts` | ✅ | detectViralVideos, findUncoveredTopics (Claude), getTrendingInNiche |
 | `lib/digest-generator.ts` | ✅ | Full Claude digest pipeline — best/worst videos, posting day, structured ideas, fallback mode, multi-niche test |
-| `lib/idea-generator.ts` | 🔲 | Video idea generation via Claude — Day 5 |
+| `lib/idea-generator.ts` | ✅ | generateVideoIdeas — Claude Sonnet 4.6, 3 ranked ideas with score/why/angle/format/length, DB save + prune |
+| `lib/revenue-benchmarks.ts` | ✅ | getNicheBenchmarks (12 niches), calculateRevenuePotential, getBenchmarkComparison, getSubscriberTier |
 | `lib/email.ts` | 🔲 | Resend email send functions — Day 5 |
 | `lib/stripe.ts` | 🔲 | Stripe client + checkout + webhook helpers — Day 5 |
 | `lib/access.ts` | 🔲 | Plan gating (canAccess function) — Day 5 |
@@ -553,12 +554,45 @@ const planLimits = {
 | `scripts/test-youtube-data.ts` | ✅ | Manual test for all 6 Data API functions |
 | `scripts/seed-test-data.ts` | ✅ | Inserts realistic finance creator test data into Supabase |
 | `scripts/test-gap-scorer.ts` | ✅ | End-to-end DB → gap scorer → save pipeline test |
+| `scripts/test-full-pipeline.ts` | ✅ | All 7 pipeline steps timed end-to-end with cost tracking |
 
 ---
 
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 1 — Day 6 night (2026-04-14)
+
+**lib/idea-generator.ts** — video idea generation via Claude
+
+* `generateVideoIdeas(userId)` — loads user data, gap score (DB cache or fresh calculation), uncovered topics, and viral videos in parallel, then calls Claude Sonnet 4.6 (max_tokens: 1000) to produce 3 ranked video ideas.
+* Each idea: `title`, `score` (0–100), `whyNow`, `angle`, `format`, `estimatedLength`, `generatedAt`.
+* Structured block parser (`parseVideoIdeas`) splits on `**Title:**` occurrences; falls back to numbered-list split. Fills missing ideas from `uncoveredTopics` if Claude returns fewer than 3.
+* `saveIdeas(result)` — inserts to `ideas` table and prunes rows older than 4 weeks for the user.
+* `getOrCalculateGapScore(userId)` — returns most recent `gap_scores` row if <7 days old; otherwise calculates fresh from DB competitor metrics.
+* Ideas table DDL at top of file — must be provisioned in Supabase before first run.
+* Cost logged per run: `$0.01138` for test user (513 input / 656 output tokens).
+* Test: `$env:RUN_IDEA_TEST="true"; npx tsx --env-file=.env.local lib/idea-generator.ts`
+
+**lib/revenue-benchmarks.ts** — niche revenue benchmarking (pure computation, no API calls)
+
+* `getNicheBenchmarks()` — returns full benchmark data for all 12 niches: CPM/RPM ranges, monthly upload averages, video duration averages, avg views per video by subscriber tier (tier1–tier4), seasonal factors (Q1–Q4), geography premium multiplier, and sponsorship rates per integration.
+* `getSubscriberTier(subscriberCount)` — maps raw sub count to tier1 (<10K) / tier2 (<100K) / tier3 (<500K) / tier4 (500K+).
+* `calculateRevenuePotential(nicheId, subscriberCount, currentAvgViews, uploadsPerMonth, currentRpm?)` — returns `RevenuePotential` with current monthly estimate, benchmark monthly estimate, monthly/annual gap, sponsorship potential, and total potential. Uses niche min RPM as conservative baseline when creator's real RPM is unknown; benchmark uses niche max RPM as aspirational target.
+* `getBenchmarkComparison(nicheId, subscriberCount, userMetrics)` — full comparison object with views/uploads/duration vs benchmark, revenue potential, and a plain-English `topInsight` sentence that names the single biggest shortfall in plain numbers.
+
+**scripts/test-full-pipeline.ts** — end-to-end intelligence pipeline timing test
+
+* Runs all 7 pipeline steps for userId `848f7497-9a46-40a3-8d90-a96d1c9cf909` and times each one individually using `Date.now()`.
+* Steps: (1) data sync check (DB reads), (2) gap score calculation, (3) trend detection, (4) uncovered topics (Claude), (5) digest generation (Claude), (6) idea generation (Claude), (7) revenue benchmarks (pure computation).
+* Logs `WARNING: Step N is slow (Xms) — consider caching` for any step over 10,000ms.
+* Logs `PIPELINE TOO SLOW: Xms total. Optimization needed before launch.` when total exceeds 30,000ms.
+* Reports: gap score, ideas generated, viral videos, uncovered topics, revenue gap (monthly + annual), total tokens, cost this run, cost at 100 users/week, slowest step.
+* Test run results: **49,576ms total** (over 30s target). Slowest steps: Step 5 — Digest (25,983ms), Step 6 — Ideas (18,328ms). Both are Claude API latency — consider parallelising steps 4+5+6 in production. Revenue gap: $228/month. Cost: ~$0.027/run → ~$2.70 per 100 users/week.
+* Run: `npx tsx --env-file=.env.local scripts/test-full-pipeline.ts`
+
+---
 
 ### Week 1 — Day 5 (2026-04-14)
 
@@ -831,6 +865,6 @@ const planLimits = {
 
 \---
 
-*Last updated: 2026-04-14 — Day 5 complete + post-deploy fixes (cron schedule, TypeScript build, Google OAuth submitted)
+*Last updated: 2026-04-14 — Day 6 night: lib/idea-generator.ts, lib/revenue-benchmarks.ts, scripts/test-full-pipeline.ts (full pipeline timing test — 49,576ms, bottleneck is Claude latency in steps 5+6)
 Next update due: End of Week 2*
 
