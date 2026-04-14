@@ -50,7 +50,8 @@ export async function detectViralVideos(competitorIds: string[]): Promise<ViralV
   if (!data || data.length === 0) return [];
 
   return data.map((row) => {
-    const comp = row.competitors as { youtube_channel_id: string; channel_name: string | null } | null;
+    const compArr = row.competitors as { youtube_channel_id: string; channel_name: string | null }[] | null;
+    const comp = Array.isArray(compArr) ? compArr[0] ?? null : null;
     return {
       videoId: row.youtube_video_id,
       title: row.title ?? '',
@@ -194,7 +195,8 @@ export async function getTrendingInNiche(
   if (!data || data.length === 0) return [];
 
   return data.map((row) => {
-    const comp = row.competitors as { youtube_channel_id: string; channel_name: string | null } | null;
+    const compArr = row.competitors as { youtube_channel_id: string; channel_name: string | null }[] | null;
+    const comp = Array.isArray(compArr) ? compArr[0] ?? null : null;
     return {
       videoId: row.youtube_video_id,
       title: row.title ?? '',
