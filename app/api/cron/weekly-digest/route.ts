@@ -1,0 +1,67 @@
+/**
+ * app/api/cron/weekly-digest/route.ts
+ * GET /api/cron/weekly-digest
+ *
+ * Runs every Monday at 9:00 AM UTC (schedule: "0 9 * * 1").
+ * Generates and saves a fresh weekly digest for every active user.
+ *
+ * Security: requires x-cron-secret header matching CRON_SECRET env var.
+ * Never lets one user's failure stop the whole batch.
+ */
+
+import { NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase'
+import { generateDigest } from '@/lib/digest-generator'
+
+export async function GET(request: Request) {
+  // ── Auth check ─────────────────────────────────────────────────────────────
+  const cronSecret = request.headers.get('x-cron-secret')
+  if (cronSecret !== process.env.CRON_SECRET) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const supabase = createServiceClient()
+
+  // ── Load eligible users ────────────────────────────────────────────────────
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('id')
+    .eq('onboarding_completed', true)
+    .in('subscription_status', ['trial', 'starter', 'pro'])
+    .not('youtube_access_token', 'is', null)
+
+  if (error) {
+    console.error('[cron/weekly-digest] Failed to load users:', error.message)
+    return NextResponse.json({ error: 'Failed to load users' }, { status: 500 })
+  }
+
+  const userList = users ?? []
+  console.log(`[cron/weekly-digest] Processing ${userList.length} user(s)`)
+
+  let succeeded = 0
+  let failed = 0
+
+  for (const user of userList) {
+    try {
+      await generateDigest(user.id)
+      succeeded++
+      console.log(`[cron/weekly-digest] Digest generated for user ${user.id}`)
+    } catch (err) {
+      failed++
+      console.error(`[cron/weekly-digest] Failed for user ${user.id}:`, err)
+    }
+
+    // 500ms delay between users — avoid hammering YouTube + Anthropic APIs
+    if (userList.indexOf(user) < userList.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+
+  console.log(`[cron/weekly-digest] Done — succeeded: ${succeeded}, failed: ${failed}`)
+
+  return NextResponse.json({
+    processed: userList.length,
+    succeeded,
+    failed,
+  })
+}

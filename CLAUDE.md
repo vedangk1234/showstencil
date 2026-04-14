@@ -500,8 +500,11 @@ const planLimits = {
 | Route | Status | Notes |
 |---|---|---|
 | `app/api/auth/[...nextauth]/route.ts` | ✅ | NextAuth v5 with Google + YouTube scopes |
-| `app/api/sync/route.ts` | ✅ | Auth-gated, runs all 5 analytics calls in parallel |
-| `app/api/cron/daily/route.ts` | 🚧 | Auth-gated shell; competitor refresh + digest stubs not wired |
+| `app/api/sync/route.ts` | ✅ | Auth-gated + cron bypass (x-cron-user-id + x-cron-secret headers) |
+| `app/api/cron/weekly-digest/route.ts` | ✅ | Runs every Monday 9am UTC; generateDigest for all active users |
+| `app/api/cron/refresh-data/route.ts` | ✅ | Runs daily 3am UTC; calls /api/sync for every active user via cron bypass |
+| `app/api/cron/trend-detection/route.ts` | ✅ | Runs every 6h; fetches competitor videos, calculates velocity + is_viral |
+| `app/api/cron/daily/route.ts` | 🚧 | Old stub — superseded by the 3 dedicated cron routes above |
 | `app/api/create-checkout-session/route.ts` | 🔲 | Stripe checkout — Day 5 |
 | `app/api/webhooks/stripe/route.ts` | 🔲 | Stripe webhook handler — Day 5 |
 | `app/api/unsubscribe/route.ts` | 🔲 | Email unsubscribe — Day 5 |
@@ -556,6 +559,48 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 1 — Day 5 (2026-04-14)
+
+**3 dedicated cron job routes + /api/sync cron bypass**
+
+*app/api/cron/weekly-digest/route.ts*
+* Runs every Monday at 9:00 AM UTC.
+* Queries users table for `onboarding_completed=true`, `subscription_status IN ('trial','starter','pro')`, `youtube_access_token IS NOT NULL`.
+* Calls `generateDigest(userId)` for each eligible user. Error in one user never stops the batch.
+* 500ms delay between users to avoid hammering Anthropic + YouTube APIs simultaneously.
+* Returns `{ processed, succeeded, failed }`.
+
+*app/api/cron/refresh-data/route.ts*
+* Runs every day at 3:00 AM UTC.
+* Same user eligibility query as weekly-digest.
+* For each user, calls `POST /api/sync` with `x-cron-user-id` + `x-cron-secret` headers (cron bypass path).
+* 1 second delay between users.
+* Returns `{ processed, succeeded, failed }`.
+
+*app/api/cron/trend-detection/route.ts*
+* Runs every 6 hours: 0:00, 6:00, 12:00, 18:00 UTC.
+* Queries all active competitors from the competitors table.
+* For each competitor: calls `getRecentVideos(channelId, 5)` + `getVideoDetails(videoIds)` to get view counts, calculates `velocity = viewCount / hoursOld`, checks `velocity > (channelAvgViews / 48) * 3` for viral threshold, upserts `competitor_videos` rows with updated `velocity_score` and `is_viral`.
+* channelAvgViews is read from existing `competitor_videos` rows in DB.
+* Returns `{ channelsChecked, viralVideosFound }`.
+
+*app/api/sync/route.ts — cron bypass*
+* Added a second auth path alongside session auth.
+* If request has `x-cron-user-id` + `x-cron-secret` headers: validates secret against `CRON_SECRET`, uses provided userId directly. No session required.
+* Existing session-based flow is unchanged for dashboard-triggered syncs.
+
+*vercel.json*
+* Updated from 1 cron (`/api/cron/daily`) to 3 dedicated crons with separate schedules.
+* CRON_SECRET updated to `nixlytics-cron-2026-secure-key-xK9mP3`.
+
+*Test results (local)*
+* weekly-digest: `{"processed":0,"succeeded":0,"failed":0}` — correct (no eligible users in test DB)
+* refresh-data: `{"processed":0,"succeeded":0,"failed":0}` — correct
+* trend-detection: `{"channelsChecked":3,"viralVideosFound":0}` — found 3 active competitors, checked their videos
+* Security: wrong secret correctly returns HTTP 401
+
+---
 
 ### Week 1 — Day 4 (2026-04-15)
 
@@ -775,6 +820,6 @@ const planLimits = {
 
 \---
 
-*Last updated: 2026-04-15 — Day 4 complete
+*Last updated: 2026-04-14 — Day 5 complete
 Next update due: End of Week 1 (after Day 5)*
 

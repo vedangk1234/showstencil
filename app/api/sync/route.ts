@@ -25,16 +25,32 @@ import {
 } from '@/lib/youtube-analytics'
 import { getVideoDetails } from '@/lib/youtube-data'
 
-export async function POST() {
+export async function POST(request: Request) {
   const start = Date.now()
 
   // ── 1. Auth check ──────────────────────────────────────────────────────────
-  const session = await auth()
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  // Two paths:
+  //   A. Normal session auth (user-initiated sync from the dashboard)
+  //   B. Cron bypass: x-cron-user-id + x-cron-secret headers (server-to-server)
+  let userId: string
 
-  const userId = session.user.id
+  const cronUserId = request.headers.get('x-cron-user-id')
+  const cronSecret = request.headers.get('x-cron-secret')
+
+  if (cronUserId && cronSecret) {
+    // Path B — cron bypass
+    if (cronSecret !== process.env.CRON_SECRET) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    userId = cronUserId
+  } else {
+    // Path A — session auth
+    const session = await auth()
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    userId = session.user.id
+  }
 
   // ── 2. Load access token from DB ───────────────────────────────────────────
   const user = await getUser(userId)
