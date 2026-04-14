@@ -246,6 +246,29 @@ export interface UncoveredTopic {
   suggestedAngle: string;     // Claude's one-line suggestion for the user's take
 }
 
+// Digest generator — structured result returned by generateDigest
+export interface DigestResult {
+  userId: string;
+  generatedAt: string;              // ISO timestamp
+  overallGapScore: number;
+  sections: {
+    thisWeek: string;
+    competitorMoves: string;
+    videoIdeas: string;
+    oneChange: string;
+  };
+  rawMarkdown: string;              // full Claude response for in-app rendering
+  videoIdeasParsed: DigestVideoIdea[];
+}
+
+// Simplified video idea type used inside DigestResult
+// (distinct from the richer VideoIdea used in the Digest DB record)
+export interface DigestVideoIdea {
+  title: string;
+  opportunityScore: number | null;
+  reasoning: string;
+}
+
 // Gap scorer — full result
 export interface GapScoreResult {
   overallScore: number;              // 0–100. Higher = bigger gap = more opportunity
