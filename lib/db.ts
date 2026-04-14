@@ -330,6 +330,34 @@ export async function getVideos(userId: string, limit: number = 20): Promise<Vid
 }
 
 // ---------------------------------------------------------------------------
+// getWorstVideos
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the user's videos sorted by view_count ascending (lowest performers first).
+ * Used to surface what is NOT landing for Claude's digest context.
+ *
+ * @returns Video[] sorted by views asc, empty array on error
+ */
+export async function getWorstVideos(userId: string, limit: number = 3): Promise<Video[]> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('videos')
+    .select('*')
+    .eq('user_id', userId)
+    .order('view_count', { ascending: true })
+    .limit(limit)
+
+  if (error) {
+    console.error('[db] getWorstVideos error:', error.message)
+    return []
+  }
+
+  return (data ?? []) as Video[]
+}
+
+// ---------------------------------------------------------------------------
 // getCompetitorMetricsFromDB
 // ---------------------------------------------------------------------------
 

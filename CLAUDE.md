@@ -487,9 +487,9 @@ const planLimits = {
 | `lib/niche-engine.ts` | ✅ | detectNiche (Claude), findCompetitors, saveDetectedNiche |
 | `lib/gap-scorer.ts` | ✅ | calculateGapScore, buildCompetitorMetrics, estimateRevenue, saveGapScore |
 | `lib/db.ts` | ✅ | All snapshot/video/competitor CRUD + getCompetitorMetricsFromDB |
-| `lib/trend-detector.ts` | 🔲 | Viral video detection — Day 4 morning |
-| `lib/digest-generator.ts` | 🔲 | Claude API digest generation — Day 4 evening |
-| `lib/idea-generator.ts` | 🔲 | Video idea generation via Claude — Day 4 evening |
+| `lib/trend-detector.ts` | ✅ | detectViralVideos, findUncoveredTopics (Claude), getTrendingInNiche |
+| `lib/digest-generator.ts` | ✅ | Full Claude digest pipeline — best/worst videos, posting day, structured ideas, fallback mode, multi-niche test |
+| `lib/idea-generator.ts` | 🔲 | Video idea generation via Claude — Day 5 |
 | `lib/email.ts` | 🔲 | Resend email send functions — Day 5 |
 | `lib/stripe.ts` | 🔲 | Stripe client + checkout + webhook helpers — Day 5 |
 | `lib/access.ts` | 🔲 | Plan gating (canAccess function) — Day 5 |
@@ -556,6 +556,39 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 1 — Day 4 (2026-04-15)
+
+**lib/trend-detector.ts** — viral video detection and topic gap analysis
+* `detectViralVideos(competitorIds)` — reads pre-flagged `is_viral=true` rows from `competitor_videos` (no YouTube API calls). Returns top 10 viral videos sorted by velocity_score descending.
+* `findUncoveredTopics(userVideoTitles, competitorVideoTitles)` — calls `claude-sonnet-4-6` at temperature 0.4 to identify topics covered by 2+ competitors but absent from user's titles. Returns top 5 with `searchDemandEstimate` (high/medium/low) and `suggestedAngle`. Prompt capped at 30 titles each side to stay under 800 tokens.
+* `getTrendingInNiche(competitorIds, limit)` — same as detectViralVideos but caller-controlled limit and competitor scope.
+
+**lib/digest-generator.ts** — full Claude digest pipeline (4 improvements)
+
+*Improvement 1 — Richer prompt payload:*
+* Added `getWorstVideos(userId, 3)` to `lib/db.ts` — fetches lowest-viewed videos (sorted ASC) alongside the existing best-video fetch.
+* `bestVideos` (top 3 by views) and `worstVideos` (bottom 3 by views) are now passed to Claude by title + view count — enables references like "How I Saved $10,000 worked; Q&A posts don't land."
+* `postingDayPattern` — derives the most frequent day-of-week from `published_at` dates and passes it to Claude.
+
+*Improvement 2 — Structured video idea format:*
+* System prompt now requires each idea in a 4-field block: `**Title:**`, `**Why now:**`, `**Angle:**`, `**Estimated opportunity:** high/medium/low`.
+* `parseVideoIdeas` updated to extract these structured fields first, with numbered-list fallback for older responses. `opportunityScore` mapped from label: high→85, medium→55, low→25.
+
+*Improvement 3 — Fallback handling:*
+* `callClaudeForDigest(context)` wraps the API call. If it throws or returns <200 chars, `usedFallback: true` is returned.
+* `generateFallbackDigest(...)` builds a template-based digest from gap score + uncoveredTopics + viral videos — ensures users always see content during API outages.
+* `usedFallback` flag is stored in `digests.key_metrics` for monitoring.
+
+*Improvement 4 — Multi-niche test suite:*
+* `RUN_NICHE_TEST=true` test block with 3 hardcoded niche contexts (finance 45K subs, gaming 80K subs, cooking 22K subs).
+* Each test checks that Claude's output contains niche-appropriate keywords: finance → CPM/revenue/$; gaming → upload/frequency/post; cooking → retention/watch time/discoverability.
+* Test runs via: `RUN_NICHE_TEST=true npx tsx --env-file=.env.local lib/digest-generator.ts`
+
+**Internal architecture change:**
+* `generateDigest` now calls `callClaudeForDigest(context)` and `generateFallbackDigest(...)` as separate functions, making the Claude layer independently testable with hardcoded data without hitting the DB.
+
+---
 
 ### Week 1 — Day 3 (2026-04-14, night session)
 
@@ -711,7 +744,7 @@ const planLimits = {
 
 **Gap scorer weights are calibrated for finance niche (Day 3 decision):** The 35/30/25/10 weighting (views/CTR/watchTime/uploads) reflects what matters most for typical niches. Different niches (e.g. gaming where upload frequency matters a lot more) may need adjusted weights in a later milestone. For now all niches use the same weights.
 
-**app/api/cron/daily/route.ts is a stub:** The cron handler has the correct auth guard and structure but the actual competitor refresh loop and digest generation calls are not wired yet — they depend on `lib/trend-detector.ts` and `lib/digest-generator.ts` which are not yet built. The cron will not do meaningful work until Day 4.
+**app/api/cron/daily/route.ts is a stub:** The cron handler has the correct auth guard and structure but the actual competitor refresh loop and digest generation calls are not wired yet — they are now buildable (trend-detector and digest-generator are complete), but wiring them into the cron is Day 5 work.
 
 \---
 
@@ -742,6 +775,6 @@ const planLimits = {
 
 \---
 
-*Last updated: 2026-04-14 — Day 3 night session
+*Last updated: 2026-04-15 — Day 4 complete
 Next update due: End of Week 1 (after Day 5)*
 
