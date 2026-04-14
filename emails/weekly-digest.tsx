@@ -104,7 +104,7 @@ export function WeeklyDigestEmail({
     <Html lang="en" dir="ltr">
       <Head />
       <Preview>
-        {channelName}: gap score {gapScore}/100 · {videoIdeas.length} ideas ready this week
+        {channelName}: gap score {String(gapScore)}/100 · {String(videoIdeas.length)} ideas ready this week
       </Preview>
 
       <Body style={bodyStyle}>
