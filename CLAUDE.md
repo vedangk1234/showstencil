@@ -71,7 +71,9 @@ nixlytics/
 │   │   ├── sync/route.ts             ← trigger data refresh
 │   │   ├── create-checkout-session/route.ts
 │   │   ├── webhooks/stripe/route.ts
-│   │   ├── unsubscribe/route.ts
+│   │   ├── unsubscribe/route.ts      ← token-based one-click unsubscribe (no auth)
+│   │   ├── settings/
+│   │   │   └── notifications/route.ts ← GET/POST notification preferences
 │   │   └── cron/
 │   │       ├── daily/route.ts
 │   ├── page.tsx                      ← landing page (public)
@@ -91,11 +93,14 @@ nixlytics/
 │   ├── access.ts                     ← plan gating (canAccess function)
 │   ├── db.ts                         ← all Supabase database operations
 │   └── utils.ts                      ← shared utilities
+├── emails/
+│   ├── weekly-digest.tsx             ← React Email: weekly digest template
+│   └── trend-alert.tsx               ← React Email: viral trend alert template
 ├── components/
 │   ├── ui/                           ← reusable UI components
 │   ├── charts/                       ← Recharts wrappers
 │   ├── dashboard/                    ← dashboard-specific components
-│   └── emails/                       ← React Email templates
+│   └── emails/                       ← (legacy path — templates now in /emails)
 ├── types/
 │   └── index.ts                      ← all TypeScript interfaces
 ├── CLAUDE.md                         ← this file
@@ -259,10 +264,18 @@ CREATE TABLE user\_settings (
   weekly\_digest\_enabled BOOLEAN DEFAULT true,
   alerts\_enabled BOOLEAN DEFAULT true,
   alert\_threshold\_multiplier FLOAT DEFAULT 3.0,
+  last\_alert\_sent\_at TIMESTAMPTZ,
+  alerted\_video\_ids TEXT[] DEFAULT '{}',
+  unsubscribe\_token TEXT,              -- UUID token for one-click email unsubscribe
   digest\_day TEXT DEFAULT 'monday',
   timezone TEXT DEFAULT 'America/New\_York',
   updated\_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Required migration (run once in Supabase SQL editor):
+-- ALTER TABLE user\_settings ADD COLUMN IF NOT EXISTS last\_alert\_sent\_at TIMESTAMPTZ;
+-- ALTER TABLE user\_settings ADD COLUMN IF NOT EXISTS alerted\_video\_ids TEXT[] DEFAULT '{}';
+-- ALTER TABLE user\_settings ADD COLUMN IF NOT EXISTS unsubscribe\_token TEXT;
 ```
 
 \---
@@ -491,8 +504,8 @@ const planLimits = {
 | `lib/digest-generator.ts` | ✅ | Full Claude digest pipeline — best/worst videos, posting day, structured ideas, fallback mode, multi-niche test |
 | `lib/idea-generator.ts` | ✅ | generateVideoIdeas — Claude Sonnet 4.6, 3 ranked ideas with score/why/angle/format/length, DB save + prune |
 | `lib/revenue-benchmarks.ts` | ✅ | getNicheBenchmarks (12 niches), calculateRevenuePotential, getBenchmarkComparison, getSubscriberTier |
-| `lib/email.ts` | 🔲 | Resend email send functions — Day 5 |
-| `lib/stripe.ts` | 🔲 | Stripe client + checkout + webhook helpers — Day 5 |
+| `lib/email.ts` | ✅ | sendWeeklyDigest, sendTrendAlert, checkAndSendAlerts, generateUnsubscribeToken |
+| `lib/stripe.ts` | 🔲 | Stripe client + checkout + webhook helpers — Week 2 |
 | `lib/access.ts` | 🔲 | Plan gating (canAccess function) — Day 5 |
 | `lib/utils.ts` | 🔲 | Shared formatting/date utilities — added as needed |
 
@@ -506,9 +519,10 @@ const planLimits = {
 | `app/api/cron/refresh-data/route.ts` | ✅ | Runs daily 3am UTC; calls /api/sync for every active user via cron bypass |
 | `app/api/cron/trend-detection/route.ts` | ✅ | Runs every 6h; fetches competitor videos, calculates velocity + is_viral |
 | `app/api/cron/daily/route.ts` | 🚧 | Old stub — superseded by the 3 dedicated cron routes above |
-| `app/api/create-checkout-session/route.ts` | 🔲 | Stripe checkout — Day 5 |
-| `app/api/webhooks/stripe/route.ts` | 🔲 | Stripe webhook handler — Day 5 |
-| `app/api/unsubscribe/route.ts` | 🔲 | Email unsubscribe — Day 5 |
+| `app/api/create-checkout-session/route.ts` | 🔲 | Stripe checkout — Week 2 |
+| `app/api/webhooks/stripe/route.ts` | 🔲 | Stripe webhook handler — Week 2 |
+| `app/api/unsubscribe/route.ts` | ✅ | Token-based one-click unsubscribe, no auth required, returns styled HTML |
+| `app/api/settings/notifications/route.ts` | ✅ | GET + POST notification prefs, auth required, validates multiplier range |
 
 ### App pages
 
@@ -536,7 +550,8 @@ const planLimits = {
 | `components/ui/` | 🔲 | Reusable UI primitives — Week 2 |
 | `components/charts/` | 🔲 | Recharts wrappers — Week 2 |
 | `components/dashboard/` | 🔲 | Dashboard-specific components — Week 2 |
-| `components/emails/` | 🔲 | React Email templates — Week 3 |
+| `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
+| `emails/trend-alert.tsx` | ✅ | React Email template: viral video alert with suggested angle |
 
 ### Types
 
@@ -555,12 +570,60 @@ const planLimits = {
 | `scripts/seed-test-data.ts` | ✅ | Inserts realistic finance creator test data into Supabase |
 | `scripts/test-gap-scorer.ts` | ✅ | End-to-end DB → gap scorer → save pipeline test |
 | `scripts/test-full-pipeline.ts` | ✅ | All 7 pipeline steps timed end-to-end with cost tracking |
+| `scripts/create-ideas-table.ts` | ✅ | Provisions the ideas table in Supabase (run once) |
+| `scripts/test-email.ts` | ✅ | Sends real weekly digest email to test user inbox |
+| `scripts/test-trend-alert.ts` | ✅ | Sends real trend alert email + tests checkAndSendAlerts |
+| `scripts/get-unsubscribe-token.ts` | ✅ | Prints unsubscribe token + test URL for the test user |
+| `scripts/re-enable-notifications.ts` | ✅ | Re-enables digest + alerts for test user after unsubscribe testing |
 
 ---
 
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 1 — Day 7 night (2026-04-15)
+
+**lib/email.ts** — full Resend email system
+
+* `generateUnsubscribeToken(userId)` — creates a UUID token and upserts it to `user_settings.unsubscribe_token`. Called before every email send to ensure each user always has a valid one-click unsubscribe URL.
+* `sendWeeklyDigest(userId, digestData)` — checks `weekly_digest_enabled`, loads ideas from DB (falls back to digest-parsed ideas), loads gap score for revenue gap, loads latest snapshot for avg views, fetches competitor viral videos for the "competitor moves" section, renders `WeeklyDigestEmail` via `@react-email/components`, sends via Resend, updates `digests.email_sent_at`.
+* `sendTrendAlert(userId, viralVideo, suggestedAngle)` — checks `alerts_enabled`, deduplicates by `last_alert_sent_at` (max 1 per day), reuses existing `unsubscribe_token` or generates one, renders `TrendAlertEmail`, sends via Resend, updates `last_alert_sent_at`.
+* `checkAndSendAlerts()` — batch function called by trend-detection cron. Finds all eligible users, gets their top unalerted viral video, calls `findUncoveredTopics` for suggested angle context, sends alert, adds videoId to `alerted_video_ids` so it is never re-sent. Returns `{ checked, sent }`.
+* Test confirmed: weekly digest email delivered to `vedangk2912@gmail.com` in 4,610ms.
+
+**emails/weekly-digest.tsx** — React Email template for weekly digest
+
+* Sections: header with channel name + gap score badge (colour-coded: green <40, yellow 40–70, red >70), key metrics row (user avg views / competitor avg views / revenue gap), competitor moves (up to 3 viral videos), 3 video idea cards with score badges, "one thing to change" highlighted box, CTA button to dashboard, footer with unsubscribe link.
+* Bug fix (Day 7): `gapScore` and `videoIdeas.length` were passed as numbers into React Email's `<Preview>` component which requires string children. Fixed both to `String(gapScore)` / `String(videoIdeas.length)` — this was the Vercel build failure.
+
+**emails/trend-alert.tsx** — React Email template for viral trend alerts
+
+* Sections: alert header with channel name, viral video details (title, view count, performance multiplier vs channel average, hours old), suggested angle box (from Claude topic gap analysis), CTA button to dashboard, footer with unsubscribe link.
+
+**app/api/unsubscribe/route.ts** — one-click email unsubscribe
+
+* `GET /api/unsubscribe?token=X` — no auth required.
+* Looks up `user_settings` row by `unsubscribe_token`. Missing/unknown token → returns styled HTML "Invalid or expired link" page. Valid token → sets `weekly_digest_enabled = false` AND `alerts_enabled = false`, returns styled HTML confirmation page.
+* HTML pages are inline strings (no React) — dark-themed, Nixlytics branded, settings page link for re-enabling.
+* Test confirmed: token `4ea1c066-f37e-4511-b1a7-ca0cfd789ec4` → Supabase updated both fields to `false` in one request.
+
+**app/api/settings/notifications/route.ts** — notification preferences API
+
+* `GET` — returns `{ weekly_digest_enabled, alerts_enabled, alert_threshold_multiplier }` for the authenticated user. Returns defaults (true/true/3.0) if no `user_settings` row exists yet.
+* `POST` — accepts any subset of the three fields, validates `alert_threshold_multiplier` is between 1.5 and 10.0, calls `upsertUserSettings`, returns the updated state.
+* Both methods require a valid `auth()` session; return 401 otherwise.
+
+**lib/db.ts additions**
+
+* `getUserSettings(userId)` — fetches `user_settings` row, normalises `alerted_video_ids` from null → `[]`.
+* `upsertUserSettings(userId, partial)` — creates or patches `user_settings`, conflict on `user_id`.
+
+**types/index.ts additions**
+
+* `UserSettings` updated: added `last_alert_sent_at`, `alerted_video_ids`, `unsubscribe_token` fields to match actual DB columns.
+
+---
 
 ### Week 1 — Day 6 night (2026-04-14)
 
@@ -835,6 +898,8 @@ const planLimits = {
 
 **Supabase joined relation returns array, not object (fixed Day 5):** When using `select('*, competitors(*)')`, Supabase returns the joined table as an array even when at most one row matches. `lib/trend-detector.ts` was casting the result as a single object, causing a TypeScript build error on Vercel. Fixed by casting to array and reading index 0.
 
+**React Email Preview requires string children (fixed Day 7):** `@react-email/components`'s `<Preview>` component has a TypeScript type of `ReactNode & string`, meaning numbers passed directly (`{gapScore}`, `{videoIdeas.length}`) cause a build error on Vercel even though they render fine locally. Fix: wrap numeric values with `String()` before interpolating inside `<Preview>`. Applies to any number or boolean in that component.
+
 \---
 
 ## Key Decisions Made
@@ -865,6 +930,6 @@ const planLimits = {
 
 \---
 
-*Last updated: 2026-04-14 — Day 6 night: lib/idea-generator.ts, lib/revenue-benchmarks.ts, scripts/test-full-pipeline.ts (full pipeline timing test — 49,576ms, bottleneck is Claude latency in steps 5+6)
+*Last updated: 2026-04-15 — Day 7 night: lib/email.ts (full Resend email system), emails/weekly-digest.tsx + trend-alert.tsx (React Email templates), app/api/unsubscribe/route.ts (token-based one-click unsubscribe), app/api/settings/notifications/route.ts (GET/POST notification prefs), fix: Preview number→string Vercel build error
 Next update due: End of Week 2*
 
