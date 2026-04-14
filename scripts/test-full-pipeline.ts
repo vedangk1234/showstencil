@@ -181,11 +181,6 @@ async function runPipeline(): Promise<void> {
   let digestResult = null;
   try {
     digestResult = await generateDigest(USER_ID);
-    if (digestResult?.tokensUsed) {
-      // digest-generator doesn't expose split token counts — estimate 70/30 split
-      totalInputTokens += Math.round(digestResult.tokensUsed * 0.7);
-      totalOutputTokens += Math.round(digestResult.tokensUsed * 0.3);
-    }
   } catch (err) {
     console.warn('  NOTE: Digest generation error (non-fatal):', (err as Error).message);
   }
