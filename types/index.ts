@@ -269,6 +269,83 @@ export interface DigestVideoIdea {
   reasoning: string;
 }
 
+// Idea generator — a single generated video idea
+export interface GeneratedVideoIdea {
+  rank: number;             // 1, 2, or 3
+  title: string;
+  score: number;            // 0-100
+  whyNow: string;
+  angle: string;
+  format: string;           // tutorial / documentary / listicle / case study / opinion / challenge
+  estimatedLength: string;
+  generatedAt: string;      // ISO timestamp
+}
+
+// Idea generator — full result returned by generateVideoIdeas
+export interface IdeaResult {
+  userId: string;
+  generatedAt: string;      // ISO timestamp
+  ideas: GeneratedVideoIdea[];
+  nicheId: string;
+  inputGapScore: number;    // gap score used as context (0 if unavailable)
+  tokensUsed: number;       // total Claude tokens consumed
+  costUsd: number;          // USD cost of the Claude call
+}
+
+// Revenue benchmarks — per-niche benchmark data
+export interface NicheBenchmark {
+  nicheId: string;
+  nicheName: string;
+  cpmRange: { min: number; max: number };
+  rpmRange: { min: number; max: number };
+  avgMonthlyUploads: number;
+  avgVideoDurationMinutes: number;
+  avgViewsPerVideo: {
+    tier1: number;
+    tier2: number;
+    tier3: number;
+    tier4: number;
+  };
+  seasonalFactors: {
+    q1: number;
+    q2: number;
+    q3: number;
+    q4: number;
+  };
+  audienceGeographyPremium: number;
+  sponsorshipRatePerIntegration: {
+    tier1: number;
+    tier2: number;
+    tier3: number;
+    tier4: number;
+  };
+}
+
+// Revenue benchmarks — potential revenue breakdown
+export interface RevenuePotential {
+  currentMonthlyEstimate: number;
+  benchmarkMonthlyEstimate: number;
+  gapMonthly: number;
+  gapAnnual: number;
+  currentRpmUsed: number;
+  benchmarkRpmUsed: number;
+  subscriberTier: string;
+  sponsorshipPotentialMonthly: number;
+  totalPotentialMonthly: number;
+  dataSource: string;
+}
+
+// Revenue benchmarks — comparison result
+export interface BenchmarkComparison {
+  niche: NicheBenchmark;
+  tier: string;
+  viewsVsBenchmark: { userValue: number; benchmarkValue: number; percentageDiff: number };
+  uploadsVsBenchmark: { userValue: number; benchmarkValue: number; percentageDiff: number };
+  durationVsBenchmark: { userValue: number; benchmarkValue: number; percentageDiff: number };
+  revenuePotential: RevenuePotential;
+  topInsight: string;
+}
+
 // Gap scorer — full result
 export interface GapScoreResult {
   overallScore: number;              // 0–100. Higher = bigger gap = more opportunity
