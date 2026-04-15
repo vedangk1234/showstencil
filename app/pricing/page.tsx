@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const starterFeatures = [
   'Competitor channels tracked: 3 channels',
@@ -30,6 +30,10 @@ const proFeatures = [
 export default function PricingPage() {
   const [loadingPlan, setLoadingPlan] = useState<'starter' | 'pro' | null>(null)
 
+  useEffect(() => {
+    setLoadingPlan(null)
+  }, [])
+
   async function handleCheckout(plan: 'starter' | 'pro') {
     setLoadingPlan(plan)
     try {
@@ -47,6 +51,7 @@ export default function PricingPage() {
 
       const { url } = await res.json()
       window.location.href = url
+      setTimeout(() => setLoadingPlan(null), 3000)
     } catch {
       alert('Something went wrong. Please try again.')
     } finally {
