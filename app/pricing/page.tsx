@@ -50,7 +50,15 @@ export default function PricingPage() {
       }
 
       const { url } = await res.json()
-      window.location.href = url
+      console.log('Redirecting to Lemon Squeezy checkout:', url)
+      const opened = window.open(url, '_self')
+      if (!opened) {
+        const a = document.createElement('a')
+        a.href = url
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+      }
       setTimeout(() => setLoadingPlan(null), 3000)
     } catch {
       alert('Something went wrong. Please try again.')
