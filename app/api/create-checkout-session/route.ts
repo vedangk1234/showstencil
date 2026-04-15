@@ -24,5 +24,9 @@ export async function POST(request: NextRequest) {
   const variantId = getVariantId(plan)
   const checkoutUrl = await createCheckoutSession(session.user.id, variantId, user.email)
 
+  if (!checkoutUrl) {
+    return NextResponse.json({ error: 'Failed to generate checkout URL' }, { status: 500 })
+  }
+
   return NextResponse.json({ url: checkoutUrl })
 }

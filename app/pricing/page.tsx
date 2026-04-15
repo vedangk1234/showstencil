@@ -35,6 +35,7 @@ export default function PricingPage() {
   }, [])
 
   async function handleCheckout(plan: 'starter' | 'pro') {
+    console.log('handleCheckout called', plan)
     setLoadingPlan(plan)
     try {
       const res = await fetch('/api/create-checkout-session', {
@@ -43,13 +44,25 @@ export default function PricingPage() {
         body: JSON.stringify({ plan }),
       })
 
+      console.log('response status', res.status)
+
       if (!res.ok) {
         const data = await res.json()
         alert(data.error || 'Something went wrong. Please try again.')
         return
       }
 
-      const { url } = await res.json()
+      const data = await res.json()
+      console.log('data received', data)
+      console.log('checkout URL', data.url)
+
+      if (!data.url) {
+        console.log('NO URL IN RESPONSE', data)
+        alert('No checkout URL received. Please try again.')
+        return
+      }
+
+      const url = data.url
       console.log('Redirecting to Lemon Squeezy checkout:', url)
       const opened = window.open(url, '_self')
       if (!opened) {
