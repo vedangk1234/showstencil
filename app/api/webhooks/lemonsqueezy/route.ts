@@ -7,11 +7,14 @@
 
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
+import { Resend } from 'resend'
 import {
   getUserByLSCustomerId,
   getUserByLSSubscriptionId,
   updateUserSubscription,
 } from '@/lib/db'
+
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 // ---------------------------------------------------------------------------
 // Signature verification
@@ -166,6 +169,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       console.error(`[ls-webhook] Failed to mark past_due for user ${user.id}`)
     } else {
       console.log(`[ls-webhook] subscription_payment_failed: user ${user.id} → past_due`)
+    }
+
+    // Send payment failed warning email
+    try {
+      await resend.emails.send({
+        from: 'Nixlytics <onboarding@resend.dev>',
+        to: user.email,
+        subject: 'Action required: Your Nixlytics payment failed',
+        html: `
+          <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#111">
+            <h1 style="font-size:22px;margin-bottom:16px">Your payment failed</h1>
+            <p style="font-size:15px;line-height:1.6;margin-bottom:24px">
+              We were unable to charge your card for your Nixlytics subscription.
+              Your account will remain active for 3 days while we retry the payment.
+              Please update your payment method to avoid losing access.
+            </p>
+            <a href="https://app.lemonsqueezy.com/my-orders"
+               style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:15px;font-weight:600">
+              Update payment method
+            </a>
+          </div>
+        `,
+      })
+      console.log(`[ls-webhook] Payment failed email sent to ${user.email}`)
+    } catch (emailErr) {
+      console.error(`[ls-webhook] Failed to send payment failed email to ${user.email}:`, emailErr)
     }
   }
 

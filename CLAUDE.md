@@ -582,6 +582,18 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 1 — Day 8 night (2026-04-15)
+
+**app/api/webhooks/lemonsqueezy/route.ts — payment failed email**
+
+* Added Resend email send inside the `subscription_payment_failed` handler, after marking the user `past_due`.
+* Uses `Resend` client imported directly (not via `lib/email.ts` — this is a transactional alert, not a digest).
+* from: `Nixlytics <onboarding@resend.dev>` / subject: `"Action required: Your Nixlytics payment failed"`.
+* HTML body: heading, 3-day grace period notice, "Update payment method" button linking to `https://app.lemonsqueezy.com/my-orders`. No unsubscribe footer — transactional emails are exempt.
+* Wrapped in `try/catch` — email failure logs an error but never crashes the webhook or changes the HTTP response.
+
+---
+
 ### Week 1 — Day 8 evening (2026-04-15)
 
 **app/api/webhooks/lemonsqueezy/route.ts** — Lemon Squeezy webhook handler
@@ -977,6 +989,6 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-15 — Day 7 night: lib/email.ts (full Resend email system), emails/weekly-digest.tsx + trend-alert.tsx (React Email templates), app/api/unsubscribe/route.ts (token-based one-click unsubscribe), app/api/settings/notifications/route.ts (GET/POST notification prefs), fix: Preview number→string Vercel build error
+*Last updated: 2026-04-15 — Day 8 night: payment failed email in LS webhook handler (Resend, try/catch, no unsubscribe footer); Day 8 evening: Lemon Squeezy checkout + webhook (4 events) + lib/access.ts plan gating; Day 7 night: lib/email.ts, React Email templates, unsubscribe route, notification settings API
 Next update due: End of Week 2*
 
