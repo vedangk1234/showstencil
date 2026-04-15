@@ -483,6 +483,98 @@ export async function getCompetitorMetricsFromDB(userId: string): Promise<Compet
 }
 
 // ---------------------------------------------------------------------------
+// getUserByLSCustomerId
+// ---------------------------------------------------------------------------
+
+/**
+ * Finds a user by their Lemon Squeezy customer ID.
+ *
+ * @returns User or null if not found / on error
+ */
+export async function getUserByLSCustomerId(customerId: string): Promise<User | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('lemon_squeezy_customer_id', customerId)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getUserByLSCustomerId error:', error.message)
+    }
+    return null
+  }
+
+  return data as User
+}
+
+// ---------------------------------------------------------------------------
+// getUserByLSSubscriptionId
+// ---------------------------------------------------------------------------
+
+/**
+ * Finds a user by their Lemon Squeezy subscription ID.
+ *
+ * @returns User or null if not found / on error
+ */
+export async function getUserByLSSubscriptionId(subscriptionId: string): Promise<User | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('lemon_squeezy_subscription_id', subscriptionId)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getUserByLSSubscriptionId error:', error.message)
+    }
+    return null
+  }
+
+  return data as User
+}
+
+// ---------------------------------------------------------------------------
+// updateUserSubscription
+// ---------------------------------------------------------------------------
+
+/**
+ * Updates subscription fields on the users row.
+ * Only the fields provided in `data` are written.
+ *
+ * @returns true on success, false on error
+ */
+export async function updateUserSubscription(
+  userId: string,
+  data: {
+    lemon_squeezy_customer_id?: string
+    lemon_squeezy_subscription_id?: string
+    subscription_status?: string
+    subscription_plan?: string
+    trial_ends_at?: string | null
+    current_period_end?: string | null
+  },
+): Promise<boolean> {
+  const supabase = createServiceClient()
+
+  const { error } = await supabase
+    .from('users')
+    .update({ ...data, updated_at: new Date().toISOString() })
+    .eq('id', userId)
+
+  if (error) {
+    console.error('[db] updateUserSubscription error:', error.message)
+    return false
+  }
+
+  return true
+}
+
+// ---------------------------------------------------------------------------
 // getUserSettings
 // ---------------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 // Plan types
-export type PlanType = 'free' | 'trial' | 'starter' | 'pro';
-export type SubscriptionStatus = 'free' | 'trial' | 'active' | 'past_due' | 'canceled' | 'paused';
+export type PlanType = 'free' | 'starter' | 'pro';
+export type SubscriptionStatus = 'free' | 'on_trial' | 'active' | 'past_due' | 'cancelled' | 'paused';
 
 // User
 export interface User {
@@ -15,9 +15,11 @@ export interface User {
   niche_id: string | null;
   niche_detected_at: string | null;
   subscription_status: SubscriptionStatus;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
+  subscription_plan: PlanType;
+  lemon_squeezy_customer_id: string | null;
+  lemon_squeezy_subscription_id: string | null;
   trial_ends_at: string | null;
+  current_period_end: string | null;
   onboarding_completed: boolean;
   created_at: string;
   updated_at: string;

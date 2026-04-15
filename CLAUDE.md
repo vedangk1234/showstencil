@@ -505,8 +505,8 @@ const planLimits = {
 | `lib/idea-generator.ts` | ✅ | generateVideoIdeas — Claude Sonnet 4.6, 3 ranked ideas with score/why/angle/format/length, DB save + prune |
 | `lib/revenue-benchmarks.ts` | ✅ | getNicheBenchmarks (12 niches), calculateRevenuePotential, getBenchmarkComparison, getSubscriberTier |
 | `lib/email.ts` | ✅ | sendWeeklyDigest, sendTrendAlert, checkAndSendAlerts, generateUnsubscribeToken |
-| `lib/stripe.ts` | 🔲 | Stripe client + checkout + webhook helpers — Week 2 |
-| `lib/access.ts` | 🔲 | Plan gating (canAccess function) — Day 5 |
+| `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — see webhook route |
+| `lib/access.ts` | ✅ | canAccess, getCompetitorLimit, getIdeaLimit, getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage |
 | `lib/utils.ts` | 🔲 | Shared formatting/date utilities — added as needed |
 
 ### API routes
@@ -519,8 +519,8 @@ const planLimits = {
 | `app/api/cron/refresh-data/route.ts` | ✅ | Runs daily 3am UTC; calls /api/sync for every active user via cron bypass |
 | `app/api/cron/trend-detection/route.ts` | ✅ | Runs every 6h; fetches competitor videos, calculates velocity + is_viral |
 | `app/api/cron/daily/route.ts` | 🚧 | Old stub — superseded by the 3 dedicated cron routes above |
-| `app/api/create-checkout-session/route.ts` | 🔲 | Stripe checkout — Week 2 |
-| `app/api/webhooks/stripe/route.ts` | 🔲 | Stripe webhook handler — Week 2 |
+| `app/api/create-checkout-session/route.ts` | ✅ | Lemon Squeezy checkout redirect — Day 8 morning |
+| `app/api/webhooks/lemonsqueezy/route.ts` | ✅ | LS webhook: subscription_created/updated/cancelled/payment_failed |
 | `app/api/unsubscribe/route.ts` | ✅ | Token-based one-click unsubscribe, no auth required, returns styled HTML |
 | `app/api/settings/notifications/route.ts` | ✅ | GET + POST notification prefs, auth required, validates multiplier range |
 
@@ -581,6 +581,53 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 1 — Day 8 evening (2026-04-15)
+
+**app/api/webhooks/lemonsqueezy/route.ts** — Lemon Squeezy webhook handler
+
+* Verifies every inbound request via `X-Signature` header using `crypto.createHmac('sha256', LEMONSQUEEZY_WEBHOOK_SECRET)`. Returns 401 on mismatch or missing header.
+* Handles 4 events:
+  * `subscription_created` — extracts `user_id` from `meta.custom_data`, resolves plan from `variant_id` against `LEMONSQUEEZY_STARTER_VARIANT_ID` / `LEMONSQUEEZY_PRO_VARIANT_ID`, writes all subscription fields to users table.
+  * `subscription_updated` — same logic as created; handles trial-to-paid conversion and plan changes.
+  * `subscription_cancelled` — looks up user by subscription ID (falls back to customer ID), sets `subscription_status = 'cancelled'`, `subscription_plan = 'free'`.
+  * `subscription_payment_failed` — looks up user by customer ID, sets `subscription_status = 'past_due'`.
+* All other events are silently ignored with a log message.
+* Always returns `{ received: true }` to acknowledge delivery.
+
+**lib/access.ts** — plan gating
+
+* `canAccess(userId, feature)` — loads user's subscription_status + subscription_plan + trial_ends_at. Resolves effective plan: on_trial/active/past_due → stored plan (past_due gets 3-day grace), expired trial → free, cancelled/free → free. Guards binary features: `digest:weekly` (starter+), `alerts:daily` (starter+), `search:compare` (pro only). Limit-based features are not blocked here — use the limit helpers instead.
+* `getCompetitorLimit(userId)` — free/starter → 3, pro → 10.
+* `getIdeaLimit(userId)` — free/starter → 3, pro → 6.
+* `getViralLimit(userId)` — free/starter → 3, pro → 10.
+* `getTopicLimit(userId)` — free/starter → 3, pro → 5.
+* `getArchiveWeeks(userId)` — free/starter → 4, pro → 12.
+* `getUpgradeMessage(feature)` — returns a friendly, positive upgrade nudge for each gated feature. Never uses "you cannot" phrasing.
+
+**lib/db.ts additions**
+
+* `getUserByLSCustomerId(customerId)` — fetches users row by `lemon_squeezy_customer_id`.
+* `getUserByLSSubscriptionId(subscriptionId)` — fetches users row by `lemon_squeezy_subscription_id`.
+* `updateUserSubscription(userId, data)` — partial update of subscription fields on users table. Returns true/false.
+
+**types/index.ts changes**
+
+* `PlanType` updated: removed `'trial'` (Lemon Squeezy uses `subscription_status = 'on_trial'` instead). Now `'free' | 'starter' | 'pro'`.
+* `SubscriptionStatus` updated: replaced `'trial'` and `'canceled'` with `'on_trial'` and `'cancelled'` to match Lemon Squeezy's actual status strings.
+* `User` interface: replaced `stripe_customer_id` / `stripe_subscription_id` with `lemon_squeezy_customer_id` / `lemon_squeezy_subscription_id`. Added `subscription_plan: PlanType` and `current_period_end: string | null`.
+
+**Database migration (run in Supabase SQL editor)**
+
+```sql
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS lemon_squeezy_customer_id TEXT,
+  ADD COLUMN IF NOT EXISTS lemon_squeezy_subscription_id TEXT,
+  ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'free',
+  ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMPTZ;
+```
+
+---
 
 ### Week 1 — Day 7 night (2026-04-15)
 
