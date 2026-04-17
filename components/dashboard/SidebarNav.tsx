@@ -3,87 +3,137 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-const navItems = [
-  { href: '/dashboard',    label: 'Dashboard',    icon: <LayoutDashboardIcon /> },
-  { href: '/competitors',  label: 'Competitors',  icon: <UsersIcon /> },
-  { href: '/ideas',        label: 'Video Ideas',  icon: <LightbulbIcon /> },
-  { href: '/digest',       label: 'Digest',       icon: <FileTextIcon /> },
-  { href: '/settings',     label: 'Settings',     icon: <SettingsIcon /> },
+const group1 = [
+  { href: '/dashboard',   label: 'Dashboard',   Icon: IconDashboard },
+  { href: '/competitors', label: 'Competitors',  Icon: IconUsers },
+  { href: '/ideas',       label: 'Ideas',        Icon: IconLightbulb },
+  { href: '/digest',      label: 'Digest',       Icon: IconFile },
+]
+
+const group2 = [
+  { href: '/settings', label: 'Settings', Icon: IconSettings },
 ]
 
 export default function SidebarNav() {
   const pathname = usePathname()
+  const isActive = (href: string) =>
+    pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
 
   return (
-    <nav className="flex-1 p-3 space-y-0.5">
-      {navItems.map(({ href, label, icon }) => {
-        const isActive = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
-        return (
-          <Link
-            key={href}
-            href={href}
-            style={isActive ? { borderLeft: '2px solid #2563eb', paddingLeft: '10px' } : { paddingLeft: '12px' }}
-            className={[
-              'flex items-center gap-3 py-2 pr-3 rounded-r-lg text-sm transition-colors',
-              isActive
-                ? 'text-white bg-[#1a1a1f]'
-                : 'text-[#6b7280] hover:text-white hover:bg-[#16161a]',
-            ].join(' ')}
-          >
-            {icon}
-            {label}
-          </Link>
-        )
-      })}
+    <nav style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+
+      {/* Group 1 */}
+      <div style={{ padding: '2px 8px' }}>
+        {group1.map(({ href, label, Icon }) => {
+          const active = isActive(href)
+          return (
+            <NavItem key={href} href={href} label={label} Icon={Icon} active={active} />
+          )
+        })}
+      </div>
+
+      {/* Divider */}
+      <div style={{ height: 1, background: '#1a1a1a', margin: '6px 0' }} />
+
+      {/* Group 2 */}
+      <div style={{ padding: '2px 8px' }}>
+        {group2.map(({ href, label, Icon }) => {
+          const active = isActive(href)
+          return (
+            <NavItem key={href} href={href} label={label} Icon={Icon} active={active} />
+          )
+        })}
+      </div>
+
     </nav>
   )
 }
 
-function LayoutDashboardIcon() {
+function NavItem({
+  href,
+  label,
+  Icon,
+  active,
+}: {
+  href: string
+  label: string
+  Icon: React.FC<{ active: boolean }>
+  active: boolean
+}) {
   return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <rect x="3" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="14" width="7" height="7" rx="1" />
-      <rect x="3" y="14" width="7" height="7" rx="1" />
+    <Link
+      href={href}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 8px',
+        borderRadius: 4,
+        color: active ? '#ffffff' : '#888888',
+        fontSize: 13,
+        textDecoration: 'none',
+        lineHeight: 1.4,
+      }}
+      onMouseEnter={(e) => {
+        if (!active) (e.currentTarget as HTMLElement).style.color = '#cccccc'
+      }}
+      onMouseLeave={(e) => {
+        if (!active) (e.currentTarget as HTMLElement).style.color = '#888888'
+      }}
+    >
+      <Icon active={active} />
+      {label}
+    </Link>
+  )
+}
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
+
+function IconDashboard({ active }: { active: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: active ? '#ffffff' : '#888888' }}>
+      <rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   )
 }
 
-function UsersIcon() {
+function IconUsers({ active }: { active: boolean }) {
   return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: active ? '#ffffff' : '#888888' }}>
+      <path d="M11 14v-1.5a3 3 0 0 0-3-3H4a3 3 0 0 0-3 3V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M15 14v-1.5a3 3 0 0 0-2-2.83" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M11 2.17a3 3 0 0 1 0 5.66" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   )
 }
 
-function LightbulbIcon() {
+function IconLightbulb({ active }: { active: boolean }) {
   return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 21h6M12 3a6 6 0 0 1 6 6c0 2.22-1.21 4.16-3 5.2V17H9v-2.8C7.21 13.16 6 11.22 6 9a6 6 0 0 1 6-6z" />
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: active ? '#ffffff' : '#888888' }}>
+      <path d="M6 14h4M8 2a5 5 0 0 1 5 5c0 1.85-1 3.47-2.5 4.33V13H5.5v-1.67A5.01 5.01 0 0 1 3 7a5 5 0 0 1 5-5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
 
-function FileTextIcon() {
+function IconFile({ active }: { active: boolean }) {
   return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: active ? '#ffffff' : '#888888' }}>
+      <path d="M9.5 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9.5 1z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9.5 1v4.5H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.5 9h5M5.5 11.5h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   )
 }
 
-function SettingsIcon() {
+function IconSettings({ active }: { active: boolean }) {
   return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: active ? '#ffffff' : '#888888' }}>
+      <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   )
 }

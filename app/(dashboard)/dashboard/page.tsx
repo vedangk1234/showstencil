@@ -5,7 +5,7 @@ import {
   getChannelSnapshots,
   getLatestGapScore,
   getCompetitors,
-  getLatestDigest,
+  getRecentDigests,
   getLatestTrend,
 } from '@/lib/db'
 import DashboardClient from '@/components/dashboard/DashboardClient'
@@ -16,12 +16,12 @@ export default async function DashboardPage() {
 
   const userId = session.user.id
 
-  const [user, snapshots, gapScore, competitors, latestDigest, latestTrend] = await Promise.all([
+  const [user, snapshots, gapScore, competitors, recentDigests, latestTrend] = await Promise.all([
     getUser(userId),
     getChannelSnapshots(userId, 30),
     getLatestGapScore(userId),
     getCompetitors(userId),
-    getLatestDigest(userId),
+    getRecentDigests(userId, 3),
     getLatestTrend(userId),
   ])
 
@@ -31,7 +31,8 @@ export default async function DashboardPage() {
       snapshots={snapshots}
       gapScore={gapScore}
       competitors={competitors}
-      latestDigest={latestDigest}
+      recentDigests={recentDigests}
+      latestDigest={recentDigests[0] ?? null}
       latestTrend={latestTrend}
     />
   )

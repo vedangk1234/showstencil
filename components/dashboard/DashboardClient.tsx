@@ -3,14 +3,10 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  LineChart,
+  Line,
   ResponsiveContainer,
-  Legend,
+  Tooltip,
 } from 'recharts'
 import BlackholeLoader from '@/components/BlackholeLoader'
 import { useSyncStatus } from '@/components/sync-context'
@@ -21,137 +17,227 @@ interface Props {
   snapshots: ChannelSnapshot[]
   gapScore: GapScore | null
   competitors: Competitor[]
+  recentDigests: Digest[]
   latestDigest: Digest | null
   latestTrend: Trend | null
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatNumber(n: number | null | undefined): string {
+function fmt(n: number | null | undefined, dec = 1): string {
   if (n == null) return '—'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(dec)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(dec)}K`
+  return String(Math.round(n))
 }
 
-function formatDuration(seconds: number | null | undefined): string {
-  if (seconds == null) return '—'
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}m ${s.toString().padStart(2, '0')}s`
-}
-
-function formatCurrency(amount: number | null | undefined): string {
-  if (amount == null) return '—'
-  if (amount >= 1_000) return `$${(amount / 1_000).toFixed(1)}K`
-  return `$${Math.round(amount)}`
-}
-
-function timeAgo(isoString: string | null | undefined): string {
-  if (!isoString) return 'never'
-  const diff = Date.now() - new Date(isoString).getTime()
+function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return 'never'
+  const diff = Date.now() - new Date(iso).getTime()
   const hours = Math.floor(diff / 3_600_000)
   if (hours < 1) return 'just now'
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
-  return `${days}d ago`
+  return days === 1 ? '1 day ago' : `${days} days ago`
 }
 
-function getGreeting(name: string | null | undefined): string {
-  const hour = new Date().getHours()
-  const first = name?.split(' ')[0] ?? 'there'
-  if (hour < 12) return `Good morning, ${first}`
-  if (hour < 17) return `Good afternoon, ${first}`
-  return `Good evening, ${first}`
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// ─── MetricCard ──────────────────────────────────────────────────────────────
+function scoreColor(score: number): string {
+  if (score < 40) return '#ff4444'
+  if (score < 70) return '#f5a623'
+  return '#00c853'
+}
 
-function MetricCard({
-  title,
-  value,
-  context,
-  contextColor,
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function Divider() {
+  return <div style={{ height: 1, background: '#1a1a1a' }} />
+}
+
+function GhostBtn({
+  children,
+  href,
+  onClick,
 }: {
-  title: string
-  value: string
-  context: string
-  contextColor?: string
+  children: React.ReactNode
+  href?: string
+  onClick?: () => void
 }) {
+  const s: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '4px 10px',
+    borderRadius: 4,
+    fontSize: 11,
+    fontWeight: 500,
+    color: '#888888',
+    background: 'transparent',
+    border: '1px solid #1a1a1a',
+    cursor: 'pointer',
+    textDecoration: 'none',
+    lineHeight: 1.5,
+  }
+  if (href)
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" style={s}>
+        {children}
+      </a>
+    )
   return (
-    <div
-      className="rounded p-5 transition-colors duration-200"
-      style={{ background: '#111114', border: '1px solid #1e1e1e' }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
-    >
-      <p className="text-xs uppercase tracking-widest mb-3" style={{ color: '#6b7280' }}>{title}</p>
-      <p className="text-2xl font-semibold text-white font-mono mb-1">{value}</p>
-      <p className="text-xs" style={{ color: contextColor ?? '#6b7280' }}>{context}</p>
-    </div>
+    <button type="button" onClick={onClick} style={s}>
+      {children}
+    </button>
   )
 }
 
-// ─── ScoreBadge ──────────────────────────────────────────────────────────────
-
-function ScoreBadge({ score }: { score: number }) {
-  const color =
-    score < 40 ? '#ef4444' :
-    score < 70 ? '#f59e0b' :
-                 '#22c55e'
+function StatusDot({ ok }: { ok: boolean }) {
   return (
     <span
-      className="text-4xl font-semibold font-mono"
-      style={{ color }}
+      style={{
+        display: 'inline-block',
+        width: 6,
+        height: 6,
+        borderRadius: '50%',
+        background: ok ? '#00c853' : '#f5a623',
+        marginRight: 6,
+        flexShrink: 0,
+      }}
+    />
+  )
+}
+
+function SmallBadge({ children, color }: { children: React.ReactNode; color: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 7px',
+        borderRadius: 3,
+        fontSize: 11,
+        fontWeight: 500,
+        background: `${color}18`,
+        color,
+        border: `1px solid ${color}33`,
+        whiteSpace: 'nowrap',
+      }}
     >
-      {score}
+      {children}
     </span>
   )
 }
 
-// ─── Skeleton ────────────────────────────────────────────────────────────────
-
-function Skeleton({ className }: { className?: string }) {
-  return <div className={`animate-pulse rounded ${className ?? ''}`} style={{ background: '#1f1f23' }} />
-}
-
-// ─── Custom Tooltip ──────────────────────────────────────────────────────────
-
-function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; fill: string }>; label?: string }) {
-  if (!active || !payload?.length) return null
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-lg p-3 text-sm" style={{ background: '#1f2937', border: '1px solid #374151' }}>
-      <p className="font-semibold text-white mb-1">{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ color: p.fill }}>
-          {p.name}: <span className="font-mono">{p.value}</span>
-        </p>
-      ))}
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 16,
+        padding: '7px 0',
+        borderBottom: '1px solid #0d0d0d',
+      }}
+    >
+      <span style={{ width: 88, flexShrink: 0, fontSize: 12, color: '#888888' }}>{label}</span>
+      <span style={{ fontSize: 12, color: '#ffffff', flex: 1, minWidth: 0 }}>{value}</span>
     </div>
   )
 }
 
-// ─── Main component ──────────────────────────────────────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
-export default function DashboardClient({ user, snapshots, gapScore, competitors, latestDigest, latestTrend }: Props) {
+function IconBranch() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+      <circle cx="4" cy="4" r="2" stroke="#888888" strokeWidth="1.5" />
+      <circle cx="12" cy="4" r="2" stroke="#888888" strokeWidth="1.5" />
+      <circle cx="4" cy="12" r="2" stroke="#888888" strokeWidth="1.5" />
+      <path d="M4 6v4M6 4h3.17A2.83 2.83 0 0 1 12 6.83V6" stroke="#888888" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function IconCheck() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+      <path d="M2 5l2.5 2.5L8 3" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// ─── Custom tooltip ───────────────────────────────────────────────────────────
+
+function ChartTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: Array<{ value: number }>
+}) {
+  if (!active || !payload?.length) return null
+  return (
+    <div
+      style={{
+        background: '#111111',
+        border: '1px solid #1a1a1a',
+        borderRadius: 4,
+        padding: '6px 10px',
+        fontSize: 11,
+        color: '#ffffff',
+      }}
+    >
+      {fmt(payload[0].value)} views
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export default function DashboardClient({
+  user,
+  snapshots,
+  gapScore,
+  competitors,
+  recentDigests,
+  latestDigest,
+  latestTrend,
+}: Props) {
   const { isSyncing } = useSyncStatus()
   const router = useRouter()
 
-  // After first sync completes, refresh server data
   useEffect(() => {
     if (!isSyncing && snapshots.length === 0) {
       router.refresh()
     }
   }, [isSyncing, snapshots.length, router])
 
-  // ── Syncing state ──────────────────────────────────────────────────────────
+  // ── Sync loading ──────────────────────────────────────────────────────────
   if (isSyncing) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-8">
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          gap: 24,
+          background: '#000000',
+        }}
+      >
         <BlackholeLoader />
-        <div className="text-center">
-          <p className="text-white text-sm font-medium">Syncing your channel data...</p>
-          <p className="text-xs mt-1" style={{ color: '#6b7280' }}>This takes about 10–15 seconds on first load.</p>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 500, margin: 0 }}>
+            Syncing your channel data...
+          </p>
+          <p style={{ color: '#888888', fontSize: 12, margin: '4px 0 0' }}>
+            This takes about 10–15 seconds on first load.
+          </p>
         </div>
       </div>
     )
@@ -160,283 +246,670 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
   // ── Empty state ────────────────────────────────────────────────────────────
   if (snapshots.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-8">
-        <BlackholeLoader />
-        <div className="text-center">
-          <p className="text-white font-medium">Your ant is gathering intelligence...</p>
-          <p className="text-sm mt-1" style={{ color: '#6b7280' }}>Connect your YouTube channel to get started.</p>
-          <a
-            href="/api/sync"
-            className="inline-block mt-4 px-5 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-80"
-            style={{ background: '#2563eb' }}
-          >
-            Connect YouTube
-          </a>
-        </div>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          gap: 16,
+          background: '#000000',
+        }}
+      >
+        <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 500, margin: 0 }}>
+          No channel data yet.
+        </p>
+        <p style={{ color: '#888888', fontSize: 12, margin: 0 }}>
+          Connect your YouTube channel to get started.
+        </p>
+        <a
+          href="/api/sync"
+          style={{
+            marginTop: 8,
+            padding: '6px 16px',
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 500,
+            color: '#000000',
+            background: '#ffffff',
+            textDecoration: 'none',
+          }}
+        >
+          Connect YouTube
+        </a>
       </div>
     )
   }
 
-  // ── Dashboard data ─────────────────────────────────────────────────────────
+  // ── Data ───────────────────────────────────────────────────────────────────
   const latest = snapshots[snapshots.length - 1]
-  const nicheLabel = user?.niche_id
-    ? `${user.niche_id.charAt(0).toUpperCase()}${user.niche_id.slice(1)} · YouTube Creator`
-    : 'YouTube Creator'
+  const lastSynced = timeAgo(latest.created_at)
+  const isFresh = latest.created_at
+    ? Date.now() - new Date(latest.created_at).getTime() < 48 * 3600_000
+    : false
 
-  // Metric card computations
-  const avgViews = latest.avg_views_per_video ?? null
-  const revenueGap = gapScore?.estimated_revenue_gap ?? null
-  const monthlyRevenue = latest.estimated_monthly_revenue ?? null
-  const watchTime = latest.avg_view_duration_seconds ?? null
+  // Views chart: last 7 snapshots
+  const viewsData = snapshots.slice(-7).map((s) => ({
+    date: s.snapshot_date,
+    views: s.avg_views_per_video ?? 0,
+  }))
 
-  // Niche avg upload frequency from competitors
-  const competitorUploads = competitors.length > 0
-    ? (competitors.reduce((sum, c) => sum + (c.subscriber_count ?? 0), 0) / competitors.length)
+  // Gap recommendations
+  const recs: string[] = []
+  if (gapScore) {
+    if (gapScore.views_gap_score > 40) recs.push('Increase views')
+    if (gapScore.ctr_gap_score > 40) recs.push('Improve CTR')
+    if (gapScore.watch_time_gap_score > 40) recs.push('Extend watch time')
+    if (gapScore.upload_frequency_gap_score > 40) recs.push('Upload more often')
+  }
+
+  // Checklist
+  const checklist = [
+    { label: 'Connect YouTube Channel', done: !!user?.youtube_channel_id },
+    { label: 'Add competitor channels',  done: competitors.length > 0 },
+    { label: 'First digest generated',   done: !!latestDigest },
+    { label: 'Upgrade to Starter plan',  done: user?.subscription_plan !== 'free' },
+    { label: 'Enable weekly alerts',     done: user?.subscription_plan !== 'free' },
+  ]
+  const doneCount = checklist.filter((c) => c.done).length
+
+  // Digest preview (first substantial line of content)
+  const digestPreview = latestDigest?.content
+    ? latestDigest.content.split('\n').find((l) => l.trim().length > 20)?.trim().slice(0, 55) ?? '...'
     : null
 
-  // Gap chart data
-  const chartData = gapScore
-    ? [
-        { name: 'Views',      you: Math.max(0, 100 - gapScore.views_gap_score),           avg: 60 },
-        { name: 'CTR',        you: Math.max(0, 100 - gapScore.ctr_gap_score),             avg: 60 },
-        { name: 'Frequency',  you: Math.max(0, 100 - gapScore.upload_frequency_gap_score),avg: 60 },
-        { name: 'Watch Time', you: Math.max(0, 100 - gapScore.watch_time_gap_score),      avg: 60 },
-      ]
-    : null
-
-  // Last synced
-  const lastSynced = latest.created_at ? timeAgo(latest.created_at) : 'never'
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6 max-w-full">
-
-      {/* Section 1 — Page header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-white">{getGreeting(user?.name)}</h1>
-        <p className="text-sm" style={{ color: '#6b7280' }}>Last synced: {lastSynced}</p>
-      </div>
-
-      {/* Section 2 — Channel hero */}
+    <div
+      style={{
+        background: '#000000',
+        color: '#ffffff',
+        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        minHeight: '100%',
+      }}
+    >
+      {/* ── Page header ─────────────────────────────────────────────────────── */}
       <div
-        className="rounded p-5 flex items-center justify-between"
-        style={{ background: '#111114', border: '1px solid #1e1e1e' }}
+        style={{
+          padding: '14px 24px',
+          borderBottom: '1px solid #1a1a1a',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
       >
-        <div>
-          <h2 className="text-2xl font-semibold text-white">
-            {user?.name ?? 'Your Channel'}
-          </h2>
-          <p className="mt-1 text-sm" style={{ color: '#9ca3af' }}>
-            {latest.subscriber_count ? `${formatNumber(latest.subscriber_count)} subscribers` : 'Subscribers syncing...'}
-          </p>
-          <p className="mt-0.5 text-xs" style={{ color: '#6b7280' }}>{nicheLabel}</p>
-        </div>
-        <div className="text-right">
-          {gapScore ? (
-            <>
-              <ScoreBadge score={gapScore.overall_score} />
-              <p className="text-xs mt-1" style={{ color: '#6b7280' }}>Gap Score · vs niche average</p>
-            </>
-          ) : (
-            <Skeleton className="h-12 w-16 ml-auto" />
-          )}
-        </div>
+        <h1 style={{ fontSize: 14, fontWeight: 500, color: '#ffffff', margin: 0 }}>
+          {user?.name ?? 'Overview'}
+        </h1>
+        <span style={{ fontSize: 12, color: '#444444' }}>Last synced: {lastSynced}</span>
       </div>
 
-      {/* Section 3 — 4 metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard
-          title="Avg Views / Video"
-          value={formatNumber(avgViews)}
-          context={
-            gapScore && avgViews
-              ? `${gapScore.views_gap_score > 50 ? 'Below' : 'Near'} niche avg`
-              : 'Syncing...'
-          }
-          contextColor={gapScore && gapScore.views_gap_score > 50 ? '#ef4444' : '#22c55e'}
-        />
-        <MetricCard
-          title="Est. Monthly Revenue"
-          value={formatCurrency(monthlyRevenue)}
-          context={
-            revenueGap != null
-              ? `Gap: ${formatCurrency(revenueGap)}/mo to niche avg`
-              : 'No gap data yet'
-          }
-          contextColor="#f59e0b"
-        />
-        <MetricCard
-          title="Active Competitors"
-          value={String(competitors.length)}
-          context={
-            competitorUploads != null
-              ? `Avg ${formatNumber(Math.round(competitorUploads))} subscribers`
-              : 'No competitors yet'
-          }
-        />
-        <MetricCard
-          title="Avg Watch Time"
-          value={formatDuration(watchTime)}
-          context={
-            gapScore && watchTime
-              ? `${gapScore.watch_time_gap_score > 50 ? 'Below' : 'Near'} niche avg`
-              : 'Syncing...'
-          }
-          contextColor={gapScore && gapScore.watch_time_gap_score > 50 ? '#ef4444' : '#22c55e'}
-        />
-      </div>
-
-      {/* Section 4 — Score breakdown chart */}
+      {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
       <div
-        className="rounded p-5"
-        style={{ background: '#111114', border: '1px solid #1e1e1e' }}
+        style={{
+          display: 'flex',
+          borderBottom: '1px solid #1a1a1a',
+          padding: '0 24px',
+        }}
       >
-        <h3 className="text-sm font-medium text-white mb-1">Score Breakdown</h3>
-        <p className="text-xs mb-5" style={{ color: '#6b7280' }}>
-          Your performance score vs niche average (100 = fully at par)
-        </p>
-        {chartData ? (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={chartData} barCategoryGap="30%" barGap={4}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f1f23" vertical={false} />
-              <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis domain={[0, 100]} tick={{ fill: '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-              <Legend wrapperStyle={{ fontSize: 12, color: '#6b7280', paddingTop: 12 }} />
-              <Bar dataKey="you" name="Your Score" fill="#2563eb" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="avg" name="Niche Avg" fill="#374151" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="space-y-3">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-4 w-1/2" />
-          </div>
-        )}
-      </div>
-
-      {/* Section 5 — Recent intelligence */}
-      <div>
-        <h3 className="text-sm font-medium text-white mb-4">Recent Intelligence</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-          {/* Viral video card */}
-          <div
-            className="rounded p-5 flex flex-col transition-colors"
-            style={{ background: '#111114', border: '1px solid #1e1e1e' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
-              <span className="text-xs font-medium text-white">Viral in Niche</span>
-            </div>
-            {latestTrend ? (
-              <>
-                <p className="text-sm text-white leading-snug mb-1 overflow-hidden line-clamp-2">
-                  {latestTrend.title ?? 'Untitled video'}
-                </p>
-                <p className="text-xs" style={{ color: '#6b7280' }}>
-                  {latestTrend.channel_name} · {formatNumber(latestTrend.view_count)} views
-                </p>
-                {latestTrend.youtube_video_id && (
-                  <a
-                    href={`https://youtube.com/watch?v=${latestTrend.youtube_video_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block mt-3 text-xs font-medium transition-opacity hover:opacity-80"
-                    style={{ color: '#2563eb' }}
-                  >
-                    Watch on YouTube →
-                  </a>
-                )}
-              </>
-            ) : (
-              <p className="text-sm" style={{ color: '#6b7280' }}>No viral videos detected yet.</p>
-            )}
-          </div>
-
-          {/* Latest digest card */}
-          <div
-            className="rounded p-5 flex flex-col transition-colors"
-            style={{ background: '#111114', border: '1px solid #1e1e1e' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#22c55e' }} />
-              <span className="text-xs font-medium text-white">Weekly Digest</span>
-            </div>
-            {latestDigest ? (
-              <>
-                <p className="text-xs mb-2" style={{ color: '#6b7280' }}>
-                  {new Date(latestDigest.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                </p>
-                <p className="text-sm leading-relaxed overflow-hidden line-clamp-2" style={{ color: '#9ca3af' }}>
-                  {latestDigest.content.slice(0, 160)}
-                </p>
-                <a
-                  href="/digest"
-                  className="inline-block mt-3 text-xs font-medium transition-opacity hover:opacity-80"
-                  style={{ color: '#2563eb' }}
-                >
-                  Read full digest →
-                </a>
-              </>
-            ) : (
-              <p className="text-sm" style={{ color: '#6b7280' }}>No digest generated yet. Check back Monday.</p>
-            )}
-          </div>
-
-          {/* Bottleneck or upgrade nudge */}
-          {gapScore?.primary_bottleneck ? (
-            <div
-              className="rounded p-5 flex flex-col transition-colors"
-              style={{ background: '#111114', border: '1px solid #1e1e1e' }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
+        {['Overview', 'Deployments', 'Analytics', 'Settings'].map((tab) => {
+          const active = tab === 'Overview'
+          return (
+            <button
+              key={tab}
+              type="button"
+              style={{
+                padding: '11px 0',
+                marginRight: 24,
+                fontSize: 13,
+                fontWeight: 400,
+                color: active ? '#ffffff' : '#888888',
+                background: 'transparent',
+                border: 'none',
+                borderBottom: active ? '2px solid #ffffff' : '2px solid transparent',
+                cursor: 'pointer',
+                marginBottom: -1,
+                letterSpacing: 0,
+              }}
             >
-              <div className="flex items-center gap-2 mb-3">
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#2563eb' }} />
-                <span className="text-xs font-medium text-white">Top Opportunity</span>
+              {tab}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ── Two-column layout ────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex' }}>
+
+        {/* ── Left column (65%) ─────────────────────────────────────────────── */}
+        <div style={{ flex: '0 0 65%', minWidth: 0 }}>
+
+          {/* Section 1 — Production Deployment card */}
+          <div style={{ padding: 24 }}>
+            <div style={{ border: '1px solid #1a1a1a' }}>
+
+              {/* Card header */}
+              <div
+                style={{
+                  padding: '10px 16px',
+                  borderBottom: '1px solid #1a1a1a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: '#888888',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    fontWeight: 500,
+                  }}
+                >
+                  Production Deployment
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <GhostBtn>Refresh Data</GhostBtn>
+                  {user?.youtube_channel_id && (
+                    <GhostBtn href={`https://youtube.com/channel/${user.youtube_channel_id}`}>
+                      Visit ↗
+                    </GhostBtn>
+                  )}
+                </div>
               </div>
-              <p className="text-sm leading-relaxed overflow-hidden line-clamp-2" style={{ color: '#9ca3af' }}>
-                {gapScore.primary_bottleneck}
-              </p>
-              {revenueGap != null && revenueGap > 0 && (
-                <p className="mt-3 text-xs font-mono" style={{ color: '#f59e0b' }}>
-                  {formatCurrency(revenueGap)}/mo left on the table
-                </p>
+
+              {/* Card body */}
+              <div style={{ padding: 16, display: 'flex', gap: 20 }}>
+
+                {/* Channel thumbnail / preview placeholder */}
+                <div
+                  style={{
+                    width: 200,
+                    aspectRatio: '16/9',
+                    flexShrink: 0,
+                    background: '#0d0d0d',
+                    border: '1px solid #1a1a1a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 28,
+                      fontWeight: 700,
+                      color: '#222222',
+                      letterSpacing: '-1px',
+                    }}
+                  >
+                    {user?.name?.[0]?.toUpperCase() ?? '?'}
+                  </span>
+                </div>
+
+                {/* Info rows */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <InfoRow label="Deployment" value={user?.name ?? '—'} />
+                  <InfoRow
+                    label="Domains"
+                    value={
+                      latest.subscriber_count
+                        ? `${fmt(latest.subscriber_count)} subscribers`
+                        : '—'
+                    }
+                  />
+                  <InfoRow
+                    label="Status"
+                    value={
+                      <span style={{ display: 'flex', alignItems: 'center' }}>
+                        <StatusDot ok={isFresh} />
+                        <span style={{ color: isFresh ? '#00c853' : '#f5a623' }}>
+                          {isFresh ? 'Ready' : 'Stale'}
+                        </span>
+                      </span>
+                    }
+                  />
+                  <InfoRow label="Created" value={lastSynced} />
+                  <InfoRow
+                    label="Source"
+                    value={
+                      <span
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <IconBranch />
+                        <span style={{ fontWeight: 500, color: '#ffffff', flexShrink: 0 }}>
+                          weekly-digest
+                        </span>
+                        {digestPreview && (
+                          <>
+                            <span style={{ color: '#333333', flexShrink: 0 }}>·</span>
+                            <span
+                              style={{
+                                color: '#444444',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {digestPreview}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2 — Gap Score bar */}
+          <Divider />
+          <div
+            style={{
+              padding: '12px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 12, color: '#888888' }}>Gap Score</span>
+              {gapScore ? (
+                <span
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 600,
+                    color: scoreColor(gapScore.overall_score),
+                    fontVariantNumeric: 'tabular-nums',
+                    lineHeight: 1,
+                  }}
+                >
+                  {gapScore.overall_score}
+                </span>
+              ) : (
+                <span style={{ fontSize: 20, color: '#333333' }}>—</span>
+              )}
+              {gapScore && (
+                <span style={{ fontSize: 12, color: '#444444' }}>/ 100</span>
               )}
             </div>
-          ) : (
-            <div
-              className="rounded p-5 flex flex-col justify-between"
-              style={{ background: '#111114', border: '1px solid #1e1e2a' }}
-            >
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#2563eb' }} />
-                  <span className="text-xs font-medium text-white">Unlock Intelligence</span>
-                </div>
-                <p className="text-sm leading-relaxed" style={{ color: '#6b7280' }}>
-                  Upgrade to Starter to get weekly digests, trend alerts, and 5 competitor slots.
-                </p>
-              </div>
+            {recs.length > 0 && (
+              <SmallBadge color="#f5a623">{recs.length} Recommendations</SmallBadge>
+            )}
+          </div>
+          <Divider />
+
+          {/* Section 3 — Activity row */}
+          <div
+            style={{
+              padding: '12px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+            }}
+          >
+            <p style={{ fontSize: 12, color: '#888888', margin: 0, flex: 1 }}>
+              To improve your score, push to the{' '}
+              <span style={{ color: '#ffffff', fontWeight: 500 }}>weekly digest</span>
+              {' '}branch.
+              {gapScore?.primary_bottleneck && (
+                <> Primary gap: {gapScore.primary_bottleneck}.</>
+              )}
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
               <a
-                href="/pricing"
-                className="inline-block mt-4 px-4 py-2 rounded text-xs font-medium text-white text-center transition-opacity hover:opacity-80"
-                style={{ background: '#2563eb' }}
+                href="/ideas"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: '#888888',
+                  background: 'transparent',
+                  border: '1px solid #1a1a1a',
+                  textDecoration: 'none',
+                }}
               >
-                Upgrade to Starter →
+                Ideas
+              </a>
+              <a
+                href="/digest"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: '#888888',
+                  background: 'transparent',
+                  border: '1px solid #1a1a1a',
+                  textDecoration: 'none',
+                }}
+              >
+                Digest
               </a>
             </div>
-          )}
+          </div>
+          <Divider />
+
+        </div>
+
+        {/* ── Right column (35%) ────────────────────────────────────────────── */}
+        <div style={{ flex: '0 0 35%', borderLeft: '1px solid #1a1a1a', minWidth: 0 }}>
+
+          {/* Widget 1 — Niche Activity */}
+          <div style={{ padding: 24 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 16,
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
+                Niche Activity
+              </span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                {['6h', '24h', '7d'].map((t, i) => (
+                  <span
+                    key={t}
+                    style={{
+                      fontSize: 11,
+                      color: i === 2 ? '#ffffff' : '#444444',
+                      cursor: 'default',
+                    }}
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 28, marginBottom: 16 }}>
+              <div>
+                <p style={{ fontSize: 11, color: '#888888', margin: '0 0 4px' }}>
+                  Viral Videos
+                </p>
+                <p
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 600,
+                    color: '#ffffff',
+                    margin: 0,
+                    fontVariantNumeric: 'tabular-nums',
+                    lineHeight: 1,
+                  }}
+                >
+                  {latestTrend ? '1+' : '0'}
+                </p>
+              </div>
+              <div>
+                <p style={{ fontSize: 11, color: '#888888', margin: '0 0 4px' }}>
+                  Competitors
+                </p>
+                <p
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 600,
+                    color: '#ffffff',
+                    margin: 0,
+                    fontVariantNumeric: 'tabular-nums',
+                    lineHeight: 1,
+                  }}
+                >
+                  {competitors.length}
+                </p>
+              </div>
+            </div>
+
+            {/* Sparkline */}
+            {viewsData.length > 1 && (
+              <ResponsiveContainer width="100%" height={44}>
+                <LineChart data={viewsData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+                  <Line
+                    type="monotone"
+                    dataKey="views"
+                    stroke="#333333"
+                    strokeWidth={1.5}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <Divider />
+
+          {/* Widget 2 — Performance */}
+          <div style={{ padding: 24 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 4,
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
+                Performance
+              </span>
+              <span style={{ fontSize: 11, color: '#444444' }}>1w</span>
+            </div>
+            <p style={{ fontSize: 11, color: '#444444', margin: '0 0 14px' }}>
+              Avg views / video
+            </p>
+
+            {viewsData.length > 1 ? (
+              <ResponsiveContainer width="100%" height={100}>
+                <LineChart data={viewsData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                  <Line
+                    type="monotone"
+                    dataKey="views"
+                    stroke="#ffffff"
+                    strokeWidth={1.5}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                  <Tooltip
+                    content={<ChartTooltip />}
+                    cursor={{ stroke: '#1a1a1a', strokeWidth: 1 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div
+                style={{
+                  height: 100,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <span style={{ fontSize: 12, color: '#333333' }}>Not enough data yet</span>
+              </div>
+            )}
+          </div>
+          <Divider />
+
+          {/* Widget 3 — Intelligence Checklist */}
+          <div style={{ padding: 24 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 16,
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
+                Intelligence Checklist
+              </span>
+              <span style={{ fontSize: 11, color: '#888888' }}>
+                {doneCount}/{checklist.length}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {checklist.map(({ label, done }) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    style={{
+                      width: 15,
+                      height: 15,
+                      borderRadius: 3,
+                      flexShrink: 0,
+                      background: done ? '#00c853' : 'transparent',
+                      border: done ? '1px solid #00c853' : '1px solid #2a2a2a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {done && <IconCheck />}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: done ? '#555555' : '#cccccc',
+                      textDecoration: done ? 'line-through' : 'none',
+                    }}
+                  >
+                    {label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
 
         </div>
       </div>
+
+      {/* ── Recent Digests — full width ──────────────────────────────────────── */}
+      <Divider />
+
+      {/* Section header */}
+      <div
+        style={{
+          padding: '14px 24px',
+          borderBottom: '1px solid #1a1a1a',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
+          Recent Digests
+        </span>
+        <a
+          href="/digest"
+          style={{ fontSize: 12, color: '#888888', textDecoration: 'none' }}
+        >
+          View all →
+        </a>
+      </div>
+
+      {/* Table column headers */}
+      <div
+        style={{
+          padding: '8px 24px',
+          borderBottom: '1px solid #1a1a1a',
+          display: 'grid',
+          gridTemplateColumns: '160px 70px 1fr 110px',
+          gap: 16,
+          alignItems: 'center',
+        }}
+      >
+        {['Date', 'Score', 'Top Opportunity', 'Status'].map((h) => (
+          <span
+            key={h}
+            style={{
+              fontSize: 11,
+              color: '#444444',
+              fontWeight: 500,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}
+          >
+            {h}
+          </span>
+        ))}
+      </div>
+
+      {/* Digest rows */}
+      {recentDigests.length > 0 ? (
+        recentDigests.map((d) => {
+          const digestScore =
+            d.key_metrics && typeof d.key_metrics === 'object'
+              ? (d.key_metrics as Record<string, unknown>).overallGapScore
+              : null
+          const scoreNum = typeof digestScore === 'number' ? digestScore : null
+          const preview = d.content.slice(0, 90).replace(/\n/g, ' ')
+
+          return (
+            <div
+              key={d.id}
+              style={{
+                padding: '11px 24px',
+                borderBottom: '1px solid #1a1a1a',
+                display: 'grid',
+                gridTemplateColumns: '160px 70px 1fr 110px',
+                gap: 16,
+                alignItems: 'center',
+              }}
+            >
+              <span style={{ fontSize: 12, color: '#888888' }}>
+                {fmtDate(d.created_at)}
+              </span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: scoreNum != null ? scoreColor(scoreNum) : '#444444',
+                  fontVariantNumeric: 'tabular-nums',
+                  fontWeight: scoreNum != null ? 500 : 400,
+                }}
+              >
+                {scoreNum != null ? scoreNum : '—'}
+              </span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: '#888888',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {preview}...
+              </span>
+              <span>
+                <SmallBadge color={d.email_sent_at ? '#00c853' : '#888888'}>
+                  {d.email_sent_at ? 'Delivered' : 'Draft'}
+                </SmallBadge>
+              </span>
+            </div>
+          )
+        })
+      ) : (
+        <div style={{ padding: '28px 24px', textAlign: 'center' }}>
+          <span style={{ fontSize: 12, color: '#333333' }}>
+            No digests generated yet. First digest arrives Monday.
+          </span>
+        </div>
+      )}
 
     </div>
   )
 }
-

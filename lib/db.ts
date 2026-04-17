@@ -689,6 +689,28 @@ export async function getLatestDigest(userId: string): Promise<import('@/types')
 }
 
 // ---------------------------------------------------------------------------
+// getRecentDigests
+// ---------------------------------------------------------------------------
+
+export async function getRecentDigests(userId: string, limit = 3): Promise<import('@/types').Digest[]> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('digests')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('[db] getRecentDigests error:', error.message)
+    return []
+  }
+
+  return (data ?? []) as import('@/types').Digest[]
+}
+
+// ---------------------------------------------------------------------------
 // getLatestTrend
 // ---------------------------------------------------------------------------
 
