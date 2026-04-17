@@ -1,9 +1,10 @@
-import { auth, signOut } from '@/auth'
+import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import Image from 'next/image'
 import { getUser, updateUserOnboardingStatus } from '@/lib/db'
 import { SyncProvider } from '@/components/sync-context'
 import SidebarNav from '@/components/dashboard/SidebarNav'
+import SignOutButton from '@/components/dashboard/SignOutButton'
 
 export default async function DashboardLayout({
   children,
@@ -65,22 +66,7 @@ export default async function DashboardLayout({
             </div>
           </div>
 
-          <form
-            action={async () => {
-              'use server'
-              await signOut({ redirectTo: '/login' })
-            }}
-          >
-            <button
-              type="submit"
-              className="mt-1 w-full px-3 py-1.5 text-xs rounded-lg transition-colors text-left"
-              style={{ color: '#6b7280' }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#d1d5db'; (e.currentTarget as HTMLButtonElement).style.background = '#16161a' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#6b7280'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-            >
-              Sign out
-            </button>
-          </form>
+          <SignOutButton />
         </div>
 
       </aside>
