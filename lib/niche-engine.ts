@@ -9,6 +9,9 @@
  * Always pass userId to detectNiche so the result is cached and we skip Claude on repeat calls.
  */
 
+import { config } from 'dotenv'
+config({ path: '.env.local', override: true })
+
 import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
 import type { NicheResult, CompetitorCandidate } from '@/types';

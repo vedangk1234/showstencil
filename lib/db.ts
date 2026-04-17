@@ -608,6 +608,115 @@ export async function getUserSettings(userId: string): Promise<UserSettings | nu
 }
 
 // ---------------------------------------------------------------------------
+// getLatestGapScore
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the most recent gap score row for a user, or null if none exists.
+ */
+export async function getLatestGapScore(userId: string): Promise<import('@/types').GapScore | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('gap_scores')
+    .select('*')
+    .eq('user_id', userId)
+    .order('calculated_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getLatestGapScore error:', error.message)
+    }
+    return null
+  }
+
+  return data as import('@/types').GapScore
+}
+
+// ---------------------------------------------------------------------------
+// getCompetitors
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns all active competitors for a user.
+ */
+export async function getCompetitors(userId: string): Promise<import('@/types').Competitor[]> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('competitors')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('subscriber_count', { ascending: false })
+
+  if (error) {
+    console.error('[db] getCompetitors error:', error.message)
+    return []
+  }
+
+  return (data ?? []) as import('@/types').Competitor[]
+}
+
+// ---------------------------------------------------------------------------
+// getLatestDigest
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the most recent digest for a user, or null if none exists.
+ */
+export async function getLatestDigest(userId: string): Promise<import('@/types').Digest | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('digests')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getLatestDigest error:', error.message)
+    }
+    return null
+  }
+
+  return data as import('@/types').Digest
+}
+
+// ---------------------------------------------------------------------------
+// getLatestTrend
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the most recently detected viral trend for a user, or null if none exists.
+ */
+export async function getLatestTrend(userId: string): Promise<import('@/types').Trend | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('trends')
+    .select('*')
+    .eq('user_id', userId)
+    .order('detected_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getLatestTrend error:', error.message)
+    }
+    return null
+  }
+
+  return data as import('@/types').Trend
+}
+
+// ---------------------------------------------------------------------------
 // upsertUserSettings
 // ---------------------------------------------------------------------------
 

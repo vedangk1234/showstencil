@@ -21,6 +21,9 @@
  *   RUN_NICHE_TEST=true npx tsx --env-file=.env.local lib/digest-generator.ts
  */
 
+import { config } from 'dotenv'
+config({ path: '.env.local', override: true })
+
 import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
 import { getUser, getChannelSnapshots, getVideos, getWorstVideos, getCompetitorMetricsFromDB } from '@/lib/db';

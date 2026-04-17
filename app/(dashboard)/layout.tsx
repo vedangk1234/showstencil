@@ -1,17 +1,9 @@
 import { auth, signOut } from '@/auth'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import Image from 'next/image'
 import { getUser, updateUserOnboardingStatus } from '@/lib/db'
 import { SyncProvider } from '@/components/sync-context'
-
-const navItems = [
-  { href: '/dashboard',   label: 'Dashboard',    Icon: LayoutIcon    },
-  { href: '/competitors', label: 'Competitors',   Icon: UsersIcon     },
-  { href: '/digest',      label: 'Weekly Digest', Icon: FileTextIcon  },
-  { href: '/ideas',       label: 'Video Ideas',   Icon: LightbulbIcon },
-  { href: '/settings',    label: 'Settings',      Icon: SettingsIcon  },
-]
+import SidebarNav from '@/components/dashboard/SidebarNav'
 
 export default async function DashboardLayout({
   children,
@@ -21,59 +13,55 @@ export default async function DashboardLayout({
   const session = await auth()
   if (!session) redirect('/login')
 
-  // Check if this is the user's first login — if so, trigger an initial sync
   const user = await getUser(session.user.id)
   const needsSync = !user?.onboarding_completed
 
   if (needsSync) {
-    // Mark onboarding complete immediately so a page refresh doesn't re-trigger sync
     await updateUserOnboardingStatus(session.user.id, true)
   }
 
   return (
-    <div className="flex h-screen bg-zinc-950">
+    <div className="flex h-screen" style={{ background: '#0a0a0b' }}>
 
       {/* Sidebar */}
-      <aside className="w-60 shrink-0 bg-zinc-900 border-r border-zinc-800 flex flex-col">
+      <aside
+        className="w-60 shrink-0 flex flex-col"
+        style={{ background: '#0d0d10', borderRight: '1px solid #1f1f23' }}
+      >
 
         {/* Logo */}
-        <div className="px-6 py-5 border-b border-zinc-800">
-          <span className="text-lg font-bold text-white tracking-tight">ShowStencil</span>
+        <div className="px-5 py-5 flex items-center gap-2.5" style={{ borderBottom: '1px solid #1f1f23' }}>
+          <AntLogo />
+          <span className="text-white font-mono text-base font-semibold tracking-tight">
+            ShowStencil
+          </span>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 p-3 space-y-0.5">
-          {navItems.map(({ href, label, Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors text-sm"
-            >
-              <Icon />
-              {label}
-            </Link>
-          ))}
-        </nav>
+        {/* Nav links (client component — needs usePathname) */}
+        <SidebarNav />
 
-        {/* User */}
-        <div className="p-3 border-t border-zinc-800">
+        {/* User section */}
+        <div className="p-3" style={{ borderTop: '1px solid #1f1f23' }}>
           <div className="flex items-center gap-2.5 px-3 py-2">
             {session.user.image ? (
               <Image
                 src={session.user.image}
                 alt={session.user.name ?? 'User'}
-                width={32}
-                height={32}
+                width={28}
+                height={28}
                 className="rounded-full"
               />
             ) : (
-              <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-sm font-medium text-zinc-300">
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium text-white"
+                style={{ background: '#2563eb' }}
+              >
                 {session.user.name?.[0]?.toUpperCase() ?? '?'}
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{session.user.name}</p>
-              <p className="text-xs text-zinc-500 truncate">{session.user.email}</p>
+              <p className="text-xs text-white truncate font-medium">{session.user.name}</p>
+              <p className="text-xs truncate" style={{ color: '#6b7280' }}>{session.user.email}</p>
             </div>
           </div>
 
@@ -85,7 +73,10 @@ export default async function DashboardLayout({
           >
             <button
               type="submit"
-              className="mt-1 w-full px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors text-left"
+              className="mt-1 w-full px-3 py-1.5 text-xs rounded-lg transition-colors text-left"
+              style={{ color: '#6b7280' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#d1d5db'; (e.currentTarget as HTMLButtonElement).style.background = '#16161a' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#6b7280'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
             >
               Sign out
             </button>
@@ -95,7 +86,7 @@ export default async function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto" style={{ background: '#0a0a0b', padding: '32px' }}>
         <SyncProvider needsSync={needsSync}>{children}</SyncProvider>
       </main>
 
@@ -103,51 +94,26 @@ export default async function DashboardLayout({
   )
 }
 
-function LayoutIcon() {
+function AntLogo() {
   return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <rect x="3" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="14" width="7" height="7" rx="1" />
-      <rect x="3" y="14" width="7" height="7" rx="1" />
-    </svg>
-  )
-}
-
-function UsersIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  )
-}
-
-function FileTextIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-    </svg>
-  )
-}
-
-function LightbulbIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 21h6M12 3a6 6 0 0 1 6 6c0 2.22-1.21 4.16-3 5.2V17H9v-2.8C7.21 13.16 6 11.22 6 9a6 6 0 0 1 6-6z" />
-    </svg>
-  )
-}
-
-function SettingsIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      {/* Abdomen */}
+      <ellipse cx="12" cy="17.5" rx="3.5" ry="4.5" fill="white" />
+      {/* Thorax */}
+      <circle cx="12" cy="10.5" r="2.5" fill="white" />
+      {/* Head */}
+      <circle cx="12" cy="5" r="2.2" fill="white" />
+      {/* Antennae */}
+      <line x1="11" y1="3.2" x2="7.5" y2="1" stroke="white" strokeWidth="1.2" strokeLinecap="round" />
+      <line x1="13" y1="3.2" x2="16.5" y2="1" stroke="white" strokeWidth="1.2" strokeLinecap="round" />
+      {/* Left legs */}
+      <line x1="9.5" y1="9.5" x2="5.5" y2="7.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
+      <line x1="9.5" y1="10.5" x2="5" y2="10.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
+      <line x1="9.5" y1="11.5" x2="5.5" y2="13.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
+      {/* Right legs */}
+      <line x1="14.5" y1="9.5" x2="18.5" y2="7.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
+      <line x1="14.5" y1="10.5" x2="19" y2="10.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
+      <line x1="14.5" y1="11.5" x2="18.5" y2="13.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
     </svg>
   )
 }

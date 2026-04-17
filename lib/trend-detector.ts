@@ -14,6 +14,9 @@
  * getTrendingInNiche return [] — that is correct behaviour.
  */
 
+import { config } from 'dotenv'
+config({ path: '.env.local', override: true })
+
 import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
 import type { ViralVideo, UncoveredTopic } from '@/types';

@@ -19,6 +19,9 @@
  *   $env:RUN_IDEA_TEST="true"; npx tsx --env-file=.env.local lib/idea-generator.ts
  */
 
+import { config } from 'dotenv'
+config({ path: '.env.local', override: true })
+
 import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
 import { getUser, getChannelSnapshots, getVideos, getCompetitorMetricsFromDB } from '@/lib/db';
