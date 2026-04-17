@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nixlytics",
+  title: "ShowStencil",
   description: "YouTube analytics for serious creators",
 };
 

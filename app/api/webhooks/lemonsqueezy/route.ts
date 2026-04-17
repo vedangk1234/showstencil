@@ -21,9 +21,14 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 // ---------------------------------------------------------------------------
 
 function verifySignature(rawBody: string, signature: string): boolean {
-  const secret = process.env.LEMONSQUEEZY_WEBHOOK_SECRET!
-  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
+  try {
+    const secret = process.env.LEMONSQUEEZY_WEBHOOK_SECRET!
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
+    // timingSafeEqual throws if buffer lengths differ (e.g. truncated or mangled signature)
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
+  } catch {
+    return false
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -41,13 +46,14 @@ function getPlanFromVariant(variantId: string): 'starter' | 'pro' | null {
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
   // Read raw body for signature verification — must happen before any JSON parsing
   const rawBody = await req.text()
 
   const signature = req.headers.get('x-signature') ?? ''
   if (!signature) {
     console.error('[ls-webhook] Missing X-Signature header')
-    return NextResponse.json({ error: 'Missing signature' }, { status: 401 })
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
   if (!verifySignature(rawBody, signature)) {
@@ -174,14 +180,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Send payment failed warning email
     try {
       await resend.emails.send({
-        from: 'Nixlytics <onboarding@resend.dev>',
+        from: 'ShowStencil <onboarding@resend.dev>',
         to: user.email,
-        subject: 'Action required: Your Nixlytics payment failed',
+        subject: 'Action required: Your ShowStencil payment failed',
         html: `
           <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#111">
             <h1 style="font-size:22px;margin-bottom:16px">Your payment failed</h1>
             <p style="font-size:15px;line-height:1.6;margin-bottom:24px">
-              We were unable to charge your card for your Nixlytics subscription.
+              We were unable to charge your card for your ShowStencil subscription.
               Your account will remain active for 3 days while we retry the payment.
               Please update your payment method to avoid losing access.
             </p>
@@ -203,4 +209,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({ received: true })
+  } catch (err) {
+    console.error('[ls-webhook] Unhandled exception in webhook handler:', err)
+    return NextResponse.json({ error: 'Bad request' }, { status: 400 })
+  }
 }

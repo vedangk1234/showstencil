@@ -1,7 +1,7 @@
 export default function Home() {
   return (
     <main>
-      <h1>Nixlytics — coming soon</h1>
+      <h1>ShowStencil — coming soon</h1>
     </main>
   );
 }

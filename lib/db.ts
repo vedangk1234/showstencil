@@ -1,6 +1,6 @@
 /**
  * lib/db.ts
- * All database operations for Nixlytics.
+ * All database operations for ShowStencil.
  * No component or API route should ever query Supabase directly — use these functions.
  *
  * All functions:

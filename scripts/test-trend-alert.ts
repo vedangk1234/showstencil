@@ -52,7 +52,7 @@ async function main() {
     console.log('Check your inbox. It should arrive within 30 seconds.')
     console.log('\nChecklist:')
     console.log('  □ Email arrived in inbox (subject: "Trend alert: I Quit My Job...")')
-    console.log('  □ Header: "Trend alert in your niche" + NIXLYTICS logo')
+    console.log('  □ Header: "Trend alert in your niche" + SHOWSTENCIL logo')
     console.log('  □ Red alert banner: "A video just hit 89.0K views in 31 hours"')
     console.log('  □ Video card shows channel, bold title, 2.1x performance')
     console.log('  □ Opportunity section with suggested angle')

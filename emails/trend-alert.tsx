@@ -1,6 +1,6 @@
 /**
  * emails/trend-alert.tsx
- * React Email component for Nixlytics viral trend alerts.
+ * React Email component for ShowStencil viral trend alerts.
  *
  * Design rules (same as weekly-digest.tsx):
  *  - Inline styles only — no CSS classes
@@ -77,7 +77,7 @@ export function TrendAlertEmail({
 
           {/* ── SECTION 1: Header ─────────────────────────────────────── */}
           <Section style={headerSectionStyle}>
-            <Text style={logoStyle}>NIXLYTICS</Text>
+            <Text style={logoStyle}>SHOWSTENCIL</Text>
             <Text style={headerTitleStyle}>Trend alert in your niche</Text>
             <Text style={headerSubStyle}>Something is moving fast. Act within 72 hours.</Text>
           </Section>
@@ -144,7 +144,7 @@ export function TrendAlertEmail({
             </Button>
 
             <Text style={footerBodyStyle}>
-              You are receiving this because you connected your YouTube channel to Nixlytics and have trend alerts enabled.
+              You are receiving this because you connected your YouTube channel to ShowStencil and have trend alerts enabled.
             </Text>
 
             <Link
@@ -154,7 +154,7 @@ export function TrendAlertEmail({
               Unsubscribe from alerts
             </Link>
 
-            <Text style={footerSmallStyle}>Nixlytics · Pune, India</Text>
+            <Text style={footerSmallStyle}>ShowStencil · Pune, India</Text>
           </Section>
 
         </Container>

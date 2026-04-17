@@ -6,7 +6,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
 
         <div className="text-center mb-10">
-          <h1 className="text-4xl font-bold text-white tracking-tight">Nixlytics</h1>
+          <h1 className="text-4xl font-bold text-white tracking-tight">ShowStencil</h1>
           <p className="mt-2 text-sm text-zinc-400">
             YouTube analytics for serious creators
           </p>

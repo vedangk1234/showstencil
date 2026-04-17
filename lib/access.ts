@@ -1,6 +1,6 @@
 /**
  * lib/access.ts
- * Plan gating for Nixlytics features.
+ * Plan gating for ShowStencil features.
  *
  * Usage:
  *   const allowed = await canAccess(userId, 'digest:weekly')

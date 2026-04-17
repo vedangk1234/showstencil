@@ -115,8 +115,9 @@ Respond with ONLY a JSON array — no markdown, no other text:
 
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 512,
+      max_tokens: 1024,
       temperature: 0.4,
+      system: 'You are a JSON-only API. Your entire response must be a single valid JSON array. Never include explanations, reasoning, markdown, or any text outside the JSON array.',
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -133,8 +134,20 @@ Respond with ONLY a JSON array — no markdown, no other text:
     try {
       parsed = JSON.parse(rawText);
     } catch {
-      console.error('[trend-detector] findUncoveredTopics: failed to parse Claude JSON:', rawText);
-      return [];
+      // Claude sometimes prepends explanation text before the JSON array.
+      // Try extracting just the [...] portion before giving up.
+      const match = rawText.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch {
+          console.error('[trend-detector] findUncoveredTopics: failed to parse Claude JSON (even after regex extraction). Raw response:', rawText);
+          return [];
+        }
+      } else {
+        console.error('[trend-detector] findUncoveredTopics: failed to parse Claude JSON. Raw response:', rawText);
+        return [];
+      }
     }
 
     if (!Array.isArray(parsed)) {

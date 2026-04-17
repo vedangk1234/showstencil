@@ -1,4 +1,4 @@
-# NIXLYTICS — Project Context for Claude Code
+# SHOWSTENCIL — Project Context for Claude Code
 
 > Read this entire file before writing a single line of code.
 > This file is the single source of truth for every decision in this project.
@@ -8,7 +8,7 @@
 
 ## What We Are Building
 
-Nixlytics is a YouTube analytics SaaS for US-based content creators (10K–500K subscribers).
+ShowStencil is a YouTube analytics SaaS for US-based content creators (10K–500K subscribers).
 It shows creators exactly why their competitors are growing faster than them — and tells them
 specifically what to do about it in plain English.
 
@@ -46,14 +46,14 @@ Pricing:
 |AI Digest|Anthropic Claude Sonnet 4.6 API|NOT Opus — cost control|
 |Hosting|Vercel|Auto-deploy from GitHub|
 |Monitoring|Sentry (errors) + UptimeRobot (uptime)|Free tiers|
-|Domain|nixlytics.com|Namecheap|
+|Domain|showstencil.com|Namecheap|
 
 \---
 
 ## Folder Structure
 
 ```
-nixlytics/
+showstencil/
 ├── app/
 │   ├── (auth)/
 │   │   ├── login/page.tsx
@@ -311,7 +311,7 @@ STRIPE\_PRO\_PRICE\_ID=               # $79/month product price ID
 
 # Resend (email)
 RESEND\_API\_KEY=
-RESEND\_FROM\_EMAIL=digest@nixlytics.com
+RESEND\_FROM\_EMAIL=digest@showstencil.com
 
 # Vercel cron secret (prevent external calls to cron endpoints)
 CRON\_SECRET=                        # generate with: openssl rand -base64 32
@@ -588,7 +588,7 @@ const planLimits = {
 
 * Added Resend email send inside the `subscription_payment_failed` handler, after marking the user `past_due`.
 * Uses `Resend` client imported directly (not via `lib/email.ts` — this is a transactional alert, not a digest).
-* from: `Nixlytics <onboarding@resend.dev>` / subject: `"Action required: Your Nixlytics payment failed"`.
+* from: `ShowStencil <onboarding@resend.dev>` / subject: `"Action required: Your ShowStencil payment failed"`.
 * HTML body: heading, 3-day grace period notice, "Update payment method" button linking to `https://app.lemonsqueezy.com/my-orders`. No unsubscribe footer — transactional emails are exempt.
 * Wrapped in `try/catch` — email failure logs an error but never crashes the webhook or changes the HTTP response.
 
@@ -664,7 +664,7 @@ ALTER TABLE users
 
 * `GET /api/unsubscribe?token=X` — no auth required.
 * Looks up `user_settings` row by `unsubscribe_token`. Missing/unknown token → returns styled HTML "Invalid or expired link" page. Valid token → sets `weekly_digest_enabled = false` AND `alerts_enabled = false`, returns styled HTML confirmation page.
-* HTML pages are inline strings (no React) — dark-themed, Nixlytics branded, settings page link for re-enabling.
+* HTML pages are inline strings (no React) — dark-themed, ShowStencil branded, settings page link for re-enabling.
 * Test confirmed: token `4ea1c066-f37e-4511-b1a7-ca0cfd789ec4` → Supabase updated both fields to `false` in one request.
 
 **app/api/settings/notifications/route.ts** — notification preferences API
@@ -748,7 +748,7 @@ ALTER TABLE users
 
 *vercel.json*
 * Updated from 1 cron (`/api/cron/daily`) to 3 dedicated crons with separate schedules.
-* CRON_SECRET updated to `nixlytics-cron-2026-secure-key-xK9mP3`.
+* CRON_SECRET updated to `showstencil-cron-2026-secure-key-xK9mP3`.
 * Post-deploy fix: trend-detection schedule changed from `0 0,6,12,18 * * *` to `0 6 * * *` — Vercel Hobby plan only allows crons that run once per day maximum.
 
 *Post-deploy fixes (same day)*
@@ -907,7 +907,7 @@ ALTER TABLE users
 * Next.js 14 project created and running on localhost:3000
 * Boilerplate cleaned: `page.tsx` reduced to placeholder, `globals.css` reduced to `@import "tailwindcss"`, default public SVGs removed
 * Full folder structure created per CLAUDE.md spec (all route groups, lib, components, types subdirectories)
-* `layout.tsx` metadata updated to Nixlytics branding
+* `layout.tsx` metadata updated to ShowStencil branding
 
 **Types**
 * `types/index.ts` — all 10 TypeScript interfaces: `User`, `ChannelSnapshot`, `Video`, `Competitor`, `CompetitorVideo`, `GapScore`, `Digest`, `Trend`, `UserSettings`, `VideoIdea`. Strict mode, no `any`.

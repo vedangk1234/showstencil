@@ -1,10 +1,10 @@
 /**
  * lib/email.ts
- * All email-sending functions for Nixlytics using the Resend SDK.
+ * All email-sending functions for ShowStencil using the Resend SDK.
  *
  * Requires:
  *  - RESEND_API_KEY in env
- *  - RESEND_FROM_EMAIL in env  (e.g. "digest@nixlytics.com")
+ *  - RESEND_FROM_EMAIL in env  (e.g. "digest@showstencil.com")
  *
  * Requires the `unsubscribe_token` column on the user_settings table.
  * Provision once in Supabase:
@@ -29,7 +29,7 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? 'https://nixlytics-u6k1.vercel.app'
 const FROM_EMAIL =
-  process.env.RESEND_FROM_EMAIL ?? 'digest@nixlytics-u6k1.vercel.app'
+  process.env.RESEND_FROM_EMAIL ?? 'digest@showstencil-u6k1.vercel.app'
 
 // ---------------------------------------------------------------------------
 // generateUnsubscribeToken
@@ -235,10 +235,10 @@ export async function sendWeeklyDigest(
     )
 
     // 10. Send via Resend
-    const subject = `Your Nixlytics digest — ${weekDate} · Gap score: ${digestData.overallGapScore} · ${videoIdeas.length} ideas ready`
+    const subject = `Your ShowStencil digest — ${weekDate} · Gap score: ${digestData.overallGapScore} · ${videoIdeas.length} ideas ready`
 
     const { data: sendData, error: sendError } = await resend.emails.send({
-      from: `Nixlytics <${FROM_EMAIL}>`,
+      from: `ShowStencil <${FROM_EMAIL}>`,
       to: user.email,
       subject,
       html: emailHtml,
@@ -354,7 +354,7 @@ export async function sendTrendAlert(
     const subject = `Trend alert: "${viralVideo.title}" just hit ${formatViewCount(viralVideo.viewCount)} views in your niche`
 
     const { data: sendData, error: sendError } = await resend.emails.send({
-      from: `Nixlytics Alerts <${FROM_EMAIL}>`,
+      from: `ShowStencil Alerts <${FROM_EMAIL}>`,
       to: user.email,
       subject,
       html: emailHtml,

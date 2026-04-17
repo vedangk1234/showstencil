@@ -1,6 +1,6 @@
 /**
  * emails/weekly-digest.tsx
- * React Email component for the Nixlytics weekly digest.
+ * React Email component for the ShowStencil weekly digest.
  *
  * Design rules:
  *  - Inline styles only — no CSS classes
@@ -112,7 +112,7 @@ export function WeeklyDigestEmail({
 
           {/* ── SECTION 1: Header ─────────────────────────────────────── */}
           <Section style={headerSectionStyle}>
-            <Text style={logoStyle}>NIXLYTICS</Text>
+            <Text style={logoStyle}>SHOWSTENCIL</Text>
             <Text style={headerTitleStyle}>Weekly digest for {channelName}</Text>
             <Text style={headerSubStyle}>Week of {weekDate}</Text>
             <Text
@@ -243,7 +243,7 @@ export function WeeklyDigestEmail({
             </Button>
 
             <Text style={footerBodyStyle}>
-              You are receiving this because you connected your YouTube channel to Nixlytics.
+              You are receiving this because you connected your YouTube channel to ShowStencil.
             </Text>
 
             <Link
@@ -253,7 +253,7 @@ export function WeeklyDigestEmail({
               Unsubscribe
             </Link>
 
-            <Text style={footerSmallStyle}>Nixlytics · Pune, India</Text>
+            <Text style={footerSmallStyle}>ShowStencil · Pune, India</Text>
           </Section>
 
         </Container>

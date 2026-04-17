@@ -1,7 +1,7 @@
 /**
  * GET /api/unsubscribe?token=X
  *
- * One-click unsubscribe from all Nixlytics emails.
+ * One-click unsubscribe from all ShowStencil emails.
  * Works without any login — the token in the URL is the only credential.
  *
  * Flow:
@@ -23,7 +23,7 @@ function htmlPage(title: string, heading: string, body: string): NextResponse {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${title} — Nixlytics</title>
+    <title>${title} — ShowStencil</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
@@ -74,7 +74,7 @@ function htmlPage(title: string, heading: string, body: string): NextResponse {
   </head>
   <body>
     <div class="card">
-      <div class="logo">Nixlytics</div>
+      <div class="logo">ShowStencil</div>
       <h1>${heading}</h1>
       ${body}
     </div>
@@ -111,7 +111,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return htmlPage(
       'Invalid link',
       'Invalid or expired link',
-      '<p>This unsubscribe link is no longer valid.</p><p>If you keep receiving emails, <a href="mailto:support@nixlytics.com">contact support</a>.</p>',
+      '<p>This unsubscribe link is no longer valid.</p><p>If you keep receiving emails, <a href="mailto:support@showstencil.com">contact support</a>.</p>',
     )
   }
 
@@ -130,7 +130,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return htmlPage(
       'Error',
       'Something went wrong',
-      '<p>We could not process your request. Please try again or <a href="mailto:support@nixlytics.com">contact support</a>.</p>',
+      '<p>We could not process your request. Please try again or <a href="mailto:support@showstencil.com">contact support</a>.</p>',
     )
   }
 
@@ -139,7 +139,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return htmlPage(
     'Unsubscribed',
     'You have been unsubscribed',
-    `<p>You have been unsubscribed from all Nixlytics emails.</p>
+    `<p>You have been unsubscribed from all ShowStencil emails.</p>
      <p>You can re-enable emails anytime from your <a href="${APP_URL}/settings/notifications">settings page</a>.</p>`,
   )
 }

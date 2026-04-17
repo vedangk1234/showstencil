@@ -64,7 +64,7 @@ const fakeDigest: DigestResult = {
 }
 
 async function main() {
-  console.log('--- Nixlytics email test ---')
+  console.log('--- ShowStencil email test ---')
   console.log('userId:', USER_ID)
   console.log('gap score:', fakeDigest.overallGapScore)
   console.log('ideas:', fakeDigest.videoIdeasParsed.length)
@@ -90,7 +90,7 @@ async function main() {
   } else {
     console.error('\nFAILED — check the error output above')
     console.log('\nCommon issues:')
-    console.log('  • Resend domain not verified → go to resend.com/domains and verify nixlytics.com')
+    console.log('  • Resend domain not verified → go to resend.com/domains and verify showstencil.com')
     console.log('    OR use onboarding@resend.dev as RESEND_FROM_EMAIL for sandbox testing')
     console.log('  • RESEND_API_KEY not set → check .env.local')
     console.log('  • user_settings missing unsubscribe_token column →')

@@ -38,7 +38,7 @@ export default async function DashboardLayout({
 
         {/* Logo */}
         <div className="px-6 py-5 border-b border-zinc-800">
-          <span className="text-lg font-bold text-white tracking-tight">Nixlytics</span>
+          <span className="text-lg font-bold text-white tracking-tight">ShowStencil</span>
         </div>
 
         {/* Nav */}

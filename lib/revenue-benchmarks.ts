@@ -215,7 +215,7 @@ export function calculateRevenuePotential(
     subscriberTier: tier,
     sponsorshipPotentialMonthly: Math.round(sponsorshipPotentialMonthly),
     totalPotentialMonthly: Math.round(totalPotentialMonthly),
-    dataSource: 'Nixlytics niche benchmark database v1',
+    dataSource: 'ShowStencil niche benchmark database v1',
   };
 }
 
