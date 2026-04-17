@@ -31,10 +31,10 @@ export default async function DashboardLayout({
       >
 
         {/* Logo */}
-        <div className="px-5 py-5 flex items-center gap-2.5" style={{ borderBottom: '1px solid #1f1f23' }}>
-          <AntLogo />
-          <span className="text-white font-mono text-base font-semibold tracking-tight">
-            ShowStencil
+        <div className="px-5 py-5 flex items-center" style={{ borderBottom: '1px solid #1f1f23' }}>
+          <span style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '17px' }}>
+            <span style={{ color: '#FFFFFF', fontWeight: 700 }}>Show</span>
+            <span style={{ color: '#B8B8B8', fontWeight: 700 }}>Stencil</span>
           </span>
         </div>
 
@@ -77,29 +77,5 @@ export default async function DashboardLayout({
       </main>
 
     </div>
-  )
-}
-
-function AntLogo() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      {/* Abdomen */}
-      <ellipse cx="12" cy="17.5" rx="3.5" ry="4.5" fill="white" />
-      {/* Thorax */}
-      <circle cx="12" cy="10.5" r="2.5" fill="white" />
-      {/* Head */}
-      <circle cx="12" cy="5" r="2.2" fill="white" />
-      {/* Antennae */}
-      <line x1="11" y1="3.2" x2="7.5" y2="1" stroke="white" strokeWidth="1.2" strokeLinecap="round" />
-      <line x1="13" y1="3.2" x2="16.5" y2="1" stroke="white" strokeWidth="1.2" strokeLinecap="round" />
-      {/* Left legs */}
-      <line x1="9.5" y1="9.5" x2="5.5" y2="7.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
-      <line x1="9.5" y1="10.5" x2="5" y2="10.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
-      <line x1="9.5" y1="11.5" x2="5.5" y2="13.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
-      {/* Right legs */}
-      <line x1="14.5" y1="9.5" x2="18.5" y2="7.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
-      <line x1="14.5" y1="10.5" x2="19" y2="10.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
-      <line x1="14.5" y1="11.5" x2="18.5" y2="13.5" stroke="white" strokeWidth="1" strokeLinecap="round" />
-    </svg>
   )
 }

@@ -80,13 +80,13 @@ function MetricCard({
 }) {
   return (
     <div
-      className="rounded-lg p-6 transition-colors duration-200 group"
-      style={{ background: '#111114', border: '1px solid #1f1f23' }}
+      className="rounded p-5 transition-colors duration-200"
+      style={{ background: '#111114', border: '1px solid #1e1e1e' }}
       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1f1f23' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
     >
-      <p className="text-xs uppercase tracking-wider mb-3" style={{ color: '#6b7280' }}>{title}</p>
-      <p className="text-3xl font-bold text-white font-mono mb-1">{value}</p>
+      <p className="text-xs uppercase tracking-widest mb-3" style={{ color: '#6b7280' }}>{title}</p>
+      <p className="text-2xl font-semibold text-white font-mono mb-1">{value}</p>
       <p className="text-xs" style={{ color: contextColor ?? '#6b7280' }}>{context}</p>
     </div>
   )
@@ -101,7 +101,7 @@ function ScoreBadge({ score }: { score: number }) {
                  '#22c55e'
   return (
     <span
-      className="text-6xl font-bold font-mono"
+      className="text-4xl font-semibold font-mono"
       style={{ color }}
     >
       {score}
@@ -208,7 +208,7 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
   const lastSynced = latest.created_at ? timeAgo(latest.created_at) : 'never'
 
   return (
-    <div className="space-y-8 max-w-6xl">
+    <div className="space-y-6 max-w-full">
 
       {/* Section 1 — Page header */}
       <div className="flex items-center justify-between">
@@ -218,11 +218,11 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
 
       {/* Section 2 — Channel hero */}
       <div
-        className="rounded-lg p-6 flex items-center justify-between"
-        style={{ background: '#111114', border: '1px solid #1f1f23' }}
+        className="rounded p-5 flex items-center justify-between"
+        style={{ background: '#111114', border: '1px solid #1e1e1e' }}
       >
         <div>
-          <h2 className="text-2xl font-bold text-white">
+          <h2 className="text-2xl font-semibold text-white">
             {user?.name ?? 'Your Channel'}
           </h2>
           <p className="mt-1 text-sm" style={{ color: '#9ca3af' }}>
@@ -231,22 +231,19 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
           <p className="mt-0.5 text-xs" style={{ color: '#6b7280' }}>{nicheLabel}</p>
         </div>
         <div className="text-right">
-          <p className="text-xs uppercase tracking-wider mb-1" style={{ color: '#6b7280' }}>
-            Intelligence Score
-          </p>
           {gapScore ? (
             <>
               <ScoreBadge score={gapScore.overall_score} />
-              <p className="text-xs mt-1" style={{ color: '#6b7280' }}>vs niche average</p>
+              <p className="text-xs mt-1" style={{ color: '#6b7280' }}>Gap Score · vs niche average</p>
             </>
           ) : (
-            <Skeleton className="h-16 w-20 ml-auto" />
+            <Skeleton className="h-12 w-16 ml-auto" />
           )}
         </div>
       </div>
 
       {/* Section 3 — 4 metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard
           title="Avg Views / Video"
           value={formatNumber(avgViews)}
@@ -290,10 +287,10 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
 
       {/* Section 4 — Score breakdown chart */}
       <div
-        className="rounded-lg p-6"
-        style={{ background: '#111114', border: '1px solid #1f1f23' }}
+        className="rounded p-5"
+        style={{ background: '#111114', border: '1px solid #1e1e1e' }}
       >
-        <h3 className="text-sm font-semibold text-white mb-1">Score Breakdown</h3>
+        <h3 className="text-sm font-medium text-white mb-1">Score Breakdown</h3>
         <p className="text-xs mb-5" style={{ color: '#6b7280' }}>
           Your performance score vs niche average (100 = fully at par)
         </p>
@@ -320,23 +317,23 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
 
       {/* Section 5 — Recent intelligence */}
       <div>
-        <h3 className="text-sm font-semibold text-white mb-4">Recent Intelligence</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <h3 className="text-sm font-medium text-white mb-4">Recent Intelligence</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Viral video card */}
           <div
-            className="rounded-lg p-5 transition-colors"
-            style={{ background: '#111114', border: '1px solid #1f1f23' }}
+            className="rounded p-5 flex flex-col transition-colors"
+            style={{ background: '#111114', border: '1px solid #1e1e1e' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1f1f23' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
           >
             <div className="flex items-center gap-2 mb-3">
-              <TrendingUpIcon />
-              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#f59e0b' }}>Viral in Niche</span>
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
+              <span className="text-xs font-medium text-white">Viral in Niche</span>
             </div>
             {latestTrend ? (
               <>
-                <p className="text-sm font-medium text-white leading-snug mb-1 line-clamp-2">
+                <p className="text-sm text-white leading-snug mb-1 overflow-hidden line-clamp-2">
                   {latestTrend.title ?? 'Untitled video'}
                 </p>
                 <p className="text-xs" style={{ color: '#6b7280' }}>
@@ -361,22 +358,22 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
 
           {/* Latest digest card */}
           <div
-            className="rounded-lg p-5 transition-colors"
-            style={{ background: '#111114', border: '1px solid #1f1f23' }}
+            className="rounded p-5 flex flex-col transition-colors"
+            style={{ background: '#111114', border: '1px solid #1e1e1e' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1f1f23' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
           >
             <div className="flex items-center gap-2 mb-3">
-              <FileTextIcon />
-              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#22c55e' }}>Weekly Digest</span>
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#22c55e' }} />
+              <span className="text-xs font-medium text-white">Weekly Digest</span>
             </div>
             {latestDigest ? (
               <>
-                <p className="text-sm font-medium text-white mb-1">
-                  Digest — {new Date(latestDigest.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                <p className="text-xs mb-2" style={{ color: '#6b7280' }}>
+                  {new Date(latestDigest.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 </p>
-                <p className="text-xs leading-relaxed line-clamp-3" style={{ color: '#6b7280' }}>
-                  {latestDigest.content.slice(0, 120)}...
+                <p className="text-sm leading-relaxed overflow-hidden line-clamp-2" style={{ color: '#9ca3af' }}>
+                  {latestDigest.content.slice(0, 160)}
                 </p>
                 <a
                   href="/digest"
@@ -391,20 +388,19 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
             )}
           </div>
 
-          {/* Upgrade nudge or bottleneck */}
+          {/* Bottleneck or upgrade nudge */}
           {gapScore?.primary_bottleneck ? (
             <div
-              className="rounded-lg p-5 transition-colors"
-              style={{ background: '#111114', border: '1px solid #1f1f23' }}
+              className="rounded p-5 flex flex-col transition-colors"
+              style={{ background: '#111114', border: '1px solid #1e1e1e' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(37,99,235,0.4)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1f1f23' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1e1e1e' }}
             >
               <div className="flex items-center gap-2 mb-3">
-                <ZapIcon />
-                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#2563eb' }}>Top Opportunity</span>
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#2563eb' }} />
+                <span className="text-xs font-medium text-white">Top Opportunity</span>
               </div>
-              <p className="text-sm text-white leading-snug mb-1">Primary bottleneck</p>
-              <p className="text-xs leading-relaxed" style={{ color: '#9ca3af' }}>
+              <p className="text-sm leading-relaxed overflow-hidden line-clamp-2" style={{ color: '#9ca3af' }}>
                 {gapScore.primary_bottleneck}
               </p>
               {revenueGap != null && revenueGap > 0 && (
@@ -415,18 +411,21 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
             </div>
           ) : (
             <div
-              className="rounded-lg p-5 flex flex-col justify-between"
-              style={{ background: '#111114', border: '1px solid #2563eb33' }}
+              className="rounded p-5 flex flex-col justify-between"
+              style={{ background: '#111114', border: '1px solid #1e1e2a' }}
             >
               <div>
-                <p className="text-sm font-semibold text-white mb-1">Unlock full intelligence</p>
-                <p className="text-xs leading-relaxed" style={{ color: '#6b7280' }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#2563eb' }} />
+                  <span className="text-xs font-medium text-white">Unlock Intelligence</span>
+                </div>
+                <p className="text-sm leading-relaxed" style={{ color: '#6b7280' }}>
                   Upgrade to Starter to get weekly digests, trend alerts, and 5 competitor slots.
                 </p>
               </div>
               <a
                 href="/pricing"
-                className="inline-block mt-4 px-4 py-2 rounded-lg text-xs font-medium text-white text-center transition-opacity hover:opacity-80"
+                className="inline-block mt-4 px-4 py-2 rounded text-xs font-medium text-white text-center transition-opacity hover:opacity-80"
                 style={{ background: '#2563eb' }}
               >
                 Upgrade to Starter →
@@ -441,32 +440,3 @@ export default function DashboardClient({ user, snapshots, gapScore, competitors
   )
 }
 
-// ─── Inline icons ─────────────────────────────────────────────────────────────
-
-function TrendingUpIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="#f59e0b" strokeWidth={2} aria-hidden="true">
-      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-      <polyline points="17 6 23 6 23 12" />
-    </svg>
-  )
-}
-
-function FileTextIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="#22c55e" strokeWidth={1.75} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-    </svg>
-  )
-}
-
-function ZapIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="#2563eb" strokeWidth={2} aria-hidden="true">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  )
-}
