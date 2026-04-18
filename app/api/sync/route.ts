@@ -66,14 +66,35 @@ export async function POST(request: Request) {
   console.log(`[sync] Starting full sync for user ${userId}`)
 
   // ── 3. Parallel analytics calls ────────────────────────────────────────────
-  const [overview, videoPerformance, demographics, trafficSources, dailyAnalytics] =
-    await Promise.all([
-      getChannelOverview(accessToken),
-      getVideoPerformance(accessToken, 20),
-      getAudienceDemographics(accessToken),
-      getTrafficSources(accessToken),
-      getDailyAnalytics(accessToken, 30),
-    ])
+  let overview: Awaited<ReturnType<typeof getChannelOverview>> = null
+  let videoPerformance: Awaited<ReturnType<typeof getVideoPerformance>> = []
+  let demographics: Awaited<ReturnType<typeof getAudienceDemographics>> = null
+  let trafficSources: Awaited<ReturnType<typeof getTrafficSources>> = []
+  let dailyAnalytics: Awaited<ReturnType<typeof getDailyAnalytics>> = []
+
+  try {
+    ;[overview, videoPerformance, demographics, trafficSources, dailyAnalytics] =
+      await Promise.all([
+        getChannelOverview(accessToken),
+        getVideoPerformance(accessToken, 20),
+        getAudienceDemographics(accessToken),
+        getTrafficSources(accessToken),
+        getDailyAnalytics(accessToken, 30),
+      ])
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[sync] YouTube Analytics error for user ${userId}:`, message)
+    if (message === 'TOKEN_EXPIRED') {
+      return NextResponse.json(
+        { error: 'YouTube token expired — please reconnect your account' },
+        { status: 401 },
+      )
+    }
+    return NextResponse.json(
+      { error: `YouTube API error: ${message}` },
+      { status: 502 },
+    )
+  }
 
   // Log what we got back (helps debug quota issues)
   console.log(`[sync] Analytics fetched — overview: ${!!overview}, videos: ${videoPerformance.length}, demographics: ${!!demographics}, traffic: ${trafficSources.length}, daily: ${dailyAnalytics.length} days`)
@@ -87,9 +108,13 @@ export async function POST(request: Request) {
   // ── 5. Fetch public video details + save video data ────────────────────────
   let videosSynced = 0
   if (videoPerformance.length > 0) {
-    const videoIds = videoPerformance.map((v) => v.videoId)
-    const videoDetails = await getVideoDetails(videoIds)
-    videosSynced = await saveVideoData(userId, videoPerformance, videoDetails)
+    try {
+      const videoIds = videoPerformance.map((v) => v.videoId)
+      const videoDetails = await getVideoDetails(videoIds)
+      videosSynced = await saveVideoData(userId, videoPerformance, videoDetails)
+    } catch (err) {
+      console.error(`[sync] Video save error for user ${userId}:`, err)
+    }
   }
 
   const elapsed = Date.now() - start

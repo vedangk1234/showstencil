@@ -26,7 +26,7 @@ import {
 } from '@react-email/components'
 import * as React from 'react'
 
-const APP_URL = 'https://nixlytics-u6k1.vercel.app'
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://nixlytics-u6k1.vercel.app'
 
 export interface WeeklyDigestEmailProps {
   channelName: string
