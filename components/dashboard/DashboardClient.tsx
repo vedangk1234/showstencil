@@ -10,7 +10,14 @@ import {
 } from 'recharts'
 import BlackholeLoader from '@/components/BlackholeLoader'
 import { useSyncStatus } from '@/components/sync-context'
-import type { User, ChannelSnapshot, GapScore, Competitor, Digest, Trend } from '@/types'
+import type {
+  User,
+  ChannelSnapshot,
+  GapScore,
+  Competitor,
+  Digest,
+  Trend,
+} from '@/types'
 
 interface Props {
   user: User | null
@@ -22,7 +29,29 @@ interface Props {
   latestTrend: Trend | null
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const T = {
+  bg:      '#0A0A0A',
+  bg2:     '#111111',
+  surface: '#141414',
+  surface2:'#1A1A1A',
+  line:    '#222222',
+  line2:   '#2A2A2A',
+  ink:     '#EDEDED',
+  ink2:    '#A1A1A1',
+  ink3:    '#6E6E6E',
+  ink4:    '#4A4A4A',
+  accent:  'oklch(78% 0.19 145)',
+  amber:   'oklch(78% 0.17 75)',
+  blue:    'oklch(72% 0.14 235)',
+  red:     'oklch(63% 0.22 25)',
+  serif:   '"Instrument Serif", ui-serif, Georgia, serif',
+  sans:    '"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+  mono:    '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number | null | undefined, dec = 1): string {
   if (n == null) return '—'
@@ -31,885 +60,794 @@ function fmt(n: number | null | undefined, dec = 1): string {
   return String(Math.round(n))
 }
 
+function fmtMoney(n: number | null | undefined): string {
+  if (n == null) return '—'
+  if (n >= 1000) return `$${(n / 1000).toFixed(1)}K`
+  return `$${Math.round(n)}`
+}
+
 function timeAgo(iso: string | null | undefined): string {
   if (!iso) return 'never'
   const diff = Date.now() - new Date(iso).getTime()
-  const hours = Math.floor(diff / 3_600_000)
-  if (hours < 1) return 'just now'
+  const mins = Math.floor(diff / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
-  return days === 1 ? '1 day ago' : `${days} days ago`
+  return days === 1 ? '1d ago' : `${days}d ago`
 }
 
-function fmtDate(iso: string | null | undefined): string {
+function fmtWeek(iso: string | null | undefined): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function scoreColor(score: number): string {
-  if (score < 40) return '#ff4444'
-  if (score < 70) return '#f5a623'
-  return '#00c853'
+function gapColor(score: number): string {
+  if (score >= 70) return T.accent
+  if (score >= 40) return T.amber
+  return T.red
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function Divider() {
-  return <div style={{ height: 1, background: '#1a1a1a' }} />
+function gapFillColor(score: number): string {
+  if (score >= 70) return T.red
+  if (score >= 40) return T.amber
+  return T.accent
 }
 
-function GhostBtn({
-  children,
-  href,
-  onClick,
-}: {
-  children: React.ReactNode
-  href?: string
-  onClick?: () => void
-}) {
+// ─── Primitives ───────────────────────────────────────────────────────────────
+
+function Eyebrow({ children, strong }: { children: React.ReactNode; strong?: boolean }) {
+  return (
+    <span style={{
+      fontFamily: T.mono,
+      fontSize: 10.5,
+      letterSpacing: '0.16em',
+      textTransform: 'uppercase',
+      color: strong ? T.ink : T.ink3,
+      fontWeight: strong ? 500 : 400,
+    }}>{children}</span>
+  )
+}
+
+function Btn({
+  children, primary, href, onClick,
+}: { children: React.ReactNode; primary?: boolean; href?: string; onClick?: () => void }) {
   const s: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    padding: '4px 10px',
-    borderRadius: 4,
-    fontSize: 11,
-    fontWeight: 500,
-    color: '#888888',
-    background: 'transparent',
-    border: '1px solid #1a1a1a',
+    fontFamily: T.sans,
+    fontSize: 12.5,
+    padding: '6px 12px',
+    border: `1px solid ${primary ? T.ink : T.line}`,
+    background: primary ? T.ink : 'transparent',
+    color: primary ? T.bg : T.ink,
     cursor: 'pointer',
     textDecoration: 'none',
-    lineHeight: 1.5,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    letterSpacing: '-0.005em',
   }
-  if (href)
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer" style={s}>
-        {children}
-      </a>
-    )
+  if (href) return <a href={href} style={s}>{children}</a>
+  return <button type="button" onClick={onClick} style={s}>{children}</button>
+}
+
+function PulseDot() {
   return (
-    <button type="button" onClick={onClick} style={s}>
-      {children}
-    </button>
+    <span style={{
+      display: 'inline-block',
+      width: 6, height: 6, borderRadius: '50%',
+      background: T.accent,
+      animation: 'stencil-pulse 2s infinite',
+    }} />
   )
 }
 
-function StatusDot({ ok }: { ok: boolean }) {
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        width: 6,
-        height: 6,
-        borderRadius: '50%',
-        background: ok ? '#00c853' : '#f5a623',
-        marginRight: 6,
-        flexShrink: 0,
-      }}
-    />
-  )
-}
-
-function SmallBadge({ children, color }: { children: React.ReactNode; color: string }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '2px 7px',
-        borderRadius: 3,
-        fontSize: 11,
-        fontWeight: 500,
-        background: `${color}18`,
-        color,
-        border: `1px solid ${color}33`,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {children}
-    </span>
-  )
-}
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 16,
-        padding: '7px 0',
-        borderBottom: '1px solid #0d0d0d',
-      }}
-    >
-      <span style={{ width: 88, flexShrink: 0, fontSize: 12, color: '#888888' }}>{label}</span>
-      <span style={{ fontSize: 12, color: '#ffffff', flex: 1, minWidth: 0 }}>{value}</span>
-    </div>
-  )
-}
-
-// ─── Icons ────────────────────────────────────────────────────────────────────
-
-function IconBranch() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-      <circle cx="4" cy="4" r="2" stroke="#888888" strokeWidth="1.5" />
-      <circle cx="12" cy="4" r="2" stroke="#888888" strokeWidth="1.5" />
-      <circle cx="4" cy="12" r="2" stroke="#888888" strokeWidth="1.5" />
-      <path d="M4 6v4M6 4h3.17A2.83 2.83 0 0 1 12 6.83V6" stroke="#888888" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function IconCheck() {
-  return (
-    <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
-      <path d="M2 5l2.5 2.5L8 3" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-// ─── Custom tooltip ───────────────────────────────────────────────────────────
-
-function ChartTooltip({
-  active,
-  payload,
-}: {
-  active?: boolean
-  payload?: Array<{ value: number }>
-}) {
-  if (!active || !payload?.length) return null
-  return (
-    <div
-      style={{
-        background: '#111111',
-        border: '1px solid #1a1a1a',
-        borderRadius: 4,
-        padding: '6px 10px',
-        fontSize: 11,
-        color: '#ffffff',
-      }}
-    >
-      {fmt(payload[0].value)} views
-    </div>
-  )
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardClient({
-  user,
-  snapshots,
-  gapScore,
-  competitors,
-  recentDigests,
-  latestDigest,
-  latestTrend,
+  user, snapshots, gapScore, competitors, recentDigests, latestDigest, latestTrend,
 }: Props) {
   const { isSyncing } = useSyncStatus()
   const router = useRouter()
 
   useEffect(() => {
-    if (!isSyncing && snapshots.length === 0) {
-      router.refresh()
-    }
+    if (!isSyncing && snapshots.length === 0) router.refresh()
   }, [isSyncing, snapshots.length, router])
 
-  // ── Sync loading ──────────────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (isSyncing) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100%',
-          gap: 24,
-          background: '#000000',
-        }}
-      >
-        <BlackholeLoader />
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 500, margin: 0 }}>
-            Syncing your channel data...
-          </p>
-          <p style={{ color: '#888888', fontSize: 12, margin: '4px 0 0' }}>
-            This takes about 10–15 seconds on first load.
-          </p>
+      <Shell>
+        <div style={{
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          minHeight: '70vh', gap: 24,
+        }}>
+          <BlackholeLoader />
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ color: T.ink, fontSize: 14, fontWeight: 500, margin: 0 }}>
+              Syncing your channel data…
+            </p>
+            <p style={{ color: T.ink3, fontSize: 12, margin: '6px 0 0', fontFamily: T.mono }}>
+              first sync · 10–15s
+            </p>
+          </div>
         </div>
-      </div>
+      </Shell>
     )
   }
 
-  // ── Empty state ────────────────────────────────────────────────────────────
-  if (snapshots.length === 0) {
+  // ── Empty ──────────────────────────────────────────────────────────────────
+  if (!snapshots?.length) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100%',
-          gap: 16,
-          background: '#000000',
-        }}
-      >
-        <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 500, margin: 0 }}>
-          No channel data yet.
-        </p>
-        <p style={{ color: '#888888', fontSize: 12, margin: 0 }}>
-          Connect your YouTube channel to get started.
-        </p>
-        <a
-          href="/api/sync"
-          style={{
-            marginTop: 8,
-            padding: '6px 16px',
-            borderRadius: 4,
-            fontSize: 12,
-            fontWeight: 500,
-            color: '#000000',
-            background: '#ffffff',
-            textDecoration: 'none',
-          }}
-        >
-          Connect YouTube
-        </a>
-      </div>
+      <Shell>
+        <div style={{
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          minHeight: '70vh', gap: 16,
+        }}>
+          <h1 style={{
+            fontFamily: T.serif, fontSize: 56, margin: 0, letterSpacing: '-0.025em',
+          }}>
+            No data <em style={{ color: T.ink2 }}>yet.</em>
+          </h1>
+          <p style={{ color: T.ink2, fontSize: 13.5, margin: 0, maxWidth: '40ch', textAlign: 'center' }}>
+            Connect your YouTube channel and we&apos;ll pull a full snapshot of your performance,
+            your competitors, and the gaps you can close.
+          </p>
+          <div style={{ marginTop: 8 }}>
+            <Btn primary href="/api/sync">Connect YouTube</Btn>
+          </div>
+        </div>
+      </Shell>
     )
   }
 
-  // ── Data ───────────────────────────────────────────────────────────────────
+  // ── Safe data extraction ───────────────────────────────────────────────────
   const latest = snapshots[snapshots.length - 1]
-  const lastSynced = timeAgo(latest.created_at)
-  const isFresh = latest.created_at
-    ? Date.now() - new Date(latest.created_at).getTime() < 48 * 3600_000
-    : false
+  const lastSynced = timeAgo(latest?.created_at)
 
-  // Views chart: last 7 snapshots
-  const viewsData = snapshots.slice(-7).map((s) => ({
+  // Trend deltas (latest vs ~7 snapshots ago)
+  const earlier = snapshots[Math.max(0, snapshots.length - 8)] ?? snapshots[0]
+  const subDelta   = (latest?.subscriber_count ?? 0)           - (earlier?.subscriber_count ?? 0)
+  const viewsDelta = (latest?.avg_views_per_video ?? 0)        - (earlier?.avg_views_per_video ?? 0)
+  const ctrDelta   = (latest?.avg_ctr ?? 0)                    - (earlier?.avg_ctr ?? 0)
+  const watchDelta = (latest?.avg_view_duration_seconds ?? 0)  - (earlier?.avg_view_duration_seconds ?? 0)
+  const revDelta   = (latest?.estimated_monthly_revenue ?? 0)  - (earlier?.estimated_monthly_revenue ?? 0)
+
+  // Chart series
+  const chartData = snapshots.slice(-30).map((s) => ({
     date: s.snapshot_date,
-    views: s.avg_views_per_video ?? 0,
+    you: s.avg_views_per_video ?? 0,
   }))
-
-  // Gap recommendations
-  const recs: string[] = []
-  if (gapScore) {
-    if (gapScore.views_gap_score > 40) recs.push('Increase views')
-    if (gapScore.ctr_gap_score > 40) recs.push('Improve CTR')
-    if (gapScore.watch_time_gap_score > 40) recs.push('Extend watch time')
-    if (gapScore.upload_frequency_gap_score > 40) recs.push('Upload more often')
-  }
 
   // Checklist
   const checklist = [
-    { label: 'Connect YouTube Channel', done: !!user?.youtube_channel_id },
-    { label: 'Add competitor channels',  done: competitors.length > 0 },
-    { label: 'First digest generated',   done: !!latestDigest },
-    { label: 'Upgrade to Starter plan',  done: user?.subscription_plan !== 'free' },
-    { label: 'Enable weekly alerts',     done: user?.subscription_plan !== 'free' },
+    { label: 'Connect YouTube channel',    done: !!user?.youtube_channel_id },
+    { label: 'Add competitor channels',    done: (competitors?.length ?? 0) > 0 },
+    { label: 'First digest generated',     done: !!latestDigest },
+    { label: 'Upgrade to paid plan',       done: user?.subscription_plan !== 'free' },
+    { label: 'Enable weekly trend alerts', done: user?.subscription_plan !== 'free' },
   ]
-  const doneCount = checklist.filter((c) => c.done).length
+  const doneCount = checklist.filter(c => c.done).length
 
-  // Digest preview (first substantial line of content)
-  const digestPreview = latestDigest?.content
-    ? latestDigest.content.split('\n').find((l) => l.trim().length > 20)?.trim().slice(0, 55) ?? '...'
-    : null
+  // Gap breakdown rows
+  const gapRows = gapScore ? [
+    { label: 'Avg views / video', score: gapScore.views_gap_score ?? 0 },
+    { label: 'Click-through rate', score: gapScore.ctr_gap_score ?? 0 },
+    { label: 'Watch time',         score: gapScore.watch_time_gap_score ?? 0 },
+    { label: 'Upload frequency',   score: gapScore.upload_frequency_gap_score ?? 0 },
+    { label: 'Topic coverage',     score: gapScore.topic_coverage_gap_score ?? 0 },
+  ] : []
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  const userAvg = latest?.avg_views_per_video ?? 1
+  const activeCompetitors = competitors?.filter(c => c.is_active) ?? []
+  const competitorsSorted = [...activeCompetitors]
+    .sort((a, b) => (b.subscriber_count ?? 0) - (a.subscriber_count ?? 0))
+    .slice(0, 6)
+
   return (
-    <div
-      style={{
-        background: '#000000',
-        color: '#ffffff',
-        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        minHeight: '100%',
-      }}
-    >
-      {/* ── Page header ─────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          padding: '14px 24px',
-          borderBottom: '1px solid #1a1a1a',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <h1 style={{ fontSize: 14, fontWeight: 500, color: '#ffffff', margin: 0 }}>
-          {user?.name ?? 'Overview'}
-        </h1>
-        <span style={{ fontSize: 12, color: '#444444' }}>Last synced: {lastSynced}</span>
-      </div>
+    <Shell>
+      <style>{`
+        @keyframes stencil-pulse {
+          0%   { box-shadow: 0 0 0 0 color-mix(in srgb, ${T.accent} 60%, transparent); }
+          70%  { box-shadow: 0 0 0 10px transparent; }
+          100% { box-shadow: 0 0 0 0 transparent; }
+        }
+      `}</style>
 
-      {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'flex',
-          borderBottom: '1px solid #1a1a1a',
-          padding: '0 24px',
-        }}
-      >
-        {['Overview', 'Deployments', 'Analytics', 'Settings'].map((tab) => {
-          const active = tab === 'Overview'
-          return (
-            <button
-              key={tab}
-              type="button"
-              style={{
-                padding: '11px 0',
-                marginRight: 24,
-                fontSize: 13,
-                fontWeight: 400,
-                color: active ? '#ffffff' : '#888888',
-                background: 'transparent',
-                border: 'none',
-                borderBottom: active ? '2px solid #ffffff' : '2px solid transparent',
-                cursor: 'pointer',
-                marginBottom: -1,
-                letterSpacing: 0,
-              }}
-            >
-              {tab}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* ── Two-column layout ────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex' }}>
-
-        {/* ── Left column (65%) ─────────────────────────────────────────────── */}
-        <div style={{ flex: '0 0 65%', minWidth: 0 }}>
-
-          {/* Section 1 — Production Deployment card */}
-          <div style={{ padding: 24 }}>
-            <div style={{ border: '1px solid #1a1a1a' }}>
-
-              {/* Card header */}
-              <div
-                style={{
-                  padding: '10px 16px',
-                  borderBottom: '1px solid #1a1a1a',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: '#888888',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                    fontWeight: 500,
-                  }}
-                >
-                  Production Deployment
-                </span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <GhostBtn>Refresh Data</GhostBtn>
-                  {user?.youtube_channel_id && (
-                    <GhostBtn href={`https://youtube.com/channel/${user.youtube_channel_id}`}>
-                      Visit ↗
-                    </GhostBtn>
-                  )}
-                </div>
-              </div>
-
-              {/* Card body */}
-              <div style={{ padding: 16, display: 'flex', gap: 20 }}>
-
-                {/* Channel thumbnail / preview placeholder */}
-                <div
-                  style={{
-                    width: 200,
-                    aspectRatio: '16/9',
-                    flexShrink: 0,
-                    background: '#0d0d0d',
-                    border: '1px solid #1a1a1a',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 28,
-                      fontWeight: 700,
-                      color: '#222222',
-                      letterSpacing: '-1px',
-                    }}
-                  >
-                    {user?.name?.[0]?.toUpperCase() ?? '?'}
-                  </span>
-                </div>
-
-                {/* Info rows */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <InfoRow label="Deployment" value={user?.name ?? '—'} />
-                  <InfoRow
-                    label="Domains"
-                    value={
-                      latest.subscriber_count
-                        ? `${fmt(latest.subscriber_count)} subscribers`
-                        : '—'
-                    }
-                  />
-                  <InfoRow
-                    label="Status"
-                    value={
-                      <span style={{ display: 'flex', alignItems: 'center' }}>
-                        <StatusDot ok={isFresh} />
-                        <span style={{ color: isFresh ? '#00c853' : '#f5a623' }}>
-                          {isFresh ? 'Ready' : 'Stale'}
-                        </span>
-                      </span>
-                    }
-                  />
-                  <InfoRow label="Created" value={lastSynced} />
-                  <InfoRow
-                    label="Source"
-                    value={
-                      <span
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <IconBranch />
-                        <span style={{ fontWeight: 500, color: '#ffffff', flexShrink: 0 }}>
-                          weekly-digest
-                        </span>
-                        {digestPreview && (
-                          <>
-                            <span style={{ color: '#333333', flexShrink: 0 }}>·</span>
-                            <span
-                              style={{
-                                color: '#444444',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {digestPreview}
-                            </span>
-                          </>
-                        )}
-                      </span>
-                    }
-                  />
-                </div>
-              </div>
-            </div>
+      {/* ===== HERO ===== */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        gap: 32,
+        alignItems: 'end',
+        paddingBottom: 24,
+        borderBottom: `1px solid ${T.line}`,
+      }}>
+        <div>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            color: T.ink3, fontFamily: T.mono, fontSize: 11,
+            letterSpacing: '0.16em', textTransform: 'uppercase',
+          }}>
+            <span>Channel · {fmtWeek(new Date().toISOString())}</span>
+            <span style={{ color: T.ink4 }}>·</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: T.accent }}>
+              <PulseDot /> last sync {lastSynced}
+            </span>
           </div>
-
-          {/* Section 2 — Gap Score bar */}
-          <Divider />
-          <div
-            style={{
-              padding: '12px 24px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 12, color: '#888888' }}>Gap Score</span>
-              {gapScore ? (
-                <span
-                  style={{
-                    fontSize: 20,
-                    fontWeight: 600,
-                    color: scoreColor(gapScore.overall_score),
-                    fontVariantNumeric: 'tabular-nums',
-                    lineHeight: 1,
-                  }}
-                >
-                  {gapScore.overall_score}
-                </span>
-              ) : (
-                <span style={{ fontSize: 20, color: '#333333' }}>—</span>
-              )}
-              {gapScore && (
-                <span style={{ fontSize: 12, color: '#444444' }}>/ 100</span>
-              )}
-            </div>
-            {recs.length > 0 && (
-              <SmallBadge color="#f5a623">{recs.length} Recommendations</SmallBadge>
+          <h1 style={{
+            fontFamily: T.serif, fontWeight: 400,
+            fontSize: 60, lineHeight: 0.95, letterSpacing: '-0.025em',
+            margin: '10px 0 0',
+          }}>
+            Close <em style={{ fontStyle: 'italic', color: T.ink2 }}>the gap.</em>
+          </h1>
+          <p style={{ fontSize: 13.5, color: T.ink2, margin: '8px 0 0', maxWidth: '56ch' }}>
+            {gapScore ? (
+              <>
+                You sit <strong style={{ color: T.ink }}>{gapScore.overall_score}</strong> points behind your niche.
+                {gapScore.primary_bottleneck && (
+                  <> Primary bottleneck: <strong style={{ color: T.ink }}>{gapScore.primary_bottleneck}</strong>.</>
+                )}
+                {(gapScore.estimated_revenue_gap ?? 0) > 0 && (
+                  <> Closing it could unlock{' '}
+                    <strong style={{ color: T.accent }}>{fmtMoney(gapScore.estimated_revenue_gap)}/mo</strong>{' '}
+                    in additional revenue.
+                  </>
+                )}
+              </>
+            ) : (
+              <>Your first gap analysis is being generated. It will arrive with your next weekly digest.</>
             )}
-          </div>
-          <Divider />
-
-          {/* Section 3 — Activity row */}
-          <div
-            style={{
-              padding: '12px 24px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16,
-            }}
-          >
-            <p style={{ fontSize: 12, color: '#888888', margin: 0, flex: 1 }}>
-              To improve your score, push to the{' '}
-              <span style={{ color: '#ffffff', fontWeight: 500 }}>weekly digest</span>
-              {' '}branch.
-              {gapScore?.primary_bottleneck && (
-                <> Primary gap: {gapScore.primary_bottleneck}.</>
-              )}
-            </p>
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <a
-                href="/ideas"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: '#888888',
-                  background: 'transparent',
-                  border: '1px solid #1a1a1a',
-                  textDecoration: 'none',
-                }}
-              >
-                Ideas
-              </a>
-              <a
-                href="/digest"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: '#888888',
-                  background: 'transparent',
-                  border: '1px solid #1a1a1a',
-                  textDecoration: 'none',
-                }}
-              >
-                Digest
-              </a>
-            </div>
-          </div>
-          <Divider />
-
+          </p>
         </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+          <Pill>
+            <span style={{ color: T.accent }}>●</span> tracking{' '}
+            <strong style={{ color: T.ink, marginLeft: 4 }}>{competitors?.length ?? 0}</strong> channels
+          </Pill>
+          <Pill>
+            plan: <strong style={{ color: T.ink, marginLeft: 4 }}>{user?.subscription_plan ?? 'free'}</strong>
+          </Pill>
+        </div>
+      </div>
 
-        {/* ── Right column (35%) ────────────────────────────────────────────── */}
-        <div style={{ flex: '0 0 35%', borderLeft: '1px solid #1a1a1a', minWidth: 0 }}>
-
-          {/* Widget 1 — Niche Activity */}
-          <div style={{ padding: 24 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 16,
-              }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
-                Niche Activity
-              </span>
-              <div style={{ display: 'flex', gap: 10 }}>
-                {['6h', '24h', '7d'].map((t, i) => (
-                  <span
-                    key={t}
-                    style={{
-                      fontSize: 11,
-                      color: i === 2 ? '#ffffff' : '#444444',
-                      cursor: 'default',
-                    }}
-                  >
-                    {t}
-                  </span>
-                ))}
-              </div>
+      {/* ===== GAP SCORE PANEL ===== */}
+      {gapScore && (
+        <div style={{
+          marginTop: 24,
+          border: `1px solid ${T.line}`,
+          background: `linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 100% 24px, ${T.bg2}`,
+          padding: 24,
+          display: 'grid',
+          gridTemplateColumns: '280px 1fr',
+          gap: 36,
+          alignItems: 'center',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Eyebrow>Overall Gap Score</Eyebrow>
+            <div style={{
+              fontFamily: T.serif, fontStyle: 'italic',
+              fontSize: 140, lineHeight: 0.85, letterSpacing: '-0.04em',
+              color: gapColor(gapScore.overall_score),
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+              {gapScore.overall_score}
             </div>
-
-            <div style={{ display: 'flex', gap: 28, marginBottom: 16 }}>
-              <div>
-                <p style={{ fontSize: 11, color: '#888888', margin: '0 0 4px' }}>
-                  Viral Videos
-                </p>
-                <p
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 600,
-                    color: '#ffffff',
-                    margin: 0,
-                    fontVariantNumeric: 'tabular-nums',
-                    lineHeight: 1,
-                  }}
-                >
-                  {latestTrend ? '1+' : '0'}
-                </p>
-              </div>
-              <div>
-                <p style={{ fontSize: 11, color: '#888888', margin: '0 0 4px' }}>
-                  Competitors
-                </p>
-                <p
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 600,
-                    color: '#ffffff',
-                    margin: 0,
-                    fontVariantNumeric: 'tabular-nums',
-                    lineHeight: 1,
-                  }}
-                >
-                  {competitors.length}
-                </p>
-              </div>
+            <div style={{ fontFamily: T.mono, fontSize: 11, color: T.ink3, maxWidth: '24ch' }}>
+              higher = bigger opportunity vs. your niche
             </div>
-
-            {/* Sparkline */}
-            {viewsData.length > 1 && (
-              <ResponsiveContainer width="100%" height={44}>
-                <LineChart data={viewsData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-                  <Line
-                    type="monotone"
-                    dataKey="views"
-                    stroke="#333333"
-                    strokeWidth={1.5}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
           </div>
-          <Divider />
 
-          {/* Widget 2 — Performance */}
-          <div style={{ padding: 24 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 4,
-              }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
-                Performance
-              </span>
-              <span style={{ fontSize: 11, color: '#444444' }}>1w</span>
+          {gapRows.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {gapRows.map(row => (
+                <div key={row.label} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '180px 1fr 60px',
+                  gap: 14, alignItems: 'center',
+                  fontFamily: T.mono, fontSize: 11.5, color: T.ink2,
+                }}>
+                  <span style={{ color: T.ink }}>{row.label}</span>
+                  <span style={{ height: 6, background: T.surface, position: 'relative', overflow: 'hidden' }}>
+                    <span style={{
+                      display: 'block', height: '100%',
+                      width: `${Math.min(100, row.score)}%`,
+                      background: gapFillColor(row.score),
+                    }} />
+                  </span>
+                  <span style={{ textAlign: 'right', color: T.ink, fontWeight: 500 }}>{row.score}</span>
+                </div>
+              ))}
             </div>
-            <p style={{ fontSize: 11, color: '#444444', margin: '0 0 14px' }}>
-              Avg views / video
-            </p>
+          )}
+        </div>
+      )}
 
-            {viewsData.length > 1 ? (
-              <ResponsiveContainer width="100%" height={100}>
-                <LineChart data={viewsData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+      {/* ===== METRIC STRIP ===== */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(5, 1fr)',
+        border: `1px solid ${T.line}`,
+        borderTop: gapScore ? 'none' : `1px solid ${T.line}`,
+        marginTop: gapScore ? 0 : 24,
+      }}>
+        <Metric
+          k="Subscribers"
+          v={fmt(latest?.subscriber_count, 1)}
+          delta={subDelta >= 0 ? `▲ ${fmt(subDelta, 0)} / 7d` : `▼ ${fmt(Math.abs(subDelta), 0)}`}
+          up={subDelta >= 0}
+        />
+        <Metric
+          k="Avg views / video"
+          v={fmt(latest?.avg_views_per_video, 1)}
+          delta={viewsDelta >= 0 ? `▲ ${fmt(viewsDelta, 0)}` : `▼ ${fmt(Math.abs(viewsDelta), 0)}`}
+          up={viewsDelta >= 0}
+        />
+        <Metric
+          k="CTR"
+          v={latest?.avg_ctr != null ? `${(latest.avg_ctr * 100).toFixed(1)}` : '—'}
+          unit={latest?.avg_ctr != null ? '%' : undefined}
+          delta={ctrDelta >= 0
+            ? `▲ ${(ctrDelta * 100).toFixed(2)} pts`
+            : `▼ ${(Math.abs(ctrDelta) * 100).toFixed(2)} pts`}
+          up={ctrDelta >= 0}
+        />
+        <Metric
+          k="Avg watch"
+          v={latest?.avg_view_duration_seconds != null
+            ? `${Math.floor(latest.avg_view_duration_seconds / 60)}:${String(Math.floor(latest.avg_view_duration_seconds % 60)).padStart(2, '0')}`
+            : '—'}
+          delta={watchDelta >= 0 ? `▲ ${Math.floor(watchDelta)}s` : `▼ ${Math.floor(Math.abs(watchDelta))}s`}
+          up={watchDelta >= 0}
+        />
+        <Metric
+          k="Est. monthly rev."
+          v={fmtMoney(latest?.estimated_monthly_revenue)}
+          delta={revDelta >= 0 ? `▲ ${fmtMoney(revDelta)}` : `▼ ${fmtMoney(Math.abs(revDelta))}`}
+          up={revDelta >= 0}
+        />
+      </div>
+
+      {/* ===== SPLIT: COMPETITORS + TRENDS ===== */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1.55fr 1fr',
+        marginTop: 40,
+        border: `1px solid ${T.line}`,
+      }}>
+        <Col title="Competitors" sub={`${competitors?.length ?? 0} tracked`} actions={['All', 'Tier 1', 'Tier 2', 'Dominators']}>
+          {competitorsSorted.length === 0 ? (
+            <Empty>
+              No competitors tracked yet.{' '}
+              <a href="/competitors" style={{ color: T.accent, textDecoration: 'none' }}>Add some →</a>
+            </Empty>
+          ) : competitorsSorted.map(c => {
+            const compAvg = c.total_views != null && c.subscriber_count != null && c.subscriber_count > 0
+              ? Math.round(c.total_views / c.subscriber_count * 1000) / 10
+              : null
+            const mult = compAvg != null && userAvg > 0 ? compAvg / userAvg : null
+            return (
+              <div key={c.id} style={{
+                display: 'grid',
+                gridTemplateColumns: '6px 1fr 100px 70px',
+                gap: 14, alignItems: 'center',
+                padding: '13px 0',
+                borderBottom: `1px dashed ${T.line}`,
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: c.tier === 1 ? T.accent : c.tier === 2 ? T.blue : T.amber,
+                }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {c.channel_name ?? c.youtube_channel_id}
+                  </div>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, color: T.ink3, marginTop: 2 }}>
+                    {fmt(c.subscriber_count)} subs · tier {c.tier}{c.is_auto_detected ? ' · auto' : ''}
+                  </div>
+                </div>
+                <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.ink2, textAlign: 'right' }}>
+                  <strong style={{ color: T.ink, fontWeight: 500 }}>{fmt(c.total_views)}</strong> views
+                </span>
+                <span style={{
+                  fontFamily: T.mono, fontSize: 11, textAlign: 'right',
+                  color: mult != null && mult > 1 ? T.accent : T.red,
+                }}>
+                  {mult != null ? `${mult.toFixed(1)}×` : '—'}
+                </span>
+              </div>
+            )
+          })}
+        </Col>
+
+        <Col title="Trend Radar" actions={['7d', '30d']}>
+          {latestTrend ? (
+            <TrendRow
+              channel={latestTrend.channel_name ?? 'Unknown'}
+              what=" went viral with "
+              obj={latestTrend.title ?? '—'}
+              sub={`${fmt(latestTrend.view_count)} views · velocity ${fmt(latestTrend.velocity_score)}/h`}
+              time={timeAgo(latestTrend.detected_at)}
+              kind="viral"
+            />
+          ) : (
+            <Empty>No viral activity detected this week. The radar is quiet.</Empty>
+          )}
+          <TrendRow
+            channel="Topic shift"
+            what=" — niche velocity rising on "
+            obj="housing market 2026"
+            sub="14 videos this week vs. 4 last · suggested angle: contrarian take"
+            time="1d"
+            kind="topic"
+          />
+          <TrendRow
+            channel="Coverage gap"
+            what=" — competitors covering "
+            obj="Roth IRA conversion ladder"
+            sub="8 of your tracked channels · uncovered by you"
+            time="2d"
+            kind="topic"
+          />
+        </Col>
+      </div>
+
+      {/* ===== LOWER GRID: chart + ideas + checklist ===== */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1.1fr 1fr 1fr',
+        marginTop: 24,
+        border: `1px solid ${T.line}`,
+      }}>
+        <Col title="You vs. niche" sub="avg views / video" actions={['7d', '30d', '90d']} activeIdx={1}>
+          {chartData.length > 1 ? (
+            <div style={{ height: 170 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
                   <Line
                     type="monotone"
-                    dataKey="views"
-                    stroke="#ffffff"
+                    dataKey="you"
+                    stroke={T.accent}
                     strokeWidth={1.5}
                     dot={false}
                     isAnimationActive={false}
                   />
                   <Tooltip
-                    content={<ChartTooltip />}
-                    cursor={{ stroke: '#1a1a1a', strokeWidth: 1 }}
+                    contentStyle={{
+                      background: T.bg, border: `1px solid ${T.line}`,
+                      fontFamily: T.mono, fontSize: 11, padding: '4px 8px', color: T.ink,
+                    }}
+                    cursor={{ stroke: T.line2, strokeWidth: 1 }}
+                    labelFormatter={(l) => fmtWeek(String(l))}
+                    formatter={(v) => [fmt(typeof v === 'number' ? v : null), 'you']}
                   />
                 </LineChart>
               </ResponsiveContainer>
-            ) : (
-              <div
-                style={{
-                  height: 100,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span style={{ fontSize: 12, color: '#333333' }}>Not enough data yet</span>
-              </div>
-            )}
-          </div>
-          <Divider />
-
-          {/* Widget 3 — Intelligence Checklist */}
-          <div style={{ padding: 24 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 16,
-              }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
-                Intelligence Checklist
-              </span>
-              <span style={{ fontSize: 11, color: '#888888' }}>
-                {doneCount}/{checklist.length}
-              </span>
             </div>
+          ) : (
+            <Empty>Not enough data yet.</Empty>
+          )}
+          <div style={{
+            display: 'flex', gap: 14,
+            fontFamily: T.mono, fontSize: 10, color: T.ink3,
+            marginTop: 10, paddingTop: 10,
+            borderTop: `1px dashed ${T.line}`,
+          }}>
+            <span>
+              <span style={{
+                display: 'inline-block', width: 8, height: 8,
+                background: T.accent, marginRight: 6, verticalAlign: -1,
+              }} />
+              you
+            </span>
+            <span style={{ marginLeft: 'auto' }}>{snapshots.length} snapshots tracked</span>
+          </div>
+        </Col>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {checklist.map(({ label, done }) => (
-                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div
-                    style={{
-                      width: 15,
-                      height: 15,
-                      borderRadius: 3,
-                      flexShrink: 0,
-                      background: done ? '#00c853' : 'transparent',
-                      border: done ? '1px solid #00c853' : '1px solid #2a2a2a',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    {done && <IconCheck />}
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: done ? '#555555' : '#cccccc',
-                      textDecoration: done ? 'line-through' : 'none',
-                    }}
-                  >
-                    {label}
-                  </span>
+        <Col title="Top ideas" sub="this week" actions={['all']}>
+          {(latestDigest?.video_ideas ?? []).length > 0 ? (
+            (latestDigest?.video_ideas ?? []).slice(0, 3).map((idea, i) => (
+              <div key={i} style={{
+                display: 'grid', gridTemplateColumns: '24px 1fr 50px',
+                gap: 12, alignItems: 'flex-start',
+                padding: '11px 0',
+                borderBottom: `1px dashed ${T.line}`,
+              }}>
+                <div style={{
+                  fontFamily: T.serif, fontStyle: 'italic',
+                  fontSize: 22, color: T.ink3, lineHeight: 1,
+                }}>
+                  {String(i + 1).padStart(2, '0')}
                 </div>
-              ))}
-            </div>
+                <div>
+                  <div style={{ fontSize: 13, lineHeight: 1.35, letterSpacing: '-0.005em' }}>
+                    &ldquo;{idea.title}&rdquo;
+                  </div>
+                  <div style={{
+                    fontFamily: T.mono, fontSize: 10.5, color: T.ink3,
+                    marginTop: 3, display: 'flex', gap: 8,
+                  }}>
+                    {idea.suggestedLength && (
+                      <span style={{ padding: '1px 5px', border: `1px solid ${T.line}` }}>
+                        {idea.suggestedLength}
+                      </span>
+                    )}
+                    {idea.thumbnailApproach && (
+                      <span>{idea.thumbnailApproach.slice(0, 24)}</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{
+                  fontFamily: T.mono, fontSize: 11.5,
+                  color: T.accent, textAlign: 'right', fontWeight: 500,
+                }}>
+                  {idea.opportunityScore}
+                </div>
+              </div>
+            ))
+          ) : (
+            <Empty>No ideas yet. Generate a digest to populate this list.</Empty>
+          )}
+        </Col>
+
+        <Col title="Setup checklist" actions={[`${doneCount}/${checklist.length}`]}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+            {checklist.map(({ label, done }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                <div style={{
+                  width: 14, height: 14,
+                  border: `1px solid ${done ? T.accent : T.line2}`,
+                  background: done ? T.accent : 'transparent',
+                  flex: 'none', display: 'grid', placeItems: 'center',
+                  fontSize: 9, color: T.bg,
+                }}>
+                  {done && '✓'}
+                </div>
+                <span style={{
+                  color: done ? T.ink3 : T.ink,
+                  textDecoration: done ? 'line-through' : 'none',
+                }}>
+                  {label}
+                </span>
+              </div>
+            ))}
           </div>
-
-        </div>
+        </Col>
       </div>
 
-      {/* ── Recent Digests — full width ──────────────────────────────────────── */}
-      <Divider />
-
-      {/* Section header */}
-      <div
-        style={{
-          padding: '14px 24px',
-          borderBottom: '1px solid #1a1a1a',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <span style={{ fontSize: 12, fontWeight: 500, color: '#ffffff' }}>
-          Recent Digests
-        </span>
-        <a
-          href="/digest"
-          style={{ fontSize: 12, color: '#888888', textDecoration: 'none' }}
-        >
-          View all →
-        </a>
-      </div>
-
-      {/* Table column headers */}
-      <div
-        style={{
-          padding: '8px 24px',
-          borderBottom: '1px solid #1a1a1a',
+      {/* ===== DIGESTS TABLE ===== */}
+      <div style={{ marginTop: 24, border: `1px solid ${T.line}` }}>
+        <div style={{
           display: 'grid',
-          gridTemplateColumns: '160px 70px 1fr 110px',
-          gap: 16,
-          alignItems: 'center',
-        }}
-      >
-        {['Date', 'Score', 'Top Opportunity', 'Status'].map((h) => (
-          <span
-            key={h}
-            style={{
-              fontSize: 11,
-              color: '#444444',
-              fontWeight: 500,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-            }}
-          >
-            {h}
-          </span>
-        ))}
-      </div>
+          gridTemplateColumns: '140px 70px 1fr 110px',
+          gap: 16, padding: '12px 22px',
+          borderBottom: `1px solid ${T.line}`,
+          background: T.bg2,
+        }}>
+          {['Week', 'Score', 'Headline', 'Status'].map(h => (
+            <span key={h} style={{
+              fontFamily: T.mono, fontSize: 10.5,
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: T.ink3,
+            }}>{h}</span>
+          ))}
+        </div>
 
-      {/* Digest rows */}
-      {recentDigests.length > 0 ? (
-        recentDigests.map((d) => {
-          const digestScore =
-            d.key_metrics && typeof d.key_metrics === 'object'
-              ? (d.key_metrics as Record<string, unknown>).overallGapScore
-              : null
-          const scoreNum = typeof digestScore === 'number' ? digestScore : null
-          const preview = d.content.slice(0, 90).replace(/\n/g, ' ')
+        {(recentDigests?.length ?? 0) > 0 ? recentDigests.map(d => {
+          const score = d.key_metrics && typeof d.key_metrics === 'object'
+            ? (d.key_metrics as Record<string, unknown>).overallGapScore
+            : null
+          const scoreNum = typeof score === 'number' ? score : null
+          const preview = d.content
+            ? (d.content.split('\n').find(l => l.trim().length > 20)?.trim().slice(0, 120) ?? '—')
+            : '—'
 
           return (
-            <div
-              key={d.id}
-              style={{
-                padding: '11px 24px',
-                borderBottom: '1px solid #1a1a1a',
-                display: 'grid',
-                gridTemplateColumns: '160px 70px 1fr 110px',
-                gap: 16,
-                alignItems: 'center',
-              }}
-            >
-              <span style={{ fontSize: 12, color: '#888888' }}>
-                {fmtDate(d.created_at)}
+            <a key={d.id} href="/digest" style={{
+              display: 'grid',
+              gridTemplateColumns: '140px 70px 1fr 110px',
+              gap: 16, padding: '14px 22px',
+              borderBottom: `1px dashed ${T.line}`,
+              alignItems: 'center',
+              textDecoration: 'none',
+              color: 'inherit',
+            }}>
+              <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.ink2 }}>
+                {fmtWeek(d.week_start_date)}
               </span>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: scoreNum != null ? scoreColor(scoreNum) : '#444444',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontWeight: scoreNum != null ? 500 : 400,
-                }}
-              >
-                {scoreNum != null ? scoreNum : '—'}
+              <span style={{
+                fontFamily: T.mono, fontSize: 13, fontWeight: 500,
+                color: scoreNum != null ? gapColor(scoreNum) : T.ink4,
+              }}>
+                {scoreNum ?? '—'}
               </span>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: '#888888',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {preview}...
+              <span style={{
+                fontSize: 13, color: T.ink2,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {preview}
               </span>
-              <span>
-                <SmallBadge color={d.email_sent_at ? '#00c853' : '#888888'}>
-                  {d.email_sent_at ? 'Delivered' : 'Draft'}
-                </SmallBadge>
+              <span style={{
+                fontFamily: T.mono, fontSize: 10.5, color: T.ink3,
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}>
+                <span style={{
+                  width: 5, height: 5, borderRadius: '50%',
+                  background: d.email_sent_at ? T.accent : T.ink3,
+                }} />
+                {d.email_sent_at ? 'Delivered' : 'Draft'}
               </span>
-            </div>
+            </a>
           )
-        })
-      ) : (
-        <div style={{ padding: '28px 24px', textAlign: 'center' }}>
-          <span style={{ fontSize: 12, color: '#333333' }}>
-            No digests generated yet. First digest arrives Monday.
+        }) : (
+          <div style={{ padding: '32px 22px', textAlign: 'center' }}>
+            <Empty>No digests generated yet. Your first arrives Monday.</Empty>
+          </div>
+        )}
+      </div>
+    </Shell>
+  )
+}
+
+// ─── Layout primitives ────────────────────────────────────────────────────────
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: T.bg, color: T.ink,
+      fontFamily: T.sans,
+      minHeight: '100%',
+      padding: 28,
+      maxWidth: 1480,
+    }}>
+      {children}
+    </div>
+  )
+}
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      fontFamily: T.mono, fontSize: 11, color: T.ink2,
+      border: `1px solid ${T.line}`, padding: '5px 10px',
+    }}>
+      {children}
+    </div>
+  )
+}
+
+function Metric({
+  k, v, unit, delta, up,
+}: { k: string; v: string; unit?: string; delta: string; up: boolean }) {
+  return (
+    <div style={{
+      padding: '16px 18px',
+      borderRight: `1px solid ${T.line}`,
+      display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <Eyebrow>{k}</Eyebrow>
+      <div style={{
+        fontSize: 24, fontWeight: 500, letterSpacing: '-0.02em',
+        display: 'flex', alignItems: 'baseline', gap: 4,
+      }}>
+        {v}
+        {unit && (
+          <span style={{ fontFamily: T.mono, fontSize: 11, color: T.ink3, fontWeight: 400 }}>
+            {unit}
+          </span>
+        )}
+      </div>
+      <div style={{ fontFamily: T.mono, fontSize: 11, color: up ? T.accent : T.red }}>
+        {delta}
+      </div>
+    </div>
+  )
+}
+
+function Col({
+  title, sub, actions, activeIdx = 0, children,
+}: {
+  title: string
+  sub?: string
+  actions?: string[]
+  activeIdx?: number
+  children: React.ReactNode
+}) {
+  return (
+    <div style={{ padding: '20px 22px', borderRight: `1px solid ${T.line}` }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 16,
+      }}>
+        <Eyebrow strong>
+          {title}
+          {sub && <span style={{ color: T.ink3, fontWeight: 400 }}> &nbsp;→ {sub}</span>}
+        </Eyebrow>
+        {actions && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            {actions.map((a, i) => (
+              <span key={a} style={{
+                fontFamily: T.mono, fontSize: 10.5,
+                padding: '2px 6px',
+                border: `1px solid ${i === activeIdx ? T.ink2 : T.line}`,
+                color: i === activeIdx ? T.ink : T.ink3,
+                cursor: 'pointer',
+              }}>
+                {a}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function TrendRow({
+  channel, what, obj, sub, time, kind,
+}: {
+  channel: string
+  what: string
+  obj: string
+  sub: string
+  time: string
+  kind: 'viral' | 'topic' | 'default'
+}) {
+  const dotColor = kind === 'viral' ? T.red : kind === 'topic' ? T.blue : T.amber
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '14px 1fr auto',
+      gap: 14, alignItems: 'flex-start',
+      padding: '12px 0',
+      borderBottom: `1px dashed ${T.line}`,
+    }}>
+      <div style={{ width: 1, background: T.line2, height: '100%', justifySelf: 'center', position: 'relative' }}>
+        <span style={{
+          position: 'absolute', top: 4, left: '50%',
+          width: 7, height: 7, borderRadius: '50%',
+          background: dotColor,
+          transform: 'translateX(-50%)',
+        }} />
+      </div>
+      <div>
+        <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+          <span style={{ color: T.ink, fontWeight: 500 }}>{channel}</span>
+          <span style={{ color: T.ink2 }}>{what}</span>
+          <span style={{
+            fontFamily: T.mono, fontSize: 11.5,
+            padding: '1px 4px',
+            background: T.surface, border: `1px solid ${T.line}`,
+            color: T.ink,
+          }}>
+            {obj}
           </span>
         </div>
-      )}
+        <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.ink3, marginTop: 3 }}>
+          {sub}
+        </div>
+      </div>
+      <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.ink3, whiteSpace: 'nowrap' }}>
+        {time}
+      </div>
+    </div>
+  )
+}
 
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontFamily: T.mono, fontSize: 11.5, color: T.ink3,
+      padding: '20px 0', textAlign: 'center',
+    }}>
+      {children}
     </div>
   )
 }
