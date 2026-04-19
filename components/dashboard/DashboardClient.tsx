@@ -294,34 +294,39 @@ export default function DashboardClient({
 
       {/* ===== GAP SCORE PANEL ===== */}
       {gapScore && (
-        <div className="mt-6 border border-stencil-line bg-stencil-grid p-6 grid grid-cols-[280px_1fr] gap-9 items-center">
-          <div className="flex flex-col gap-[10px]">
-            <Eyebrow>Overall Gap Score</Eyebrow>
-            <div className={`font-serif italic text-[140px] leading-[0.85] tracking-[-0.04em] tabular-nums ${gapColorClass(gapScore.overall_score)}`}>
-              {gapScore.overall_score}
+        <>
+          <p className="text-sm text-stencil-ink2 max-w-2xl mt-6 mb-6 px-1">
+            This is where you stand against your niche. Each bar shows how far behind you are in that area — the longer the bar, the bigger the opportunity to grow. A short bar means you&apos;re already competitive there; a long bar means that&apos;s where focusing your efforts will move the needle most.
+          </p>
+          <div className="border border-stencil-line bg-stencil-grid p-6 grid grid-cols-[280px_1fr] gap-9 items-center">
+            <div className="flex flex-col gap-[10px]">
+              <Eyebrow>Overall Gap Score</Eyebrow>
+              <div className={`font-serif italic text-[140px] leading-[0.85] tracking-[-0.04em] tabular-nums ${gapColorClass(gapScore.overall_score)}`}>
+                {gapScore.overall_score}
+              </div>
+              <div className="font-mono text-[11px] text-stencil-ink3 max-w-[24ch]">
+                out of 100
+              </div>
             </div>
-            <div className="font-mono text-[11px] text-stencil-ink3 max-w-[24ch]">
-              higher = bigger opportunity vs. your niche
-            </div>
-          </div>
 
-          {gapRows.length > 0 && (
-            <div className="flex flex-col gap-[14px]">
-              {gapRows.map(row => (
-                <div key={row.label} className="grid grid-cols-[180px_1fr_60px] gap-[14px] items-center font-mono text-[11.5px] text-stencil-ink2">
-                  <span className="text-stencil-ink">{row.label}</span>
-                  <span className="h-[6px] bg-stencil-surface relative overflow-hidden">
-                    <span
-                      className={`block h-full ${gapFillClass(row.score)}`}
-                      style={{ width: `${Math.min(100, row.score)}%` }}
-                    />
-                  </span>
-                  <span className="text-right text-stencil-ink font-medium">{row.score}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+            {gapRows.length > 0 && (
+              <div className="flex flex-col gap-[14px]">
+                {gapRows.map(row => (
+                  <div key={row.label} className="grid grid-cols-[180px_1fr_60px] gap-[14px] items-center font-mono text-[11.5px] text-stencil-ink2">
+                    <span className="text-stencil-ink">{row.label}</span>
+                    <span className="h-[6px] bg-stencil-surface relative overflow-hidden">
+                      <span
+                        className={`block h-full ${gapFillClass(row.score)}`}
+                        style={{ width: `${Math.min(100, row.score)}%` }}
+                      />
+                    </span>
+                    <span className="text-right text-stencil-ink font-medium">{row.score}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {/* ===== METRIC STRIP ===== */}
