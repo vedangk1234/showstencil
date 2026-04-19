@@ -531,14 +531,14 @@ const planLimits = {
 | `app/(auth)/login/page.tsx` | ✅ | Google sign-in button |
 | `app/(auth)/callback/page.tsx` | 🔲 | OAuth callback — not yet needed (NextAuth handles it) |
 | `app/(dashboard)/layout.tsx` | ✅ | Auth guard + first-sync trigger |
-| `app/(dashboard)/dashboard/page.tsx` | 🚧 | Sync loading state only; charts/data in Week 2 |
-| `app/(dashboard)/competitors/page.tsx` | 🔲 | Competitor management UI — Week 2 |
-| `app/(dashboard)/digest/page.tsx` | 🔲 | Weekly digest view — Week 2 |
-| `app/(dashboard)/ideas/page.tsx` | 🔲 | Video idea suggestions — Week 2 |
-| `app/(dashboard)/settings/page.tsx` | 🔲 | Settings page — Week 2 |
-| `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Notification preferences — Week 2 |
+| `app/(dashboard)/dashboard/page.tsx` | ✅ | Full dashboard: gap score panel, 5-metric strip, competitors table, trend radar, views chart, top ideas, setup checklist, digest table |
+| `app/(dashboard)/competitors/page.tsx` | ✅ | Competitor management: list by tier, subscriber count, total views, last synced |
+| `app/(dashboard)/digest/page.tsx` | ✅ | Weekly digest view: list of past digests with preview, gap score, status |
+| `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with why/angle/format/length |
+| `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, notification toggles, account actions |
+| `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Dedicated notifications sub-page — only .gitkeep exists |
 | `app/page.tsx` | 🚧 | Placeholder only; full landing page — Week 3 |
-| `app/pricing/page.tsx` | 🔲 | Pricing table — Week 3 |
+| `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
 | `app/privacy/page.tsx` | 🔲 | Legal — Week 3 |
 | `app/terms/page.tsx` | 🔲 | Legal — Week 3 |
 
@@ -547,9 +547,12 @@ const planLimits = {
 | Directory | Status | Notes |
 |---|---|---|
 | `components/sync-context.tsx` | ✅ | SyncProvider + useSyncStatus hook |
-| `components/ui/` | 🔲 | Reusable UI primitives — Week 2 |
-| `components/charts/` | 🔲 | Recharts wrappers — Week 2 |
-| `components/dashboard/` | 🔲 | Dashboard-specific components — Week 2 |
+| `components/BlackholeLoader.tsx` | ✅ | Animated loading spinner used during first sync |
+| `components/dashboard/DashboardClient.tsx` | ✅ | Full dashboard client component — all panels, chart, metric strip, gap rows |
+| `components/dashboard/SidebarNav.tsx` | ✅ | Left sidebar navigation: workspace + account links, active state |
+| `components/dashboard/SignOutButton.tsx` | ✅ | Sign-out button using next-auth signOut |
+| `components/ui/` | 🔲 | Reusable UI primitives — not yet extracted |
+| `components/charts/` | 🔲 | Recharts wrappers — not yet extracted |
 | `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
 | `emails/trend-alert.tsx` | ✅ | React Email template: viral video alert with suggested angle |
 
@@ -575,12 +578,32 @@ const planLimits = {
 | `scripts/test-trend-alert.ts` | ✅ | Sends real trend alert email + tests checkAndSendAlerts |
 | `scripts/get-unsubscribe-token.ts` | ✅ | Prints unsubscribe token + test URL for the test user |
 | `scripts/re-enable-notifications.ts` | ✅ | Re-enables digest + alerts for test user after unsubscribe testing |
+| `scripts/update-gap-scores.ts` | ✅ | One-time script: sets watch_time=15, upload_freq=85, topic_coverage=NULL for test user |
 
 ---
 
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 2 — Day 9 (2026-04-19)
+
+**Dashboard bug fixes**
+
+*lib/db.ts — `saveChannelSnapshot` field preservation*
+* Previously: delete + insert with only 3 fields (total_views, avg_view_duration_seconds, estimated_monthly_revenue). Every sync nuked seeded/Data-API fields like subscriber_count, avg_views_per_video, avg_ctr.
+* Fix: fetch existing snapshot row before delete. Re-insert preserves subscriber_count, videos_count, avg_views_per_video, avg_ctr, avg_like_ratio, rpm, momentum_score from the existing row. avg_view_duration_seconds is only overwritten when the Analytics API returns > 0 (zero = no 90-day data for this channel, keep existing). estimated_monthly_revenue falls back to existing if Analytics API returns 0.
+* Result: all 5 metric cards (Subscribers 45K, Avg views 8.4K, CTR 2.1%, Avg watch 6:20, Est. rev $168) survive a sync.
+
+*components/dashboard/DashboardClient.tsx — Topic coverage removed*
+* `gapRows` array no longer includes the "Topic coverage" entry. `topic_coverage_gap_score` is a stub that always returns 0 — showing it created a misleading all-zero bar.
+* Array now has 4 rows: Avg views / video, Click-through rate, Watch time, Upload frequency.
+
+*Supabase data correction*
+* Updated gap_scores row for test user: watch_time_gap_score=15, upload_frequency_gap_score=85, topic_coverage_gap_score=NULL. Previous values were 0 for both (incorrect — caused by an earlier scorer run before calibration was complete).
+* Script: `scripts/update-gap-scores.ts`
+
+---
 
 ### Week 1 — Day 8 night (2026-04-15)
 
@@ -959,6 +982,10 @@ ALTER TABLE users
 
 **React Email Preview requires string children (fixed Day 7):** `@react-email/components`'s `<Preview>` component has a TypeScript type of `ReactNode & string`, meaning numbers passed directly (`{gapScore}`, `{videoIdeas.length}`) cause a build error on Vercel even though they render fine locally. Fix: wrap numeric values with `String()` before interpolating inside `<Preview>`. Applies to any number or boolean in that component.
 
+**saveChannelSnapshot overwrote seeded/enriched fields (fixed Day 9 — 2026-04-19):** The sync route called saveChannelSnapshot which deleted today's snapshot and re-inserted with only 3 analytics fields. This nuked subscriber_count, avg_views_per_video, avg_ctr etc. set by the seed script, and set avg_view_duration_seconds=0 when the YouTube Analytics API returned 0 (no 90-day data). Dashboard showed "0:00" for Avg watch. Fix: fetch existing row first, preserve all non-analytics fields, only update avg_view_duration_seconds when API returns > 0.
+
+**Topic coverage gap score is a stub that returns 0 (known limitation):** `topic_coverage_gap_score` is always 0 because topic analysis is not implemented. The gap score chart now filters it out — it was showing as a misleading zero bar alongside real scores. Will be re-added when topic analysis is built.
+
 \---
 
 ## Key Decisions Made
@@ -972,6 +999,8 @@ ALTER TABLE users
 * Web app not Chrome extension: extensions require store approval, cannot do server-side processing
 * Three competitor tiers: Tier 1 (1x-3x user's subs), Tier 2 (3x-10x), beyond 10x excluded as not actionable. findCompetitors searches 0.5x-3x range but gap scorer filters to larger-than-user only.
 * Vercel Hobby plan limits crons to once-per-day — trend detection downgraded from every 6 hours to daily at 6 AM UTC. Upgrade to Pro to restore 6-hour cadence.
+* Topic coverage removed from gap score display (Day 9): stub returns 0, showing it is misleading. Will be added back when topic analysis is implemented.
+* Week 2 pages built as server components with inline sub-components (no separate component files extracted yet) — fast to build, refactor into components/ui/ when patterns stabilise.
 
 \---
 
@@ -989,6 +1018,7 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-15 — Day 8 night: payment failed email in LS webhook handler (Resend, try/catch, no unsubscribe footer); Day 8 evening: Lemon Squeezy checkout + webhook (4 events) + lib/access.ts plan gating; Day 7 night: lib/email.ts, React Email templates, unsubscribe route, notification settings API
-Next update due: End of Week 2*
+*Last updated: 2026-04-19 — Day 9: saveChannelSnapshot field preservation bug fix (avg watch 0:00 → 6:20); Topic coverage removed from gap score chart; gap_scores corrected in DB (watch_time=15, upload_freq=85); feature status table updated to reflect all Week 2 pages and components built
+Previous: 2026-04-15 — Day 8 night: payment failed email in LS webhook handler; Day 8 evening: Lemon Squeezy checkout + webhook + lib/access.ts plan gating; Day 7 night: lib/email.ts, React Email templates, unsubscribe route, notification settings API
+Next update due: End of Week 3*
 

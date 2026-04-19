@@ -217,7 +217,6 @@ export default function DashboardClient({
     { label: 'Click-through rate', score: gapScore.ctr_gap_score ?? 0 },
     { label: 'Watch time',         score: gapScore.watch_time_gap_score ?? 0 },
     { label: 'Upload frequency',   score: gapScore.upload_frequency_gap_score ?? 0 },
-    { label: 'Topic coverage',     score: gapScore.topic_coverage_gap_score ?? 0 },
   ] : []
 
   const userAvg = latest?.avg_views_per_video ?? 1
