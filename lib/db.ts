@@ -31,8 +31,13 @@ export async function saveChannelSnapshot(
   const supabase = createServiceClient()
   const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD UTC
 
-  // Estimate monthly revenue: divide 90-day figure by 3
-  const estimatedMonthlyRevenue = data.estimatedRevenue > 0 ? data.estimatedRevenue / 3 : 0
+  // Preserve fields that come from seeded/Data-API data, not the Analytics API
+  const { data: existing } = await supabase
+    .from('channel_snapshots')
+    .select('subscriber_count, videos_count, avg_views_per_video, avg_ctr, avg_view_duration_seconds, avg_like_ratio, rpm, momentum_score, estimated_monthly_revenue')
+    .eq('user_id', userId)
+    .eq('snapshot_date', today)
+    .maybeSingle()
 
   // Delete existing snapshot for today before inserting fresh data
   await supabase
@@ -41,14 +46,31 @@ export async function saveChannelSnapshot(
     .eq('user_id', userId)
     .eq('snapshot_date', today)
 
+  const estimatedMonthlyRevenue = data.estimatedRevenue > 0
+    ? data.estimatedRevenue / 3
+    : (existing?.estimated_monthly_revenue ?? 0)
+
+  // Only overwrite avg_view_duration_seconds when the Analytics API has real data (> 0).
+  // A zero return means the channel has no data in the 90-day window — keep the existing value.
+  const avgWatchSeconds = data.avgViewDurationSeconds > 0
+    ? Math.round(data.avgViewDurationSeconds)
+    : (existing?.avg_view_duration_seconds ?? null)
+
   const { error } = await supabase.from('channel_snapshots').insert({
     user_id: userId,
     snapshot_date: today,
+    // Preserve enriched fields from seed / Data API that Analytics API doesn't provide
+    subscriber_count: existing?.subscriber_count ?? null,
+    videos_count: existing?.videos_count ?? null,
+    avg_views_per_video: existing?.avg_views_per_video ?? null,
+    avg_ctr: existing?.avg_ctr ?? null,
+    avg_like_ratio: existing?.avg_like_ratio ?? null,
+    rpm: existing?.rpm ?? null,
+    momentum_score: existing?.momentum_score ?? null,
+    // Analytics API fields
     total_views: data.totalViews,
-    avg_view_duration_seconds: Math.round(data.avgViewDurationSeconds),
+    avg_view_duration_seconds: avgWatchSeconds,
     estimated_monthly_revenue: estimatedMonthlyRevenue,
-    // subscriber_count, videos_count, avg_ctr, avg_like_ratio, rpm, momentum_score
-    // require a separate YouTube Data API call — enriched in a later milestone
   })
 
   if (error) {
