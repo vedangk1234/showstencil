@@ -307,6 +307,9 @@ export default function DashboardClient({
               <div className="font-mono text-[11px] text-stencil-ink3 max-w-[24ch]">
                 out of 100
               </div>
+              <div className="font-mono text-[11px] text-stencil-ink3 max-w-[24ch]">
+                higher = bigger opportunity vs. your niche
+              </div>
             </div>
 
             {gapRows.length > 0 && (
