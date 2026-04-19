@@ -6,19 +6,6 @@ import { SyncProvider } from '@/components/sync-context'
 import SidebarNav from '@/components/dashboard/SidebarNav'
 import SignOutButton from '@/components/dashboard/SignOutButton'
 
-const T = {
-  bg:     '#0A0A0A',
-  surface:'#141414',
-  line:   '#222222',
-  ink:    '#EDEDED',
-  ink2:   '#A1A1A1',
-  ink3:   '#6E6E6E',
-  accent: 'oklch(78% 0.19 145)',
-  serif:  '"Instrument Serif", ui-serif, Georgia, serif',
-  sans:   '"Geist", ui-sans-serif, system-ui, -apple-system, sans-serif',
-  mono:   '"Geist Mono", ui-monospace, SFMono-Regular, monospace',
-}
-
 export default async function DashboardLayout({
   children,
 }: {
@@ -35,69 +22,30 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      height: '100vh',
-      background: T.bg,
-      fontFamily: T.sans,
-      color: T.ink,
-      WebkitFontSmoothing: 'antialiased',
-    }}>
+    <div className="flex h-screen bg-stencil-bg font-sans text-stencil-ink antialiased">
 
       {/* Sidebar */}
-      <aside style={{
-        width: 240, flexShrink: 0,
-        display: 'flex', flexDirection: 'column',
-        background: T.bg,
-        borderRight: `1px solid ${T.line}`,
-        padding: '18px 14px',
-        gap: 18,
-      }}>
+      <aside className="w-60 shrink-0 flex flex-col bg-stencil-bg border-r border-stencil-line px-[14px] py-[18px] gap-[18px]">
 
         {/* Brand */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '2px 6px 14px',
-          borderBottom: `1px dashed ${T.line}`,
-        }}>
-          <div style={{
-            width: 24, height: 24, background: T.ink, color: T.bg,
-            display: 'grid', placeItems: 'center',
-            fontFamily: T.mono, fontWeight: 600, fontSize: 11,
-            position: 'relative',
-          }}>
+        <div className="flex items-center gap-[10px] pt-[2px] px-[6px] pb-[14px] border-b border-dashed border-stencil-line">
+          <div className="size-6 bg-stencil-ink text-stencil-bg grid place-items-center font-mono font-semibold text-[11px] relative">
             S
-            <span style={{ position: 'absolute', inset: 3, border: `1px solid ${T.bg}` }} />
+            <span className="absolute inset-[3px] border border-stencil-bg" />
           </div>
-          <span style={{
-            fontFamily: T.serif, fontSize: 20, fontStyle: 'italic',
-            letterSpacing: '-0.01em',
-          }}>
+          <span className="font-serif text-xl italic tracking-[-0.01em]">
             ShowStencil
           </span>
-          <span style={{
-            marginLeft: 'auto',
-            fontFamily: T.mono, fontSize: 9.5, color: T.ink3,
-            border: `1px solid ${T.line}`, padding: '2px 5px',
-          }}>
+          <span className="ml-auto font-mono text-[9.5px] text-stencil-ink3 border border-stencil-line px-[5px] py-[2px]">
             {user?.subscription_plan ?? 'free'}
           </span>
         </div>
 
         {/* Search hint */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '6px 10px',
-          border: `1px solid ${T.line}`,
-          fontFamily: T.mono, fontSize: 11, color: T.ink3,
-        }}>
+        <div className="flex items-center gap-2 px-[10px] py-[6px] border border-stencil-line font-mono text-[11px] text-stencil-ink3">
           <span>⌘</span>
           <span>Find...</span>
-          <kbd style={{
-            marginLeft: 'auto',
-            fontFamily: T.mono, fontSize: 9.5,
-            border: `1px solid ${T.line}`, padding: '1px 4px',
-          }}>
+          <kbd className="ml-auto font-mono text-[9.5px] border border-stencil-line px-1 py-px">
             ⌘F
           </kbd>
         </div>
@@ -105,38 +53,23 @@ export default async function DashboardLayout({
         <SidebarNav />
 
         {/* User card */}
-        <div style={{
-          marginTop: 'auto',
-          border: `1px solid ${T.line}`,
-          padding: 10,
-          display: 'flex', alignItems: 'center', gap: 10,
-        }}>
+        <div className="mt-auto border border-stencil-line p-2.5 flex items-center gap-[10px]">
           {session.user.image ? (
             <Image
               src={session.user.image}
               alt={session.user.name ?? 'User'}
               width={26}
               height={26}
-              style={{ flexShrink: 0 }}
+              className="shrink-0"
             />
           ) : (
-            <div style={{
-              width: 26, height: 26,
-              background: `linear-gradient(135deg, ${T.accent}, oklch(72% 0.14 235))`,
-              flexShrink: 0,
-            }} />
+            <div className="size-[26px] shrink-0 bg-[linear-gradient(135deg,oklch(78%_0.19_145),oklch(72%_0.14_235))]" />
           )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontSize: 12.5, lineHeight: 1.2,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
+          <div className="flex-1 min-w-0">
+            <div className="text-[12.5px] leading-[1.2] truncate">
               {session.user.name ?? 'You'}
             </div>
-            <div style={{
-              fontFamily: T.mono, fontSize: 10, color: T.ink3,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
+            <div className="font-mono text-[10px] text-stencil-ink3 truncate">
               {session.user.email}
             </div>
           </div>
@@ -145,7 +78,7 @@ export default async function DashboardLayout({
       </aside>
 
       {/* Main */}
-      <main style={{ flex: 1, overflow: 'auto', background: T.bg }}>
+      <main className="flex-1 overflow-auto bg-stencil-bg">
         <SyncProvider needsSync={needsSync}>{children}</SyncProvider>
       </main>
     </div>

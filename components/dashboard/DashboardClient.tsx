@@ -29,28 +29,6 @@ interface Props {
   latestTrend: Trend | null
 }
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
-
-const T = {
-  bg:      '#0A0A0A',
-  bg2:     '#111111',
-  surface: '#141414',
-  surface2:'#1A1A1A',
-  line:    '#222222',
-  line2:   '#2A2A2A',
-  ink:     '#EDEDED',
-  ink2:    '#A1A1A1',
-  ink3:    '#6E6E6E',
-  ink4:    '#4A4A4A',
-  accent:  'oklch(78% 0.19 145)',
-  amber:   'oklch(78% 0.17 75)',
-  blue:    'oklch(72% 0.14 235)',
-  red:     'oklch(63% 0.22 25)',
-  serif:   '"Instrument Serif", ui-serif, Georgia, serif',
-  sans:    '"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
-  mono:    '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number | null | undefined, dec = 1): string {
@@ -83,62 +61,43 @@ function fmtWeek(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function gapColor(score: number): string {
-  if (score >= 70) return T.accent
-  if (score >= 40) return T.amber
-  return T.red
+function gapColorClass(score: number): string {
+  if (score >= 70) return 'text-stencil-accent'
+  if (score >= 40) return 'text-stencil-amber'
+  return 'text-stencil-red'
 }
 
-function gapFillColor(score: number): string {
-  if (score >= 70) return T.red
-  if (score >= 40) return T.amber
-  return T.accent
+function gapFillClass(score: number): string {
+  if (score >= 70) return 'bg-stencil-red'
+  if (score >= 40) return 'bg-stencil-amber'
+  return 'bg-stencil-accent'
 }
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
 function Eyebrow({ children, strong }: { children: React.ReactNode; strong?: boolean }) {
   return (
-    <span style={{
-      fontFamily: T.mono,
-      fontSize: 10.5,
-      letterSpacing: '0.16em',
-      textTransform: 'uppercase',
-      color: strong ? T.ink : T.ink3,
-      fontWeight: strong ? 500 : 400,
-    }}>{children}</span>
+    <span className={`font-mono text-[10.5px] tracking-[0.16em] uppercase ${strong ? 'text-stencil-ink font-medium' : 'text-stencil-ink3 font-normal'}`}>
+      {children}
+    </span>
   )
 }
 
 function Btn({
   children, primary, href, onClick,
 }: { children: React.ReactNode; primary?: boolean; href?: string; onClick?: () => void }) {
-  const s: React.CSSProperties = {
-    fontFamily: T.sans,
-    fontSize: 12.5,
-    padding: '6px 12px',
-    border: `1px solid ${primary ? T.ink : T.line}`,
-    background: primary ? T.ink : 'transparent',
-    color: primary ? T.bg : T.ink,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    letterSpacing: '-0.005em',
-  }
-  if (href) return <a href={href} style={s}>{children}</a>
-  return <button type="button" onClick={onClick} style={s}>{children}</button>
+  const cls = `font-sans text-[12.5px] py-[6px] px-3 border inline-flex items-center gap-[6px] tracking-[-0.005em] cursor-pointer no-underline ${
+    primary
+      ? 'border-stencil-ink bg-stencil-ink text-stencil-bg'
+      : 'border-stencil-line bg-transparent text-stencil-ink'
+  }`
+  if (href) return <a href={href} className={cls}>{children}</a>
+  return <button type="button" onClick={onClick} className={cls}>{children}</button>
 }
 
 function PulseDot() {
   return (
-    <span style={{
-      display: 'inline-block',
-      width: 6, height: 6, borderRadius: '50%',
-      background: T.accent,
-      animation: 'stencil-pulse 2s infinite',
-    }} />
+    <span className="inline-block size-[6px] rounded-full bg-stencil-accent animate-stencil-pulse" />
   )
 }
 
@@ -158,17 +117,13 @@ export default function DashboardClient({
   if (isSyncing) {
     return (
       <Shell>
-        <div style={{
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-          minHeight: '70vh', gap: 24,
-        }}>
+        <div className="flex flex-col items-center justify-center min-h-[70vh] gap-6">
           <BlackholeLoader />
-          <div style={{ textAlign: 'center' }}>
-            <p style={{ color: T.ink, fontSize: 14, fontWeight: 500, margin: 0 }}>
+          <div className="text-center">
+            <p className="text-stencil-ink text-sm font-medium m-0">
               Syncing your channel data…
             </p>
-            <p style={{ color: T.ink3, fontSize: 12, margin: '6px 0 0', fontFamily: T.mono }}>
+            <p className="text-stencil-ink3 text-xs m-0 mt-1.5 font-mono">
               first sync · 10–15s
             </p>
           </div>
@@ -181,21 +136,15 @@ export default function DashboardClient({
   if (!snapshots?.length) {
     return (
       <Shell>
-        <div style={{
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-          minHeight: '70vh', gap: 16,
-        }}>
-          <h1 style={{
-            fontFamily: T.serif, fontSize: 56, margin: 0, letterSpacing: '-0.025em',
-          }}>
-            No data <em style={{ color: T.ink2 }}>yet.</em>
+        <div className="flex flex-col items-center justify-center min-h-[70vh] gap-4">
+          <h1 className="font-serif text-[56px] m-0 tracking-[-0.025em]">
+            No data <em className="text-stencil-ink2">yet.</em>
           </h1>
-          <p style={{ color: T.ink2, fontSize: 13.5, margin: 0, maxWidth: '40ch', textAlign: 'center' }}>
+          <p className="text-stencil-ink2 text-[13.5px] m-0 max-w-[40ch] text-center">
             Connect your YouTube channel and we&apos;ll pull a full snapshot of your performance,
             your competitors, and the gaps you can close.
           </p>
-          <div style={{ marginTop: 8 }}>
+          <div className="mt-2">
             <Btn primary href="/api/sync">Connect YouTube</Btn>
           </div>
         </div>
@@ -207,21 +156,18 @@ export default function DashboardClient({
   const latest = snapshots[snapshots.length - 1]
   const lastSynced = timeAgo(latest?.created_at)
 
-  // Trend deltas (latest vs ~7 snapshots ago)
   const earlier = snapshots[Math.max(0, snapshots.length - 8)] ?? snapshots[0]
-  const subDelta   = (latest?.subscriber_count ?? 0)           - (earlier?.subscriber_count ?? 0)
-  const viewsDelta = (latest?.avg_views_per_video ?? 0)        - (earlier?.avg_views_per_video ?? 0)
-  const ctrDelta   = (latest?.avg_ctr ?? 0)                    - (earlier?.avg_ctr ?? 0)
-  const watchDelta = (latest?.avg_view_duration_seconds ?? 0)  - (earlier?.avg_view_duration_seconds ?? 0)
-  const revDelta   = (latest?.estimated_monthly_revenue ?? 0)  - (earlier?.estimated_monthly_revenue ?? 0)
+  const subDelta   = (latest?.subscriber_count ?? 0)          - (earlier?.subscriber_count ?? 0)
+  const viewsDelta = (latest?.avg_views_per_video ?? 0)       - (earlier?.avg_views_per_video ?? 0)
+  const ctrDelta   = (latest?.avg_ctr ?? 0)                   - (earlier?.avg_ctr ?? 0)
+  const watchDelta = (latest?.avg_view_duration_seconds ?? 0) - (earlier?.avg_view_duration_seconds ?? 0)
+  const revDelta   = (latest?.estimated_monthly_revenue ?? 0) - (earlier?.estimated_monthly_revenue ?? 0)
 
-  // Chart series
   const chartData = snapshots.slice(-30).map((s) => ({
     date: s.snapshot_date,
     you: s.avg_views_per_video ?? 0,
   }))
 
-  // Checklist
   const checklist = [
     { label: 'Connect YouTube channel',    done: !!user?.youtube_channel_id },
     { label: 'Add competitor channels',    done: (competitors?.length ?? 0) > 0 },
@@ -231,7 +177,6 @@ export default function DashboardClient({
   ]
   const doneCount = checklist.filter(c => c.done).length
 
-  // Gap breakdown rows
   const gapRows = gapScore ? [
     { label: 'Avg views / video', score: gapScore.views_gap_score ?? 0 },
     { label: 'Click-through rate', score: gapScore.ctr_gap_score ?? 0 },
@@ -248,117 +193,96 @@ export default function DashboardClient({
 
   return (
     <Shell>
-      <style>{`
-        @keyframes stencil-pulse {
-          0%   { box-shadow: 0 0 0 0 color-mix(in srgb, ${T.accent} 60%, transparent); }
-          70%  { box-shadow: 0 0 0 10px transparent; }
-          100% { box-shadow: 0 0 0 0 transparent; }
-        }
-      `}</style>
-
       {/* ===== HERO ===== */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr auto',
-        gap: 32,
-        alignItems: 'end',
-        paddingBottom: 24,
-        borderBottom: `1px solid ${T.line}`,
-      }}>
-        <div>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            color: T.ink3, fontFamily: T.mono, fontSize: 11,
-            letterSpacing: '0.16em', textTransform: 'uppercase',
-          }}>
-            <span>Channel · {fmtWeek(new Date().toISOString())}</span>
-            <span style={{ color: T.ink4 }}>·</span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: T.accent }}>
-              <PulseDot /> last sync {lastSynced}
-            </span>
+      <div className="pb-6 border-b border-stencil-line">
+        {/* Channel identity row */}
+        <div className="flex items-center gap-4 mb-5">
+          {user?.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={user.image} alt={user.name ?? 'Channel'} width={44} height={44} className="shrink-0" />
+          ) : (
+            <div className="size-11 shrink-0 bg-stencil-surface border border-stencil-line grid place-items-center font-mono text-stencil-ink3 text-lg">
+              {(user?.name ?? 'U')[0]}
+            </div>
+          )}
+          <div>
+            <div className="font-serif italic text-[28px] leading-none tracking-[-0.02em]">
+              {user?.name ?? 'Your Channel'}
+            </div>
+            <div className="font-mono text-[11px] text-stencil-ink3 mt-1">
+              {fmt(latest?.subscriber_count, 1)} subscribers
+            </div>
           </div>
-          <h1 style={{
-            fontFamily: T.serif, fontWeight: 400,
-            fontSize: 60, lineHeight: 0.95, letterSpacing: '-0.025em',
-            margin: '10px 0 0',
-          }}>
-            Close <em style={{ fontStyle: 'italic', color: T.ink2 }}>the gap.</em>
-          </h1>
-          <p style={{ fontSize: 13.5, color: T.ink2, margin: '8px 0 0', maxWidth: '56ch' }}>
-            {gapScore ? (
-              <>
-                You sit <strong style={{ color: T.ink }}>{gapScore.overall_score}</strong> points behind your niche.
-                {gapScore.primary_bottleneck && (
-                  <> Primary bottleneck: <strong style={{ color: T.ink }}>{gapScore.primary_bottleneck}</strong>.</>
-                )}
-                {(gapScore.estimated_revenue_gap ?? 0) > 0 && (
-                  <> Closing it could unlock{' '}
-                    <strong style={{ color: T.accent }}>{fmtMoney(gapScore.estimated_revenue_gap)}/mo</strong>{' '}
-                    in additional revenue.
-                  </>
-                )}
-              </>
-            ) : (
-              <>Your first gap analysis is being generated. It will arrive with your next weekly digest.</>
-            )}
-          </p>
+          <div className="ml-auto flex flex-col gap-1.5 items-end">
+            <Pill>
+              <span className="text-stencil-accent">●</span> tracking{' '}
+              <strong className="text-stencil-ink ml-1">{competitors?.length ?? 0}</strong> channels
+            </Pill>
+            <Pill>
+              plan: <strong className="text-stencil-ink ml-1">{user?.subscription_plan ?? 'free'}</strong>
+            </Pill>
+          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
-          <Pill>
-            <span style={{ color: T.accent }}>●</span> tracking{' '}
-            <strong style={{ color: T.ink, marginLeft: 4 }}>{competitors?.length ?? 0}</strong> channels
-          </Pill>
-          <Pill>
-            plan: <strong style={{ color: T.ink, marginLeft: 4 }}>{user?.subscription_plan ?? 'free'}</strong>
-          </Pill>
+
+        <div className="grid grid-cols-[1fr_auto] gap-8 items-end">
+          <div>
+            <div className="flex items-center gap-[10px] text-stencil-ink3 font-mono text-[11px] tracking-[0.16em] uppercase">
+              <span>Channel · {fmtWeek(new Date().toISOString())}</span>
+              <span className="text-stencil-ink4">·</span>
+              <span className="inline-flex items-center gap-[6px] text-stencil-accent">
+                <PulseDot /> last sync {lastSynced}
+              </span>
+            </div>
+            <h1 className="font-serif font-normal text-[60px] leading-[0.95] tracking-[-0.025em] mt-[10px] mb-0">
+              Close <em className="italic text-stencil-ink2">the gap.</em>
+            </h1>
+            <p className="text-[13.5px] text-stencil-ink2 mt-2 mb-0 max-w-[56ch]">
+              {gapScore ? (
+                <>
+                  You sit <strong className="text-stencil-ink">{gapScore.overall_score}</strong> points behind your niche.
+                  {gapScore.primary_bottleneck && (
+                    <> Primary bottleneck: <strong className="text-stencil-ink">{gapScore.primary_bottleneck}</strong>.</>
+                  )}
+                  {(gapScore.estimated_revenue_gap ?? 0) > 0 && (
+                    <> Closing it could unlock{' '}
+                      <strong className="text-stencil-accent">{fmtMoney(gapScore.estimated_revenue_gap)}/mo</strong>{' '}
+                      in additional revenue.
+                    </>
+                  )}
+                </>
+              ) : (
+                <>Your first gap analysis is being generated. It will arrive with your next weekly digest.</>
+              )}
+            </p>
+          </div>
         </div>
       </div>
 
       {/* ===== GAP SCORE PANEL ===== */}
       {gapScore && (
-        <div style={{
-          marginTop: 24,
-          border: `1px solid ${T.line}`,
-          background: `linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 100% 24px, ${T.bg2}`,
-          padding: 24,
-          display: 'grid',
-          gridTemplateColumns: '280px 1fr',
-          gap: 36,
-          alignItems: 'center',
-        }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="mt-6 border border-stencil-line bg-stencil-grid p-6 grid grid-cols-[280px_1fr] gap-9 items-center">
+          <div className="flex flex-col gap-[10px]">
             <Eyebrow>Overall Gap Score</Eyebrow>
-            <div style={{
-              fontFamily: T.serif, fontStyle: 'italic',
-              fontSize: 140, lineHeight: 0.85, letterSpacing: '-0.04em',
-              color: gapColor(gapScore.overall_score),
-              fontVariantNumeric: 'tabular-nums',
-            }}>
+            <div className={`font-serif italic text-[140px] leading-[0.85] tracking-[-0.04em] tabular-nums ${gapColorClass(gapScore.overall_score)}`}>
               {gapScore.overall_score}
             </div>
-            <div style={{ fontFamily: T.mono, fontSize: 11, color: T.ink3, maxWidth: '24ch' }}>
+            <div className="font-mono text-[11px] text-stencil-ink3 max-w-[24ch]">
               higher = bigger opportunity vs. your niche
             </div>
           </div>
 
           {gapRows.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="flex flex-col gap-[14px]">
               {gapRows.map(row => (
-                <div key={row.label} style={{
-                  display: 'grid',
-                  gridTemplateColumns: '180px 1fr 60px',
-                  gap: 14, alignItems: 'center',
-                  fontFamily: T.mono, fontSize: 11.5, color: T.ink2,
-                }}>
-                  <span style={{ color: T.ink }}>{row.label}</span>
-                  <span style={{ height: 6, background: T.surface, position: 'relative', overflow: 'hidden' }}>
-                    <span style={{
-                      display: 'block', height: '100%',
-                      width: `${Math.min(100, row.score)}%`,
-                      background: gapFillColor(row.score),
-                    }} />
+                <div key={row.label} className="grid grid-cols-[180px_1fr_60px] gap-[14px] items-center font-mono text-[11.5px] text-stencil-ink2">
+                  <span className="text-stencil-ink">{row.label}</span>
+                  <span className="h-[6px] bg-stencil-surface relative overflow-hidden">
+                    <span
+                      className={`block h-full ${gapFillClass(row.score)}`}
+                      style={{ width: `${Math.min(100, row.score)}%` }}
+                    />
                   </span>
-                  <span style={{ textAlign: 'right', color: T.ink, fontWeight: 500 }}>{row.score}</span>
+                  <span className="text-right text-stencil-ink font-medium">{row.score}</span>
                 </div>
               ))}
             </div>
@@ -367,13 +291,7 @@ export default function DashboardClient({
       )}
 
       {/* ===== METRIC STRIP ===== */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(5, 1fr)',
-        border: `1px solid ${T.line}`,
-        borderTop: gapScore ? 'none' : `1px solid ${T.line}`,
-        marginTop: gapScore ? 0 : 24,
-      }}>
+      <div className={`grid grid-cols-5 border border-stencil-line ${gapScore ? 'border-t-0' : 'mt-6'}`}>
         <Metric
           k="Subscribers"
           v={fmt(latest?.subscriber_count, 1)}
@@ -385,6 +303,9 @@ export default function DashboardClient({
           v={fmt(latest?.avg_views_per_video, 1)}
           delta={viewsDelta >= 0 ? `▲ ${fmt(viewsDelta, 0)}` : `▼ ${fmt(Math.abs(viewsDelta), 0)}`}
           up={viewsDelta >= 0}
+          context={gapScore?.views_gap_score != null
+            ? `${gapScore.views_gap_score}pt gap vs niche avg`
+            : undefined}
         />
         <Metric
           k="CTR"
@@ -394,6 +315,9 @@ export default function DashboardClient({
             ? `▲ ${(ctrDelta * 100).toFixed(2)} pts`
             : `▼ ${(Math.abs(ctrDelta) * 100).toFixed(2)} pts`}
           up={ctrDelta >= 0}
+          context={gapScore?.ctr_gap_score != null
+            ? `${gapScore.ctr_gap_score}pt gap vs niche avg`
+            : undefined}
         />
         <Metric
           k="Avg watch"
@@ -402,27 +326,28 @@ export default function DashboardClient({
             : '—'}
           delta={watchDelta >= 0 ? `▲ ${Math.floor(watchDelta)}s` : `▼ ${Math.floor(Math.abs(watchDelta))}s`}
           up={watchDelta >= 0}
+          context={gapScore?.watch_time_gap_score != null
+            ? `${gapScore.watch_time_gap_score}pt gap vs niche avg`
+            : undefined}
         />
         <Metric
           k="Est. monthly rev."
           v={fmtMoney(latest?.estimated_monthly_revenue)}
           delta={revDelta >= 0 ? `▲ ${fmtMoney(revDelta)}` : `▼ ${fmtMoney(Math.abs(revDelta))}`}
           up={revDelta >= 0}
+          context={gapScore?.estimated_revenue_gap != null && gapScore.estimated_revenue_gap > 0
+            ? `${fmtMoney(gapScore.estimated_revenue_gap)}/mo gap to niche`
+            : undefined}
         />
       </div>
 
       {/* ===== SPLIT: COMPETITORS + TRENDS ===== */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1.55fr 1fr',
-        marginTop: 40,
-        border: `1px solid ${T.line}`,
-      }}>
+      <div className="grid grid-cols-[1.55fr_1fr] mt-10 border border-stencil-line">
         <Col title="Competitors" sub={`${competitors?.length ?? 0} tracked`} actions={['All', 'Tier 1', 'Tier 2', 'Dominators']}>
           {competitorsSorted.length === 0 ? (
             <Empty>
               No competitors tracked yet.{' '}
-              <a href="/competitors" style={{ color: T.accent, textDecoration: 'none' }}>Add some →</a>
+              <a href="/competitors" className="text-stencil-accent no-underline">Add some →</a>
             </Empty>
           ) : competitorsSorted.map(c => {
             const compAvg = c.total_views != null && c.subscriber_count != null && c.subscriber_count > 0
@@ -430,35 +355,20 @@ export default function DashboardClient({
               : null
             const mult = compAvg != null && userAvg > 0 ? compAvg / userAvg : null
             return (
-              <div key={c.id} style={{
-                display: 'grid',
-                gridTemplateColumns: '6px 1fr 100px 70px',
-                gap: 14, alignItems: 'center',
-                padding: '13px 0',
-                borderBottom: `1px dashed ${T.line}`,
-              }}>
-                <span style={{
-                  width: 6, height: 6, borderRadius: '50%',
-                  background: c.tier === 1 ? T.accent : c.tier === 2 ? T.blue : T.amber,
-                }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>
+              <div key={c.id} className="grid grid-cols-[6px_1fr_100px_70px] gap-[14px] items-center py-[13px] border-b border-dashed border-stencil-line">
+                <span className={`size-[6px] rounded-full ${c.tier === 1 ? 'bg-stencil-accent' : c.tier === 2 ? 'bg-stencil-blue' : 'bg-stencil-amber'}`} />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium tracking-[-0.01em] truncate">
                     {c.channel_name ?? c.youtube_channel_id}
                   </div>
-                  <div style={{ fontFamily: T.mono, fontSize: 11, color: T.ink3, marginTop: 2 }}>
+                  <div className="font-mono text-[11px] text-stencil-ink3 mt-0.5">
                     {fmt(c.subscriber_count)} subs · tier {c.tier}{c.is_auto_detected ? ' · auto' : ''}
                   </div>
                 </div>
-                <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.ink2, textAlign: 'right' }}>
-                  <strong style={{ color: T.ink, fontWeight: 500 }}>{fmt(c.total_views)}</strong> views
+                <span className="font-mono text-[11.5px] text-stencil-ink2 text-right">
+                  <strong className="text-stencil-ink font-medium">{fmt(c.total_views)}</strong> views
                 </span>
-                <span style={{
-                  fontFamily: T.mono, fontSize: 11, textAlign: 'right',
-                  color: mult != null && mult > 1 ? T.accent : T.red,
-                }}>
+                <span className={`font-mono text-[11px] text-right ${mult != null && mult > 1 ? 'text-stencil-accent' : 'text-stencil-red'}`}>
                   {mult != null ? `${mult.toFixed(1)}×` : '—'}
                 </span>
               </div>
@@ -499,31 +409,30 @@ export default function DashboardClient({
       </div>
 
       {/* ===== LOWER GRID: chart + ideas + checklist ===== */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1.1fr 1fr 1fr',
-        marginTop: 24,
-        border: `1px solid ${T.line}`,
-      }}>
+      <div className="grid grid-cols-[1.1fr_1fr_1fr] mt-6 border border-stencil-line">
         <Col title="You vs. niche" sub="avg views / video" actions={['7d', '30d', '90d']} activeIdx={1}>
           {chartData.length > 1 ? (
-            <div style={{ height: 170 }}>
+            <div className="h-[170px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
                   <Line
                     type="monotone"
                     dataKey="you"
-                    stroke={T.accent}
+                    stroke="oklch(78% 0.19 145)"
                     strokeWidth={1.5}
                     dot={false}
                     isAnimationActive={false}
                   />
                   <Tooltip
                     contentStyle={{
-                      background: T.bg, border: `1px solid ${T.line}`,
-                      fontFamily: T.mono, fontSize: 11, padding: '4px 8px', color: T.ink,
+                      background: '#0A0A0A',
+                      border: '1px solid #222222',
+                      fontFamily: 'Geist Mono, monospace',
+                      fontSize: 11,
+                      padding: '4px 8px',
+                      color: '#EDEDED',
                     }}
-                    cursor={{ stroke: T.line2, strokeWidth: 1 }}
+                    cursor={{ stroke: '#2A2A2A', strokeWidth: 1 }}
                     labelFormatter={(l) => fmtWeek(String(l))}
                     formatter={(v) => [fmt(typeof v === 'number' ? v : null), 'you']}
                   />
@@ -533,48 +442,29 @@ export default function DashboardClient({
           ) : (
             <Empty>Not enough data yet.</Empty>
           )}
-          <div style={{
-            display: 'flex', gap: 14,
-            fontFamily: T.mono, fontSize: 10, color: T.ink3,
-            marginTop: 10, paddingTop: 10,
-            borderTop: `1px dashed ${T.line}`,
-          }}>
+          <div className="flex gap-[14px] font-mono text-[10px] text-stencil-ink3 mt-[10px] pt-[10px] border-t border-dashed border-stencil-line">
             <span>
-              <span style={{
-                display: 'inline-block', width: 8, height: 8,
-                background: T.accent, marginRight: 6, verticalAlign: -1,
-              }} />
+              <span className="inline-block size-2 bg-stencil-accent mr-[6px] align-[-1px]" />
               you
             </span>
-            <span style={{ marginLeft: 'auto' }}>{snapshots.length} snapshots tracked</span>
+            <span className="ml-auto">{snapshots.length} snapshots tracked</span>
           </div>
         </Col>
 
         <Col title="Top ideas" sub="this week" actions={['all']}>
           {(latestDigest?.video_ideas ?? []).length > 0 ? (
             (latestDigest?.video_ideas ?? []).slice(0, 3).map((idea, i) => (
-              <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '24px 1fr 50px',
-                gap: 12, alignItems: 'flex-start',
-                padding: '11px 0',
-                borderBottom: `1px dashed ${T.line}`,
-              }}>
-                <div style={{
-                  fontFamily: T.serif, fontStyle: 'italic',
-                  fontSize: 22, color: T.ink3, lineHeight: 1,
-                }}>
+              <div key={i} className="grid grid-cols-[24px_1fr_50px] gap-3 items-start py-[11px] border-b border-dashed border-stencil-line">
+                <div className="font-serif italic text-[22px] text-stencil-ink3 leading-none">
                   {String(i + 1).padStart(2, '0')}
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, lineHeight: 1.35, letterSpacing: '-0.005em' }}>
+                  <div className="text-[13px] leading-[1.35] tracking-[-0.005em]">
                     &ldquo;{idea.title}&rdquo;
                   </div>
-                  <div style={{
-                    fontFamily: T.mono, fontSize: 10.5, color: T.ink3,
-                    marginTop: 3, display: 'flex', gap: 8,
-                  }}>
+                  <div className="font-mono text-[10.5px] text-stencil-ink3 mt-[3px] flex gap-2">
                     {idea.suggestedLength && (
-                      <span style={{ padding: '1px 5px', border: `1px solid ${T.line}` }}>
+                      <span className="px-[5px] py-[1px] border border-stencil-line">
                         {idea.suggestedLength}
                       </span>
                     )}
@@ -583,10 +473,7 @@ export default function DashboardClient({
                     )}
                   </div>
                 </div>
-                <div style={{
-                  fontFamily: T.mono, fontSize: 11.5,
-                  color: T.accent, textAlign: 'right', fontWeight: 500,
-                }}>
+                <div className="font-mono text-[11.5px] text-stencil-accent text-right font-medium">
                   {idea.opportunityScore}
                 </div>
               </div>
@@ -597,22 +484,13 @@ export default function DashboardClient({
         </Col>
 
         <Col title="Setup checklist" actions={[`${doneCount}/${checklist.length}`]}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+          <div className="flex flex-col gap-[11px]">
             {checklist.map(({ label, done }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
-                <div style={{
-                  width: 14, height: 14,
-                  border: `1px solid ${done ? T.accent : T.line2}`,
-                  background: done ? T.accent : 'transparent',
-                  flex: 'none', display: 'grid', placeItems: 'center',
-                  fontSize: 9, color: T.bg,
-                }}>
+              <div key={label} className="flex items-center gap-[10px] text-[13px]">
+                <div className={`size-[14px] border grid place-items-center shrink-0 text-[9px] text-stencil-bg ${done ? 'border-stencil-accent bg-stencil-accent' : 'border-stencil-line2 bg-transparent'}`}>
                   {done && '✓'}
                 </div>
-                <span style={{
-                  color: done ? T.ink3 : T.ink,
-                  textDecoration: done ? 'line-through' : 'none',
-                }}>
+                <span className={done ? 'text-stencil-ink3 line-through' : 'text-stencil-ink'}>
                   {label}
                 </span>
               </div>
@@ -622,20 +500,10 @@ export default function DashboardClient({
       </div>
 
       {/* ===== DIGESTS TABLE ===== */}
-      <div style={{ marginTop: 24, border: `1px solid ${T.line}` }}>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '140px 70px 1fr 110px',
-          gap: 16, padding: '12px 22px',
-          borderBottom: `1px solid ${T.line}`,
-          background: T.bg2,
-        }}>
+      <div className="mt-6 border border-stencil-line">
+        <div className="grid grid-cols-[140px_70px_1fr_110px] gap-4 px-[22px] py-3 border-b border-stencil-line bg-stencil-bg2">
           {['Week', 'Score', 'Headline', 'Status'].map(h => (
-            <span key={h} style={{
-              fontFamily: T.mono, fontSize: 10.5,
-              letterSpacing: '0.14em', textTransform: 'uppercase',
-              color: T.ink3,
-            }}>{h}</span>
+            <span key={h} className="font-mono text-[10.5px] tracking-[0.14em] uppercase text-stencil-ink3">{h}</span>
           ))}
         </div>
 
@@ -649,44 +517,24 @@ export default function DashboardClient({
             : '—'
 
           return (
-            <a key={d.id} href="/digest" style={{
-              display: 'grid',
-              gridTemplateColumns: '140px 70px 1fr 110px',
-              gap: 16, padding: '14px 22px',
-              borderBottom: `1px dashed ${T.line}`,
-              alignItems: 'center',
-              textDecoration: 'none',
-              color: 'inherit',
-            }}>
-              <span style={{ fontFamily: T.mono, fontSize: 11.5, color: T.ink2 }}>
+            <a key={d.id} href="/digest" className="grid grid-cols-[140px_70px_1fr_110px] gap-4 px-[22px] py-[14px] border-b border-dashed border-stencil-line items-center no-underline text-inherit">
+              <span className="font-mono text-[11.5px] text-stencil-ink2">
                 {fmtWeek(d.week_start_date)}
               </span>
-              <span style={{
-                fontFamily: T.mono, fontSize: 13, fontWeight: 500,
-                color: scoreNum != null ? gapColor(scoreNum) : T.ink4,
-              }}>
+              <span className={`font-mono text-[13px] font-medium ${scoreNum != null ? gapColorClass(scoreNum) : 'text-stencil-ink4'}`}>
                 {scoreNum ?? '—'}
               </span>
-              <span style={{
-                fontSize: 13, color: T.ink2,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
+              <span className="text-[13px] text-stencil-ink2 truncate">
                 {preview}
               </span>
-              <span style={{
-                fontFamily: T.mono, fontSize: 10.5, color: T.ink3,
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-              }}>
-                <span style={{
-                  width: 5, height: 5, borderRadius: '50%',
-                  background: d.email_sent_at ? T.accent : T.ink3,
-                }} />
+              <span className="font-mono text-[10.5px] text-stencil-ink3 inline-flex items-center gap-[6px]">
+                <span className={`size-[5px] rounded-full ${d.email_sent_at ? 'bg-stencil-accent' : 'bg-stencil-ink3'}`} />
                 {d.email_sent_at ? 'Delivered' : 'Draft'}
               </span>
             </a>
           )
         }) : (
-          <div style={{ padding: '32px 22px', textAlign: 'center' }}>
+          <div className="px-[22px] py-8 text-center">
             <Empty>No digests generated yet. Your first arrives Monday.</Empty>
           </div>
         )}
@@ -699,13 +547,7 @@ export default function DashboardClient({
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{
-      background: T.bg, color: T.ink,
-      fontFamily: T.sans,
-      minHeight: '100%',
-      padding: 28,
-      maxWidth: 1480,
-    }}>
+    <div className="bg-stencil-bg text-stencil-ink font-sans min-h-full p-7 max-w-[1480px]">
       {children}
     </div>
   )
@@ -713,40 +555,32 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      fontFamily: T.mono, fontSize: 11, color: T.ink2,
-      border: `1px solid ${T.line}`, padding: '5px 10px',
-    }}>
+    <div className="flex items-center gap-2 font-mono text-[11px] text-stencil-ink2 border border-stencil-line px-[10px] py-[5px]">
       {children}
     </div>
   )
 }
 
 function Metric({
-  k, v, unit, delta, up,
-}: { k: string; v: string; unit?: string; delta: string; up: boolean }) {
+  k, v, unit, delta, up, context,
+}: { k: string; v: string; unit?: string; delta: string; up: boolean; context?: string }) {
   return (
-    <div style={{
-      padding: '16px 18px',
-      borderRight: `1px solid ${T.line}`,
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
+    <div className="p-[16px_18px] border-r border-stencil-line flex flex-col gap-[6px]">
       <Eyebrow>{k}</Eyebrow>
-      <div style={{
-        fontSize: 24, fontWeight: 500, letterSpacing: '-0.02em',
-        display: 'flex', alignItems: 'baseline', gap: 4,
-      }}>
+      <div className="text-2xl font-medium tracking-[-0.02em] flex items-baseline gap-1">
         {v}
         {unit && (
-          <span style={{ fontFamily: T.mono, fontSize: 11, color: T.ink3, fontWeight: 400 }}>
-            {unit}
-          </span>
+          <span className="font-mono text-[11px] text-stencil-ink3 font-normal">{unit}</span>
         )}
       </div>
-      <div style={{ fontFamily: T.mono, fontSize: 11, color: up ? T.accent : T.red }}>
+      <div className={`font-mono text-[11px] ${up ? 'text-stencil-accent' : 'text-stencil-red'}`}>
         {delta}
       </div>
+      {context && (
+        <div className="font-mono text-[10px] text-stencil-ink3 border-t border-dashed border-stencil-line pt-[5px] mt-[2px]">
+          {context}
+        </div>
+      )}
     </div>
   )
 }
@@ -761,25 +595,16 @@ function Col({
   children: React.ReactNode
 }) {
   return (
-    <div style={{ padding: '20px 22px', borderRight: `1px solid ${T.line}` }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 16,
-      }}>
+    <div className="p-[20px_22px] border-r border-stencil-line">
+      <div className="flex items-center justify-between mb-4">
         <Eyebrow strong>
           {title}
-          {sub && <span style={{ color: T.ink3, fontWeight: 400 }}> &nbsp;→ {sub}</span>}
+          {sub && <span className="text-stencil-ink3 font-normal"> &nbsp;→ {sub}</span>}
         </Eyebrow>
         {actions && (
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="flex gap-[6px]">
             {actions.map((a, i) => (
-              <span key={a} style={{
-                fontFamily: T.mono, fontSize: 10.5,
-                padding: '2px 6px',
-                border: `1px solid ${i === activeIdx ? T.ink2 : T.line}`,
-                color: i === activeIdx ? T.ink : T.ink3,
-                cursor: 'pointer',
-              }}>
+              <span key={a} className={`font-mono text-[10.5px] px-[6px] py-[2px] border cursor-pointer ${i === activeIdx ? 'border-stencil-ink2 text-stencil-ink' : 'border-stencil-line text-stencil-ink3'}`}>
                 {a}
               </span>
             ))}
@@ -801,40 +626,25 @@ function TrendRow({
   time: string
   kind: 'viral' | 'topic' | 'default'
 }) {
-  const dotColor = kind === 'viral' ? T.red : kind === 'topic' ? T.blue : T.amber
+  const dotClass = kind === 'viral' ? 'bg-stencil-red' : kind === 'topic' ? 'bg-stencil-blue' : 'bg-stencil-amber'
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '14px 1fr auto',
-      gap: 14, alignItems: 'flex-start',
-      padding: '12px 0',
-      borderBottom: `1px dashed ${T.line}`,
-    }}>
-      <div style={{ width: 1, background: T.line2, height: '100%', justifySelf: 'center', position: 'relative' }}>
-        <span style={{
-          position: 'absolute', top: 4, left: '50%',
-          width: 7, height: 7, borderRadius: '50%',
-          background: dotColor,
-          transform: 'translateX(-50%)',
-        }} />
+    <div className="grid grid-cols-[14px_1fr_auto] gap-[14px] items-start py-3 border-b border-dashed border-stencil-line">
+      <div className="w-px bg-stencil-line2 h-full justify-self-center relative">
+        <span className={`absolute top-1 left-1/2 size-[7px] rounded-full -translate-x-1/2 ${dotClass}`} />
       </div>
       <div>
-        <div style={{ fontSize: 13, lineHeight: 1.45 }}>
-          <span style={{ color: T.ink, fontWeight: 500 }}>{channel}</span>
-          <span style={{ color: T.ink2 }}>{what}</span>
-          <span style={{
-            fontFamily: T.mono, fontSize: 11.5,
-            padding: '1px 4px',
-            background: T.surface, border: `1px solid ${T.line}`,
-            color: T.ink,
-          }}>
+        <div className="text-[13px] leading-[1.45]">
+          <span className="text-stencil-ink font-medium">{channel}</span>
+          <span className="text-stencil-ink2">{what}</span>
+          <span className="font-mono text-[11.5px] px-1 bg-stencil-surface border border-stencil-line text-stencil-ink">
             {obj}
           </span>
         </div>
-        <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.ink3, marginTop: 3 }}>
+        <div className="font-mono text-[10.5px] text-stencil-ink3 mt-[3px]">
           {sub}
         </div>
       </div>
-      <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.ink3, whiteSpace: 'nowrap' }}>
+      <div className="font-mono text-[10.5px] text-stencil-ink3 whitespace-nowrap">
         {time}
       </div>
     </div>
@@ -843,10 +653,7 @@ function TrendRow({
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{
-      fontFamily: T.mono, fontSize: 11.5, color: T.ink3,
-      padding: '20px 0', textAlign: 'center',
-    }}>
+    <div className="font-mono text-[11.5px] text-stencil-ink3 py-5 text-center">
       {children}
     </div>
   )

@@ -1,1 +1,50 @@
 @import "tailwindcss";
+
+@theme {
+  /* Stencil backgrounds */
+  --color-stencil-bg:       #0A0A0A;
+  --color-stencil-bg2:      #111111;
+  --color-stencil-surface:  #141414;
+  --color-stencil-surface2: #1A1A1A;
+
+  /* Stencil lines */
+  --color-stencil-line:  #222222;
+  --color-stencil-line2: #2A2A2A;
+
+  /* Stencil ink */
+  --color-stencil-ink:  #EDEDED;
+  --color-stencil-ink2: #A1A1A1;
+  --color-stencil-ink3: #6E6E6E;
+  --color-stencil-ink4: #4A4A4A;
+
+  /* Stencil accents */
+  --color-stencil-accent: oklch(78% 0.19 145);
+  --color-stencil-amber:  oklch(78% 0.17 75);
+  --color-stencil-blue:   oklch(72% 0.14 235);
+  --color-stencil-red:    oklch(63% 0.22 25);
+
+  /* Fonts */
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans:  "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:  "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Animations */
+  --animate-stencil-pulse: stencil-pulse 2s ease-in-out infinite;
+}
+
+@keyframes stencil-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+body {
+  background: #0A0A0A;
+  color: #EDEDED;
+  -webkit-font-smoothing: antialiased;
+}
+
+.bg-stencil-grid {
+  background:
+    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 100% 24px,
+    #111111;
+}
