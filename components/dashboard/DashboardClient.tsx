@@ -6,6 +6,7 @@ import { signOut } from 'next-auth/react'
 import {
   LineChart,
   Line,
+  XAxis,
   ResponsiveContainer,
   Tooltip,
 } from 'recharts'
@@ -198,7 +199,7 @@ export default function DashboardClient({
   const revDelta   = (latest?.estimated_monthly_revenue ?? 0) - (earlier?.estimated_monthly_revenue ?? 0)
 
   const chartData = snapshots.slice(-30).map((s) => ({
-    date: s.snapshot_date,
+    date: new Date(s.snapshot_date).getTime(),
     you: s.avg_views_per_video ?? 0,
   }))
 
@@ -449,6 +450,7 @@ export default function DashboardClient({
             <div style={{ height: 170, width: '100%' }}>
               <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
+                  <XAxis dataKey="date" type="number" domain={['dataMin', 'dataMax']} hide />
                   <Line
                     type="monotone"
                     dataKey="you"
@@ -467,7 +469,7 @@ export default function DashboardClient({
                       color: '#EDEDED',
                     }}
                     cursor={{ stroke: '#2A2A2A', strokeWidth: 1 }}
-                    labelFormatter={(l) => fmtWeek(String(l))}
+                    labelFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     formatter={(v) => [fmt(typeof v === 'number' ? v : null), 'you']}
                   />
                 </LineChart>
