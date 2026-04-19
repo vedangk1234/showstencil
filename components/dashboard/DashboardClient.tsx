@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { signOut } from 'next-auth/react'
 import {
   LineChart,
   Line,
@@ -131,6 +132,25 @@ export default function DashboardClient({
             <p className="text-stencil-ink3 text-xs m-0 mt-1.5 font-mono">
               first sync · 10–15s
             </p>
+          </div>
+        </div>
+      </Shell>
+    )
+  }
+
+  // ── No channel connected ───────────────────────────────────────────────────
+  if (!user?.youtube_channel_id) {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center justify-center min-h-[70vh] gap-4">
+          <h2 className="font-serif italic text-[40px] m-0 tracking-[-0.025em]">
+            No YouTube Channel Connected
+          </h2>
+          <p className="text-stencil-ink2 text-[13.5px] m-0 max-w-[40ch] text-center">
+            Sign out and sign in again to authorize YouTube access.
+          </p>
+          <div className="mt-2">
+            <Btn primary onClick={() => signOut()}>Sign Out</Btn>
           </div>
         </div>
       </Shell>

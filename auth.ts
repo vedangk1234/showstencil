@@ -52,6 +52,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           console.error('[auth] upsert error:', error.message)
           return false
         }
+
+        // Fetch and save YouTube channel ID
+        if (account.access_token) {
+          const channelId = await getYouTubeChannelId(account.access_token)
+          if (channelId) {
+            console.log('[auth] YouTube channel ID:', channelId)
+            await supabase
+              .from('users')
+              .update({ youtube_channel_id: channelId, updated_at: new Date().toISOString() })
+              .eq('email', user.email)
+          } else {
+            console.warn('[auth] Could not fetch YouTube channel ID for', user.email)
+          }
+        }
+
         return true
       } catch (err) {
         console.error('[auth] signIn error:', err)
@@ -98,6 +113,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 })
+
+async function getYouTubeChannelId(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      'https://www.googleapis.com/youtube/v3/channels?part=id&mine=true',
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    const data = await res.json() as { items?: { id: string }[] }
+    return data.items?.[0]?.id ?? null
+  } catch (err) {
+    console.error('[auth] getYouTubeChannelId error:', err)
+    return null
+  }
+}
 
 async function refreshGoogleToken(token: JWT): Promise<JWT> {
   try {
