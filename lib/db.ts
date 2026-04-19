@@ -139,6 +139,7 @@ export async function saveVideoData(
 
 /**
  * Updates a competitor row and replaces all their stored videos with fresh data.
+ * Also recalculates the tier based on the user's current subscriber count.
  *
  * @returns true on success, false if the competitor row update failed
  */
@@ -148,7 +149,33 @@ export async function saveCompetitorData(
 ): Promise<boolean> {
   const supabase = createServiceClient()
 
-  // Update the competitor channel metadata
+  // Look up the competitor's user_id so we can recalculate tier
+  const { data: compRow } = await supabase
+    .from('competitors')
+    .select('user_id')
+    .eq('id', competitorId)
+    .single()
+
+  let tier: number | undefined
+  if (compRow?.user_id) {
+    const { data: snapshot } = await supabase
+      .from('channel_snapshots')
+      .select('subscriber_count')
+      .eq('user_id', compRow.user_id)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    const userSubCount: number = snapshot?.subscriber_count ?? 0
+    const compSubCount = profile.channel.subscriberCount
+
+    if (userSubCount > 0 && compSubCount > 0) {
+      const ratio = compSubCount / userSubCount
+      tier = ratio <= 3 ? 1 : ratio <= 10 ? 2 : 3
+    }
+  }
+
+  // Update the competitor channel metadata (tier included when calculable)
   const { error: competitorError } = await supabase
     .from('competitors')
     .update({
@@ -157,6 +184,7 @@ export async function saveCompetitorData(
       subscriber_count: profile.channel.subscriberCount,
       total_views: profile.channel.totalViews,
       last_synced_at: new Date().toISOString(),
+      ...(tier !== undefined ? { tier } : {}),
     })
     .eq('id', competitorId)
 

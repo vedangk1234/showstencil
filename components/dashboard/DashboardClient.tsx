@@ -62,6 +62,15 @@ function fmtWeek(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+function getTierLabel(tier: number | null | undefined): string {
+  switch (tier) {
+    case 1: return 'Similar (1-3×)'
+    case 2: return 'Aspirational (3-10×)'
+    case 3: return 'Dominant (10×+)'
+    default: return 'Unknown'
+  }
+}
+
 function gapColorClass(score: number): string {
   if (score >= 70) return 'text-stencil-accent'
   if (score >= 40) return 'text-stencil-amber'
@@ -387,7 +396,7 @@ export default function DashboardClient({
                     {c.channel_name ?? c.youtube_channel_id}
                   </div>
                   <div className="font-mono text-[11px] text-stencil-ink3 mt-0.5">
-                    {fmt(c.subscriber_count)} subs · tier {c.tier}{c.is_auto_detected ? ' · auto' : ''}
+                    {fmt(c.subscriber_count)} subs · {getTierLabel(c.tier)}{c.is_auto_detected ? ' · auto' : ''}
                   </div>
                 </div>
                 <span className="font-mono text-[11.5px] text-stencil-ink2 text-right">
