@@ -412,7 +412,7 @@ export default function DashboardClient({
       <div className="grid grid-cols-[1.1fr_1fr_1fr] mt-6 border border-stencil-line">
         <Col title="You vs. niche" sub="avg views / video" actions={['7d', '30d', '90d']} activeIdx={1}>
           {chartData.length > 1 ? (
-            <div className="h-[170px] w-full">
+            <div className="w-full" style={{ height: 170 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
                   <Line
