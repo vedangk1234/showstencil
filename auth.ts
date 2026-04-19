@@ -95,9 +95,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token
       }
 
-      // Subsequent requests: return token if still valid (with 60s buffer)
+      // Subsequent requests: return token if still valid (with 5-minute buffer)
       const expiresAt = token.expiresAt
-      if (!expiresAt || Date.now() < expiresAt * 1000 - 60_000) {
+      if (!expiresAt || Date.now() < expiresAt * 1000 - 300_000) {
         return token
       }
 
@@ -109,6 +109,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       session.user.id = token.userId ?? ''
       session.user.subscriptionStatus = token.subscriptionStatus ?? 'free'
+      session.accessToken = token.accessToken
       return session
     },
   },
