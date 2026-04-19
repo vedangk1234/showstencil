@@ -418,7 +418,7 @@ export default function DashboardClient({
         <Col title="You vs. niche" sub="avg views / video" actions={['7d', '30d', '90d']} activeIdx={1}>
           {mounted && chartData.length > 1 ? (
             <div style={{ height: 170, width: '100%' }}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
                   <Line
                     type="monotone"
