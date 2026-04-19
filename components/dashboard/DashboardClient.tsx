@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   LineChart,
@@ -108,6 +108,11 @@ export default function DashboardClient({
 }: Props) {
   const { isSyncing } = useSyncStatus()
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     if (!isSyncing && snapshots.length === 0) router.refresh()
@@ -411,8 +416,8 @@ export default function DashboardClient({
       {/* ===== LOWER GRID: chart + ideas + checklist ===== */}
       <div className="grid grid-cols-[1.1fr_1fr_1fr] mt-6 border border-stencil-line">
         <Col title="You vs. niche" sub="avg views / video" actions={['7d', '30d', '90d']} activeIdx={1}>
-          {chartData.length > 1 ? (
-            <div className="w-full" style={{ height: 170 }}>
+          {mounted && chartData.length > 1 ? (
+            <div style={{ height: 170, width: '100%' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
                   <Line
