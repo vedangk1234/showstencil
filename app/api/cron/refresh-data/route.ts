@@ -15,8 +15,8 @@ import { createServiceClient } from '@/lib/supabase'
 
 export async function GET(request: Request) {
   // ── Auth check ─────────────────────────────────────────────────────────────
-  const cronSecret = request.headers.get('x-cron-secret')
-  if (cronSecret !== process.env.CRON_SECRET) {
+  const authHeader = request.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
