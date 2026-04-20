@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { TierBadge } from './TierBadge'
 import { UpgradeBanner } from './UpgradeBanner'
 import { PlanLimitIndicator } from './PlanLimitIndicator'
+import { ChannelSearchBar } from './ChannelSearchBar'
 import type { Competitor } from '@/types'
 import type { PlanLimits } from '@/lib/plan-limits'
 
@@ -55,8 +57,6 @@ export function CompetitorsTable({ competitors, user, planLimits }: CompetitorsT
     return competitors
   }, [competitors, filter])
 
-  const isPro = user.subscription_plan === 'pro'
-
   return (
     <div style={{
       minHeight: '100vh',
@@ -87,23 +87,13 @@ export function CompetitorsTable({ competitors, user, planLimits }: CompetitorsT
       </div>
 
       {/* Search section */}
-      {!isPro ? (
+      {!planLimits.canUseSearch ? (
         <UpgradeBanner
           feature="Search & Compare Any YouTuber"
-          description="Upgrade to Pro to search and compare your channel against any YouTuber on YouTube."
+          description="Upgrade to Starter or Pro to search and compare your channel against any YouTuber on YouTube."
         />
       ) : (
-        <div style={{
-          marginBottom: 24,
-          padding: '14px 16px',
-          background: '#0a0a0a',
-          border: '1px dashed #1a1a1a',
-          borderRadius: 8,
-        }}>
-          <p style={{ color: '#444444', fontSize: 12, margin: 0, fontFamily: 'monospace' }}>
-            🔍 Channel search coming in Phase 2
-          </p>
-        </div>
+        <ChannelSearchBar planLimits={planLimits} plan={user.subscription_plan} />
       )}
 
       {/* Filter tabs */}
@@ -184,6 +174,7 @@ export function CompetitorsTable({ competitors, user, planLimits }: CompetitorsT
 }
 
 function CompetitorRow({ competitor }: { competitor: Competitor }) {
+  const router = useRouter()
   const matchScore = competitor.sub_niche_match_score
   const matchLabel =
     matchScore == null
@@ -195,14 +186,21 @@ function CompetitorRow({ competitor }: { competitor: Competitor }) {
       : { text: '○ Different', color: '#555555' }
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '1fr 100px 160px 140px 120px',
-      gap: 16,
-      padding: '14px 20px',
-      borderBottom: '1px solid #111111',
-      alignItems: 'center',
-    }}>
+    <div
+      onClick={() => router.push(`/competitors/${competitor.id}`)}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 100px 160px 140px 120px',
+        gap: 16,
+        padding: '14px 20px',
+        borderBottom: '1px solid #111111',
+        alignItems: 'center',
+        cursor: 'pointer',
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#0a0a0a' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+    >
       {/* Channel */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
         {competitor.channel_thumbnail ? (

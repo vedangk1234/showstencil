@@ -1,0 +1,198 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+
+interface InsightsTabProps {
+  user: Record<string, unknown>
+  competitor: Record<string, unknown>
+}
+
+interface Insight {
+  type: 'observation' | 'recommendation' | 'strength' | 'gap'
+  title: string
+  description: string
+  priority: 'high' | 'medium' | 'low'
+}
+
+const TYPE_STYLES: Record<
+  string,
+  { label: string; color: string; bg: string; border: string }
+> = {
+  observation: { label: 'OBSERVATION', color: '#60a5fa', bg: '#0a1628', border: '#1d3a6e' },
+  recommendation: { label: 'RECOMMENDATION', color: '#4ade80', bg: '#0a2018', border: '#1d5e3a' },
+  strength: { label: 'STRENGTH', color: '#a78bfa', bg: '#120a28', border: '#3a1d6e' },
+  gap: { label: 'GAP', color: '#f87171', bg: '#280a0a', border: '#6e1d1d' },
+}
+
+const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 }
+
+export function InsightsTab({ user, competitor }: InsightsTabProps) {
+  const [insights, setInsights] = useState<Insight[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function loadInsights() {
+      try {
+        const res = await fetch('/api/competitors/insights', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ competitor_id: competitor.id }),
+        })
+
+        if (!res.ok) {
+          const data = await res.json()
+          setError(data.error || 'Failed to load insights')
+          return
+        }
+
+        const data = await res.json()
+        const sorted = (data.insights || []).sort(
+          (a: Insight, b: Insight) =>
+            (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2),
+        )
+        setInsights(sorted)
+      } catch {
+        setError('Failed to generate insights')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadInsights()
+  }, [competitor.id])
+
+  if (loading) {
+    return (
+      <div style={{ padding: '48px 0', textAlign: 'center' }}>
+        <div
+          style={{
+            display: 'inline-block',
+            width: 24,
+            height: 24,
+            border: '2px solid #1a1a1a',
+            borderTopColor: '#4ade80',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+            marginBottom: 12,
+          }}
+        />
+        <p style={{ color: '#555555', fontSize: 13, margin: 0 }}>
+          Generating AI insights for {competitor.channel_name as string}…
+        </p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div
+        style={{
+          padding: '32px 20px',
+          background: '#0a0a0a',
+          border: '1px solid #1a1a1a',
+          borderRadius: 8,
+          textAlign: 'center',
+        }}
+      >
+        <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>{error}</p>
+      </div>
+    )
+  }
+
+  if (insights.length === 0) {
+    return (
+      <div
+        style={{
+          padding: '48px 24px',
+          textAlign: 'center',
+          background: '#0a0a0a',
+          border: '1px dashed #1a1a1a',
+          borderRadius: 8,
+        }}
+      >
+        <p style={{ color: '#888888', fontSize: 13, margin: 0 }}>
+          No insights available. Add more competitor video data first.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <p style={{ color: '#555555', fontSize: 12, marginBottom: 20, fontFamily: 'monospace' }}>
+        AI analysis comparing you to {competitor.channel_name as string}
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {insights.map((insight, i) => {
+          const style = TYPE_STYLES[insight.type] || TYPE_STYLES.observation
+          const isPriHigh = insight.priority === 'high'
+
+          return (
+            <div
+              key={i}
+              style={{
+                padding: '16px 20px',
+                background: '#0a0a0a',
+                border: `1px solid ${isPriHigh ? style.border : '#1a1a1a'}`,
+                borderRadius: 8,
+              }}
+            >
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    fontFamily: 'monospace',
+                    letterSpacing: '0.1em',
+                    color: style.color,
+                    background: style.bg,
+                    border: `1px solid ${style.border}`,
+                    borderRadius: 3,
+                    padding: '2px 6px',
+                  }}
+                >
+                  {style.label}
+                </span>
+                {isPriHigh && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontFamily: 'monospace',
+                      color: '#fbbf24',
+                      letterSpacing: '0.1em',
+                    }}
+                  >
+                    HIGH PRIORITY
+                  </span>
+                )}
+              </div>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: '#ffffff',
+                  marginBottom: 6,
+                  lineHeight: 1.3,
+                }}
+              >
+                {insight.title}
+              </div>
+              <div style={{ fontSize: 13, color: '#888888', lineHeight: 1.6 }}>
+                {insight.description}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <p style={{ fontSize: 11, color: '#333333', marginTop: 16, fontFamily: 'monospace' }}>
+        Generated by Claude · Based on publicly available data
+      </p>
+    </div>
+  )
+}
