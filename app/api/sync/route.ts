@@ -117,6 +117,22 @@ export async function POST(request: Request) {
     }
   }
 
+  // Trigger sub-niche detection after first sync (only if not yet detected)
+  // Fire-and-forget — never block the sync response on this
+  if (videosSynced > 0) {
+    const freshUser = await getUser(userId)
+    if (!freshUser?.sub_niche) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+      fetch(`${appUrl}/api/users/detect-sub-niche`, {
+        method: 'POST',
+        headers: {
+          'x-cron-user-id': userId,
+          'x-cron-secret': process.env.CRON_SECRET ?? '',
+        },
+      }).catch((err) => console.error('[sync] Sub-niche detection trigger failed:', err))
+    }
+  }
+
   const elapsed = Date.now() - start
   console.log(`[sync] Completed for user ${userId} in ${elapsed}ms — snapshot: ${channelSnapshot}, videos: ${videosSynced}`)
 

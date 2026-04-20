@@ -162,12 +162,19 @@ export async function saveVideoData(
 /**
  * Updates a competitor row and replaces all their stored videos with fresh data.
  * Also recalculates the tier based on the user's current subscriber count.
+ * Preserves sub_niche and is_dominator fields when not explicitly provided.
  *
  * @returns true on success, false if the competitor row update failed
  */
 export async function saveCompetitorData(
   competitorId: string,
   profile: CompetitorFullProfile,
+  extra?: {
+    sub_niche?: string | null
+    sub_niche_keywords?: string[] | null
+    is_dominator?: boolean
+    sub_niche_match_score?: number | null
+  },
 ): Promise<boolean> {
   const supabase = createServiceClient()
 
@@ -197,7 +204,7 @@ export async function saveCompetitorData(
     }
   }
 
-  // Update the competitor channel metadata (tier included when calculable)
+  // Update the competitor channel metadata (tier and sub_niche fields included when provided)
   const { error: competitorError } = await supabase
     .from('competitors')
     .update({
@@ -207,6 +214,10 @@ export async function saveCompetitorData(
       total_views: profile.channel.totalViews,
       last_synced_at: new Date().toISOString(),
       ...(tier !== undefined ? { tier } : {}),
+      ...(extra?.sub_niche !== undefined ? { sub_niche: extra.sub_niche } : {}),
+      ...(extra?.sub_niche_keywords !== undefined ? { sub_niche_keywords: extra.sub_niche_keywords } : {}),
+      ...(extra?.is_dominator !== undefined ? { is_dominator: extra.is_dominator } : {}),
+      ...(extra?.sub_niche_match_score !== undefined ? { sub_niche_match_score: extra.sub_niche_match_score } : {}),
     })
     .eq('id', competitorId)
 

@@ -14,6 +14,10 @@ export interface User {
   token_expires_at: string | null;
   niche_id: string | null;
   niche_detected_at: string | null;
+  sub_niche: string | null;
+  sub_niche_keywords: string[] | null;
+  sub_niche_confidence: number | null;
+  sub_niche_detected_at: string | null;
   subscription_status: SubscriptionStatus;
   subscription_plan: PlanType;
   lemon_squeezy_customer_id: string | null;
@@ -84,6 +88,12 @@ export interface Competitor {
   tier: 1 | 2 | 3; // 1 = similar, 2 = aspirational, 3 = dominator
   is_auto_detected: boolean;
   is_active: boolean;
+  is_dominator: boolean;
+  is_searched: boolean;
+  searched_at: string | null;
+  sub_niche: string | null;
+  sub_niche_keywords: string[] | null;
+  sub_niche_match_score: number | null;
   last_synced_at: string | null;
   created_at: string;
 }

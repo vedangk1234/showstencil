@@ -221,9 +221,11 @@ export default function DashboardClient({
 
   const userAvg = latest?.avg_views_per_video ?? 1
   const activeCompetitors = competitors?.filter(c => c.is_active) ?? []
-  const competitorsSorted = [...activeCompetitors]
-    .sort((a, b) => (b.subscriber_count ?? 0) - (a.subscriber_count ?? 0))
-    .slice(0, 6)
+  // Show 1 Tier 1 + 1 Tier 2 on the dashboard; Dominators are excluded here
+  const dashboardCompetitors = [
+    activeCompetitors.find(c => c.tier === 1 && !c.is_dominator) ?? null,
+    activeCompetitors.find(c => c.tier === 2 && !c.is_dominator) ?? null,
+  ].filter((c): c is typeof activeCompetitors[number] => c !== null)
 
   return (
     <Shell>
@@ -386,12 +388,12 @@ export default function DashboardClient({
       {/* ===== SPLIT: COMPETITORS + TRENDS ===== */}
       <div className="grid grid-cols-[1.55fr_1fr] mt-10 border border-stencil-line">
         <Col title="Competitors" sub={`${competitors?.length ?? 0} tracked`} actions={['All', 'Tier 1', 'Tier 2', 'Dominators']}>
-          {competitorsSorted.length === 0 ? (
+          {dashboardCompetitors.length === 0 ? (
             <Empty>
               No competitors tracked yet.{' '}
               <a href="/competitors" className="text-stencil-accent no-underline">Add some →</a>
             </Empty>
-          ) : competitorsSorted.map(c => {
+          ) : dashboardCompetitors.map(c => {
             const compAvg = c.total_views != null && c.subscriber_count != null && c.subscriber_count > 0
               ? Math.round(c.total_views / c.subscriber_count * 1000) / 10
               : null
@@ -416,6 +418,12 @@ export default function DashboardClient({
               </div>
             )
           })}
+          <a
+            href="/competitors"
+            className="font-mono text-[11px] text-stencil-ink3 hover:text-stencil-ink mt-3 pt-3 border-t border-dashed border-stencil-line block no-underline"
+          >
+            View all competitors →
+          </a>
         </Col>
 
         <Col title="Trend Radar" actions={['7d', '30d']}>
