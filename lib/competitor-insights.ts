@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import type { Insight } from '@/types'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -21,13 +22,6 @@ export interface InsightCompetitorMetrics {
   sub_niche: string
   top_videos: Array<{ title: string; views: number }>
   publishing_days: string[]
-}
-
-export interface Insight {
-  type: 'observation' | 'recommendation' | 'strength' | 'gap'
-  title: string
-  description: string
-  priority: 'high' | 'medium' | 'low'
 }
 
 export async function generateCompetitorInsights(

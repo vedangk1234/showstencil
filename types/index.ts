@@ -76,6 +76,14 @@ export interface Video {
   synced_at: string;
 }
 
+// Insight (Claude-generated strategic insight for a competitor comparison)
+export interface Insight {
+  type: 'observation' | 'recommendation' | 'strength' | 'gap';
+  title: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
 // Competitor (channels tracked for each user)
 export interface Competitor {
   id: string;
@@ -94,7 +102,29 @@ export interface Competitor {
   sub_niche: string | null;
   sub_niche_keywords: string[] | null;
   sub_niche_match_score: number | null;
+  video_count: number | null;
+  avg_views_per_video: number | null;
+  avg_video_length_seconds: number | null;
+  upload_frequency_30d: number | null;
+  insights: Insight[] | null;
+  insights_generated_at: string | null;
+  replacement_locked_until: string | null;
   last_synced_at: string | null;
+  created_at: string;
+}
+
+// CompetitorSnapshot (daily historical data per competitor)
+export interface CompetitorSnapshot {
+  id: string;
+  competitor_id: string;
+  snapshot_date: string; // YYYY-MM-DD
+  subscriber_count: number | null;
+  total_views: number | null;
+  video_count: number | null;
+  avg_views_per_video: number | null;
+  avg_video_length_seconds: number | null;
+  upload_frequency_30d: number | null;
+  velocity_score_avg: number | null;
   created_at: string;
 }
 

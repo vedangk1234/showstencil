@@ -12,7 +12,7 @@
 import { createServiceClient } from '@/lib/supabase'
 import type { ChannelOverview, VideoPerformanceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
-import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings } from '@/types'
+import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, Insight } from '@/types'
 
 // ---------------------------------------------------------------------------
 // saveChannelSnapshot
@@ -872,4 +872,245 @@ export async function upsertUserSettings(
   }
 
   return true
+}
+
+// ---------------------------------------------------------------------------
+// saveCompetitorSnapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * Upserts a daily snapshot for one competitor (today UTC).
+ * Safe to call multiple times — updates the existing row if it already exists.
+ *
+ * @returns true on success, false on error
+ */
+export async function saveCompetitorSnapshot(
+  competitorId: string,
+  data: {
+    subscriber_count?: number
+    total_views?: number
+    video_count?: number
+    avg_views_per_video?: number
+    avg_video_length_seconds?: number
+    upload_frequency_30d?: number
+    velocity_score_avg?: number
+  },
+): Promise<boolean> {
+  const supabase = createServiceClient()
+  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD UTC
+
+  const { error } = await supabase.from('competitor_snapshots').upsert(
+    {
+      competitor_id: competitorId,
+      snapshot_date: today,
+      ...data,
+    },
+    { onConflict: 'competitor_id,snapshot_date' },
+  )
+
+  if (error) {
+    console.error('[db] saveCompetitorSnapshot error:', error.message)
+    return false
+  }
+
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// getCompetitorSnapshots
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the last N days of snapshots for one competitor, sorted ascending
+ * (oldest first — chart-friendly order).
+ *
+ * @returns CompetitorSnapshot[] — empty array on error or no data
+ */
+export async function getCompetitorSnapshots(
+  competitorId: string,
+  days: number = 30,
+): Promise<CompetitorSnapshot[]> {
+  const supabase = createServiceClient()
+
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceDate = since.toISOString().slice(0, 10)
+
+  const { data, error } = await supabase
+    .from('competitor_snapshots')
+    .select('*')
+    .eq('competitor_id', competitorId)
+    .gte('snapshot_date', sinceDate)
+    .order('snapshot_date', { ascending: true })
+
+  if (error) {
+    console.error('[db] getCompetitorSnapshots error:', error.message)
+    return []
+  }
+
+  return (data ?? []) as CompetitorSnapshot[]
+}
+
+// ---------------------------------------------------------------------------
+// getAllCompetitorSnapshotsForUser
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the last N days of snapshots for every active competitor of a user.
+ * Result is grouped by competitor — ready to plot as a multi-line chart.
+ *
+ * @returns Array of { competitorId, snapshots } — empty array on error
+ */
+export async function getAllCompetitorSnapshotsForUser(
+  userId: string,
+  days: number = 30,
+): Promise<{ competitorId: string; snapshots: CompetitorSnapshot[] }[]> {
+  const supabase = createServiceClient()
+
+  const { data: competitors, error: compError } = await supabase
+    .from('competitors')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+
+  if (compError) {
+    console.error('[db] getAllCompetitorSnapshotsForUser competitors error:', compError.message)
+    return []
+  }
+
+  if (!competitors || competitors.length === 0) return []
+
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceDate = since.toISOString().slice(0, 10)
+
+  const competitorIds = competitors.map((c) => c.id)
+
+  const { data, error } = await supabase
+    .from('competitor_snapshots')
+    .select('*')
+    .in('competitor_id', competitorIds)
+    .gte('snapshot_date', sinceDate)
+    .order('snapshot_date', { ascending: true })
+
+  if (error) {
+    console.error('[db] getAllCompetitorSnapshotsForUser snapshots error:', error.message)
+    return []
+  }
+
+  const rows = (data ?? []) as CompetitorSnapshot[]
+
+  return competitorIds.map((id) => ({
+    competitorId: id,
+    snapshots: rows.filter((r) => r.competitor_id === id),
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// updateCompetitorMetrics
+// ---------------------------------------------------------------------------
+
+/**
+ * Partial update of metric fields on a competitors row.
+ * Used by the daily refresh cron to write freshly calculated values.
+ *
+ * @returns true on success, false on error
+ */
+export async function updateCompetitorMetrics(
+  competitorId: string,
+  metrics: {
+    video_count?: number
+    avg_views_per_video?: number
+    avg_video_length_seconds?: number
+    upload_frequency_30d?: number
+    subscriber_count?: number
+    total_views?: number
+    last_synced_at?: string
+  },
+): Promise<boolean> {
+  const supabase = createServiceClient()
+
+  const { error } = await supabase
+    .from('competitors')
+    .update(metrics)
+    .eq('id', competitorId)
+
+  if (error) {
+    console.error('[db] updateCompetitorMetrics error:', error.message)
+    return false
+  }
+
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// saveCompetitorInsights
+// ---------------------------------------------------------------------------
+
+/**
+ * Caches Claude-generated insights on the competitors row.
+ * Sets insights_generated_at to NOW() so staleness can be checked later.
+ *
+ * @returns true on success, false on error
+ */
+export async function saveCompetitorInsights(
+  competitorId: string,
+  insights: Insight[],
+): Promise<boolean> {
+  const supabase = createServiceClient()
+
+  const { error } = await supabase
+    .from('competitors')
+    .update({
+      insights: insights,
+      insights_generated_at: new Date().toISOString(),
+    })
+    .eq('id', competitorId)
+
+  if (error) {
+    console.error('[db] saveCompetitorInsights error:', error.message)
+    return false
+  }
+
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// getCachedInsights
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns cached insights from the competitors row if they are fresh enough.
+ * Returns null when insights are absent or older than maxAgeDays.
+ *
+ * @returns Insight[] if cache is valid, null otherwise
+ */
+export async function getCachedInsights(
+  competitorId: string,
+  maxAgeDays: number = 7,
+): Promise<Insight[] | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('competitors')
+    .select('insights, insights_generated_at')
+    .eq('id', competitorId)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getCachedInsights error:', error.message)
+    }
+    return null
+  }
+
+  if (!data?.insights || !data?.insights_generated_at) return null
+
+  const generatedAt = new Date(data.insights_generated_at as string)
+  const ageMs = Date.now() - generatedAt.getTime()
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000
+
+  if (ageMs > maxAgeMs) return null
+
+  return data.insights as Insight[]
 }
