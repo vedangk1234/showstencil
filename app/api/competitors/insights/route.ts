@@ -10,12 +10,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { competitor_id } = await request.json()
+    const { competitor_id, force_regenerate } = await request.json()
     if (!competitor_id) {
       return NextResponse.json({ error: 'competitor_id required' }, { status: 400 })
     }
 
     const supabase = createServiceClient()
+
+    // Check cache first (unless force_regenerate)
+    if (!force_regenerate) {
+      const { data: cached } = await supabase
+        .from('competitor_insights')
+        .select('insights, generated_at')
+        .eq('user_id', session.user.id)
+        .eq('competitor_id', competitor_id)
+        .single()
+
+      if (cached) {
+        return NextResponse.json({
+          success: true,
+          insights: cached.insights,
+          cached: true,
+          generated_at: cached.generated_at,
+        })
+      }
+    }
 
     // Load user snapshot
     const { data: userSnapshot } = await supabase
@@ -26,7 +45,6 @@ export async function POST(request: Request) {
       .limit(1)
       .single()
 
-    // Load user sub_niche
     const { data: user } = await supabase
       .from('users')
       .select('name, sub_niche')
@@ -76,12 +94,9 @@ export async function POST(request: Request) {
     ).length
     const uploadsPerWeek = recentUploads / 4.3
 
-    // Detect top publishing days
     const dayCounts: Record<string, number> = {}
     videos.forEach((v: Record<string, unknown>) => {
-      const day = new Date(v.published_at as string).toLocaleDateString('en-US', {
-        weekday: 'long',
-      })
+      const day = new Date(v.published_at as string).toLocaleDateString('en-US', { weekday: 'long' })
       dayCounts[day] = (dayCounts[day] || 0) + 1
     })
     const publishingDays = Object.entries(dayCounts)
@@ -124,7 +139,24 @@ export async function POST(request: Request) {
       },
     )
 
-    return NextResponse.json({ success: true, insights })
+    // Save to cache (upsert on user_id + competitor_id)
+    await supabase.from('competitor_insights').upsert(
+      {
+        user_id: session.user.id,
+        competitor_id,
+        insights,
+        generated_at: new Date().toISOString(),
+        generation_count: 1,
+      },
+      { onConflict: 'user_id,competitor_id' },
+    )
+
+    return NextResponse.json({
+      success: true,
+      insights,
+      cached: false,
+      generated_at: new Date().toISOString(),
+    })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Insights generation failed'
     console.error('[competitors/insights]', error)

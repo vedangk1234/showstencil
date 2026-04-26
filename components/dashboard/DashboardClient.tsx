@@ -387,7 +387,7 @@ export default function DashboardClient({
 
       {/* ===== SPLIT: COMPETITORS + TRENDS ===== */}
       <div className="grid grid-cols-[1.55fr_1fr] mt-10 border border-stencil-line">
-        <Col title="Competitors" sub={`${competitors?.length ?? 0} tracked`} actions={['All', 'Tier 1', 'Tier 2', 'Dominators']}>
+        <Col title="Competitors" sub={`${competitors?.length ?? 0} tracked`}>
           {dashboardCompetitors.length === 0 ? (
             <Empty>
               No competitors tracked yet.{' '}

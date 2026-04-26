@@ -14,10 +14,7 @@ interface Insight {
   priority: 'high' | 'medium' | 'low'
 }
 
-const TYPE_STYLES: Record<
-  string,
-  { label: string; color: string; bg: string; border: string }
-> = {
+const TYPE_STYLES: Record<string, { label: string; color: string; bg: string; border: string }> = {
   observation: { label: 'OBSERVATION', color: '#60a5fa', bg: '#0a1628', border: '#1d3a6e' },
   recommendation: { label: 'RECOMMENDATION', color: '#4ade80', bg: '#0a2018', border: '#1d5e3a' },
   strength: { label: 'STRENGTH', color: '#a78bfa', bg: '#120a28', border: '#3a1d6e' },
@@ -26,40 +23,47 @@ const TYPE_STYLES: Record<
 
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 }
 
-export function InsightsTab({ user, competitor }: InsightsTabProps) {
+export function InsightsTab({ competitor }: InsightsTabProps) {
   const [insights, setInsights] = useState<Insight[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [cached, setCached] = useState(false)
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null)
+
+  async function fetchInsights(forceRegenerate = false) {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/competitors/insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ competitor_id: competitor.id, force_regenerate: forceRegenerate }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        setError(data.error || 'Failed to load insights')
+        return
+      }
+
+      const data = await res.json()
+      const sorted = (data.insights || []).sort(
+        (a: Insight, b: Insight) =>
+          (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2),
+      )
+      setInsights(sorted)
+      setCached(data.cached ?? false)
+      setGeneratedAt(data.generated_at ?? null)
+    } catch {
+      setError('Failed to generate insights')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    async function loadInsights() {
-      try {
-        const res = await fetch('/api/competitors/insights', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ competitor_id: competitor.id }),
-        })
-
-        if (!res.ok) {
-          const data = await res.json()
-          setError(data.error || 'Failed to load insights')
-          return
-        }
-
-        const data = await res.json()
-        const sorted = (data.insights || []).sort(
-          (a: Insight, b: Insight) =>
-            (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2),
-        )
-        setInsights(sorted)
-      } catch {
-        setError('Failed to generate insights')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadInsights()
+    fetchInsights()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [competitor.id])
 
   if (loading) {
@@ -78,7 +82,7 @@ export function InsightsTab({ user, competitor }: InsightsTabProps) {
           }}
         />
         <p style={{ color: '#555555', fontSize: 13, margin: 0 }}>
-          Generating AI insights for {competitor.channel_name as string}…
+          {cached ? 'Loading insights…' : `Generating AI insights for ${competitor.channel_name as string}…`}
         </p>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
@@ -87,15 +91,7 @@ export function InsightsTab({ user, competitor }: InsightsTabProps) {
 
   if (error) {
     return (
-      <div
-        style={{
-          padding: '32px 20px',
-          background: '#0a0a0a',
-          border: '1px solid #1a1a1a',
-          borderRadius: 8,
-          textAlign: 'center',
-        }}
-      >
+      <div style={{ padding: '32px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8, textAlign: 'center' }}>
         <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>{error}</p>
       </div>
     )
@@ -103,15 +99,7 @@ export function InsightsTab({ user, competitor }: InsightsTabProps) {
 
   if (insights.length === 0) {
     return (
-      <div
-        style={{
-          padding: '48px 24px',
-          textAlign: 'center',
-          background: '#0a0a0a',
-          border: '1px dashed #1a1a1a',
-          borderRadius: 8,
-        }}
-      >
+      <div style={{ padding: '48px 24px', textAlign: 'center', background: '#0a0a0a', border: '1px dashed #1a1a1a', borderRadius: 8 }}>
         <p style={{ color: '#888888', fontSize: 13, margin: 0 }}>
           No insights available. Add more competitor video data first.
         </p>
@@ -121,9 +109,31 @@ export function InsightsTab({ user, competitor }: InsightsTabProps) {
 
   return (
     <div>
-      <p style={{ color: '#555555', fontSize: 12, marginBottom: 20, fontFamily: 'monospace' }}>
-        AI analysis comparing you to {competitor.channel_name as string}
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <p style={{ color: '#555555', fontSize: 12, margin: 0, fontFamily: 'monospace' }}>
+          AI analysis comparing you to {competitor.channel_name as string}
+          {cached && generatedAt && (
+            <span style={{ marginLeft: 8, color: '#333333' }}>
+              · cached {new Date(generatedAt).toLocaleDateString()}
+            </span>
+          )}
+        </p>
+        <button
+          onClick={() => fetchInsights(true)}
+          style={{
+            fontSize: 11,
+            fontFamily: 'monospace',
+            color: '#444444',
+            background: 'transparent',
+            border: '1px solid #222222',
+            borderRadius: 4,
+            padding: '3px 8px',
+            cursor: 'pointer',
+          }}
+        >
+          Regenerate
+        </button>
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {insights.map((insight, i) => {
@@ -140,9 +150,7 @@ export function InsightsTab({ user, competitor }: InsightsTabProps) {
                 borderRadius: 8,
               }}
             >
-              <div
-                style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}
-              >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span
                   style={{
                     fontSize: 9,
@@ -159,27 +167,12 @@ export function InsightsTab({ user, competitor }: InsightsTabProps) {
                   {style.label}
                 </span>
                 {isPriHigh && (
-                  <span
-                    style={{
-                      fontSize: 9,
-                      fontFamily: 'monospace',
-                      color: '#fbbf24',
-                      letterSpacing: '0.1em',
-                    }}
-                  >
+                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#fbbf24', letterSpacing: '0.1em' }}>
                     HIGH PRIORITY
                   </span>
                 )}
               </div>
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: '#ffffff',
-                  marginBottom: 6,
-                  lineHeight: 1.3,
-                }}
-              >
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#ffffff', marginBottom: 6, lineHeight: 1.3 }}>
                 {insight.title}
               </div>
               <div style={{ fontSize: 13, color: '#888888', lineHeight: 1.6 }}>

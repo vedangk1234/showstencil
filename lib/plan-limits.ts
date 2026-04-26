@@ -86,10 +86,17 @@ export async function canAddAutoCompetitor(
   return { allowed: true }
 }
 
-// Check if a Starter user can perform a search this month
+// Searches are now unlimited — only tracking (adding as competitor) is quota-gated.
 export async function canSearchThisMonth(
-  userId: string,
+  _userId: string,
 ): Promise<{ allowed: boolean; nextAvailable?: Date; reason?: string }> {
+  return { allowed: true }
+}
+
+// Check if a user can track (add) a new searched competitor this month.
+export async function canTrackThisMonth(
+  userId: string,
+): Promise<{ allowed: boolean; nextAvailable?: Date; reason?: string; tracksRemaining?: number }> {
   const supabase = createServiceClient()
 
   const { data: user } = await supabase
@@ -101,13 +108,30 @@ export async function canSearchThisMonth(
   const limits = getPlanLimits(user?.subscription_plan)
 
   if (!limits.canUseSearch) {
-    return { allowed: false, reason: 'Search not available on this plan' }
+    return { allowed: false, reason: 'Track feature not available on this plan' }
   }
 
+  // Pro: unlimited tracks, just check searchedChannelsMax cap
   if (limits.searchesPerMonth === -1) {
-    return { allowed: true } // Unlimited
+    const { count } = await supabase
+      .from('competitors')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_searched', true)
+      .eq('is_active', true)
+
+    const remaining = limits.searchedChannelsMax - (count ?? 0)
+    return {
+      allowed: remaining > 0,
+      tracksRemaining: Math.max(0, remaining),
+      reason:
+        remaining <= 0
+          ? `Maximum ${limits.searchedChannelsMax} tracked channels reached. Remove one to add another.`
+          : undefined,
+    }
   }
 
+  // Starter: 1 track per 30 days
   const thirtyDaysAgo = new Date()
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
@@ -115,6 +139,7 @@ export async function canSearchThisMonth(
     .from('user_search_history')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId)
+    .eq('added_as_competitor', true)
     .gte('searched_at', thirtyDaysAgo.toISOString())
 
   if ((count ?? 0) >= limits.searchesPerMonth) {
@@ -122,6 +147,7 @@ export async function canSearchThisMonth(
       .from('user_search_history')
       .select('searched_at')
       .eq('user_id', userId)
+      .eq('added_as_competitor', true)
       .order('searched_at', { ascending: true })
       .limit(1)
       .single()
@@ -132,9 +158,13 @@ export async function canSearchThisMonth(
     return {
       allowed: false,
       nextAvailable,
-      reason: `Search limit reached. Next available ${nextAvailable.toLocaleDateString()}`,
+      tracksRemaining: 0,
+      reason: `Track limit reached. Next available ${nextAvailable.toLocaleDateString()}`,
     }
   }
 
-  return { allowed: true }
+  return {
+    allowed: true,
+    tracksRemaining: limits.searchesPerMonth - (count ?? 0),
+  }
 }

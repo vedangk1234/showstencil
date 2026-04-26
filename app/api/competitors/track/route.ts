@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
-import { getPlanLimits } from '@/lib/plan-limits'
+import { getPlanLimits, canTrackThisMonth } from '@/lib/plan-limits'
 import { calculateTier } from '@/lib/competitor-matcher'
 import { calculateSubNicheSimilarity } from '@/lib/sub-niche-detector'
 
@@ -43,6 +43,20 @@ export async function POST(request: Request) {
     }
 
     const limits = getPlanLimits(user.subscription_plan)
+
+    // Check monthly track quota before slot capacity
+    const trackCheck = await canTrackThisMonth(user.id)
+    if (!trackCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: 'Track limit reached',
+          message: trackCheck.reason,
+          next_available: trackCheck.nextAvailable,
+          upgrade_required: user.subscription_plan === 'starter',
+        },
+        { status: 403 },
+      )
+    }
 
     const { count: searchedCount } = await supabase
       .from('competitors')

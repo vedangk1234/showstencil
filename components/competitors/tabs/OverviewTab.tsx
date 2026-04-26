@@ -38,7 +38,9 @@ export function OverviewTab({ userSnapshot, competitor, competitorVideos }: Over
     (v) => new Date(v.published_at as string) > thirtyDaysAgo,
   ).length
   const compUploadsPerWeek = recentUploads / 4.3
-  const userUploadsPerWeek = ((userSnapshot?.videos_count as number) || 0) / 52
+
+  // User upload frequency: not reliably derivable from snapshot alone — show N/A
+  const userWatchTime = (userSnapshot?.avg_view_duration_seconds as number) || 0
 
   const metrics = [
     {
@@ -46,36 +48,49 @@ export function OverviewTab({ userSnapshot, competitor, competitorVideos }: Over
       user: fmt((userSnapshot?.subscriber_count as number) || 0),
       competitor: fmt((competitor.subscriber_count as number) || 0),
       gap: ((competitor.subscriber_count as number) || 0) - ((userSnapshot?.subscriber_count as number) || 0),
+      note: null as string | null,
     },
     {
       label: 'Avg views / video',
       user: fmt((userSnapshot?.avg_views_per_video as number) || 0),
       competitor: fmt(compAvgViews),
       gap: compAvgViews - ((userSnapshot?.avg_views_per_video as number) || 0),
+      note: null,
     },
     {
       label: 'CTR',
       user: `${(((userSnapshot?.avg_ctr as number) || 0) * 100).toFixed(1)}%`,
       competitor: 'N/A',
-      gap: 0,
+      gap: null as number | null,
+      note: 'Only available for your own channel',
     },
     {
       label: 'Avg watch time',
-      user: fmtDuration((userSnapshot?.avg_view_duration_seconds as number) || 0),
+      user: userWatchTime > 0 ? fmtDuration(userWatchTime) : 'N/A',
+      competitor: 'N/A',
+      gap: null,
+      note: 'Watch time not available for competitors',
+    },
+    {
+      label: 'Avg video length',
+      user: 'N/A',
       competitor: fmtDuration(compAvgDuration),
-      gap: compAvgDuration - ((userSnapshot?.avg_view_duration_seconds as number) || 0),
+      gap: null,
+      note: null,
     },
     {
       label: 'Upload frequency',
-      user: `${userUploadsPerWeek.toFixed(1)}/week`,
+      user: 'N/A',
       competitor: `${compUploadsPerWeek.toFixed(1)}/week`,
-      gap: compUploadsPerWeek - userUploadsPerWeek,
+      gap: null,
+      note: 'Based on last 30 days',
     },
     {
       label: 'Total videos',
       user: fmt((userSnapshot?.videos_count as number) || 0),
       competitor: fmt((competitor.video_count as number) || competitorVideos.length || 0),
-      gap: 0,
+      gap: null,
+      note: null,
     },
   ]
 
@@ -125,18 +140,20 @@ export function OverviewTab({ userSnapshot, competitor, competitorVideos }: Over
               alignItems: 'center',
             }}
           >
-            <span style={{ color: '#888888', fontSize: 13 }}>{m.label}</span>
+            <div>
+              <span style={{ color: '#888888', fontSize: 13 }}>{m.label}</span>
+              {m.note && <div style={{ color: '#333333', fontSize: 10, fontFamily: 'monospace', marginTop: 2 }}>{m.note}</div>}
+            </div>
             <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{m.user}</span>
             <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{m.competitor}</span>
             <span
               style={{
                 fontSize: 12,
                 fontFamily: 'monospace',
-                color: m.gap > 0 ? '#f87171' : m.gap < 0 ? '#4ade80' : '#444444',
+                color: m.gap == null ? '#444444' : m.gap > 0 ? '#f87171' : m.gap < 0 ? '#4ade80' : '#444444',
               }}
             >
-              {m.gap !== 0 ? (m.gap > 0 ? '−' : '+') : ''}
-              {m.gap !== 0 ? fmt(Math.abs(m.gap)) : '—'}
+              {m.gap == null || m.gap === 0 ? '—' : `${m.gap > 0 ? '−' : '+'}${fmt(Math.abs(m.gap))}`}
             </span>
           </div>
         ))}

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
-import { getPlanLimits, canSearchThisMonth } from '@/lib/plan-limits'
+import { getPlanLimits } from '@/lib/plan-limits'
 import { normalizeChannelInput, getChannelData } from '@/lib/channel-search'
 
 export async function POST(request: Request) {
@@ -38,18 +38,6 @@ export async function POST(request: Request) {
           upgrade_required: true,
         },
         { status: 403 },
-      )
-    }
-
-    const searchCheck = await canSearchThisMonth(user.id)
-    if (!searchCheck.allowed) {
-      return NextResponse.json(
-        {
-          error: 'Search limit reached',
-          message: searchCheck.reason,
-          next_available: searchCheck.nextAvailable,
-        },
-        { status: 429 },
       )
     }
 
