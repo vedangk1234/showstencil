@@ -351,6 +351,31 @@ CREATE TABLE searched\_channels\_cache (
   search\_count INTEGER DEFAULT 1
 );
 
+-- competitor_snapshots — daily historical data per competitor (migration 004)
+CREATE TABLE IF NOT EXISTS competitor\_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen\_random\_uuid(),
+  competitor\_id UUID NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+  snapshot\_date DATE NOT NULL,
+  subscriber\_count INTEGER,
+  total\_views BIGINT,
+  video\_count INTEGER,
+  avg\_views\_per\_video FLOAT,
+  avg\_video\_length\_seconds INTEGER,
+  upload\_frequency\_30d FLOAT,
+  velocity\_score\_avg FLOAT,
+  created\_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(competitor\_id, snapshot\_date)
+);
+
+-- New columns on competitors table (migration 004)
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS video\_count INTEGER;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS avg\_views\_per\_video FLOAT;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS avg\_video\_length\_seconds INTEGER;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS upload\_frequency\_30d FLOAT;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS insights JSONB;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS insights\_generated\_at TIMESTAMPTZ;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS replacement\_locked\_until TIMESTAMPTZ;
+
 -- Required migrations (run once in Supabase SQL editor):
 -- File: supabase/migrations/002_competitors_phase1.sql
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_niche TEXT;
@@ -603,6 +628,7 @@ const planLimits = {
 | `lib/access.ts` | ✅ | canAccess, getCompetitorLimit, getIdeaLimit, getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage |
 | `lib/utils.ts` | 🔲 | Shared formatting/date utilities — added as needed |
 | `lib/sub-niche-detector.ts` | ✅ | detectSubNiche (Claude), calculateSubNicheSimilarity — granular sub-niche within a broad niche |
+| `lib/db.ts` (Day 13 additions) | ✅ | saveCompetitorSnapshot, getCompetitorSnapshots, getAllCompetitorSnapshotsForUser, updateCompetitorMetrics, saveCompetitorInsights, getCachedInsights |
 | `lib/dominator-finder.ts` | ✅ | findDominatorsForUser — niche-specific rules (sub_niche match for gaming/fitness/tech/education, broad for others) |
 | `lib/plan-limits.ts` | ✅ | PLAN_LIMITS config, getPlanLimits, canSearchThisMonth — Starter: 4 total/1 searched, Pro: 13/3 searched |
 | `lib/competitor-matcher.ts` | ✅ | calculateTier, CompetitorMatch — tier from sub ratio, sub-niche enrichment |
@@ -705,6 +731,57 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 2 — Day 13 (2026-04-26)
+
+**Database foundation + seed data expansion**
+
+*supabase/migrations/004\_competitor\_snapshots.sql*
+* New `competitor_snapshots` table — daily historical snapshots per competitor (mirrors `channel_snapshots` for the user's own data). Columns: `subscriber_count`, `total_views`, `video_count`, `avg_views_per_video`, `avg_video_length_seconds`, `upload_frequency_30d`, `velocity_score_avg`. Unique constraint on `(competitor_id, snapshot_date)`. RLS: users can only SELECT rows for their own competitors.
+* Seven new columns added to `competitors`: `video_count`, `avg_views_per_video`, `avg_video_length_seconds`, `upload_frequency_30d` (displayable metrics), `insights` JSONB + `insights_generated_at` (on-row cache for Claude insights — 7-day TTL), `replacement_locked_until` (manual competitor swap lock, NULL for auto-detected).
+* Index added: `idx_competitor_videos_competitor_published` on `competitor_videos(competitor_id, published_at DESC)`.
+
+*types/index.ts*
+* `Insight` interface moved from `lib/competitor-insights.ts` into `types/index.ts` — canonical location. `competitor-insights.ts` now imports it from there.
+* `Competitor` interface updated with all 7 new nullable fields.
+* New `CompetitorSnapshot` interface added.
+
+*lib/db.ts — 6 new functions*
+* `saveCompetitorSnapshot(competitorId, data)` — UPSERT on `(competitor_id, snapshot_date)` for today UTC. Called by the daily refresh cron (next session).
+* `getCompetitorSnapshots(competitorId, days)` — last N days for one competitor, ascending order (chart-ready).
+* `getAllCompetitorSnapshotsForUser(userId, days)` — groups snapshots by competitor; returns `{ competitorId, snapshots }[]` for multi-line dashboard chart.
+* `updateCompetitorMetrics(competitorId, metrics)` — partial update on competitors row; used by daily cron.
+* `saveCompetitorInsights(competitorId, insights)` — writes JSONB insight array + sets `insights_generated_at = NOW()`.
+* `getCachedInsights(competitorId, maxAgeDays)` — returns cached insights if fresh, null if absent/stale.
+
+*scripts/seed-test-data.ts — fully rewritten to upsert mode*
+* Finds test user by email (`vedangk2912@gmail.com`); exits with clear error if not found.
+* Sets `niche_id = 'finance'` and `sub_niche = 'Personal Finance & Money Management'` if not already correct.
+* Competitors: 1 Tier 1 (Finance With Sarah, 112K), 1 Tier 2 (Money With Marcus, 380K), 1 Dominator (Wealth Empire, 2.4M). Old "Smart Money Moves" deactivated (`is_active=false`). All 3 have `sub_niche`, `sub_niche_keywords`, `video_count`, `avg_views_per_video`, `avg_video_length_seconds`, `upload_frequency_30d` populated.
+* Own channel videos: 15 finance videos spread over 90 days with realistic variance (3 "hit" outliers). Existence-checked per `(user_id, youtube_video_id)`.
+* Competitor videos: ensured ≥10 per competitor. Adds only what's missing (idempotent). Per-tier view ranges: Sarah 18K–75K, Marcus 65K–240K, Dominator 450K–1.9M.
+* Channel snapshots: 31 rows (days -30 to today) via per-row existence check. Random walk from 42K → 45K subs.
+* Competitor snapshots: 31 rows × 3 competitors = 93 rows. Per-competitor random walk matching final subscriber counts.
+* Verification block confirms all tables populated correctly; exits with code 1 on any failure.
+
+---
+
+### Week 2 — Day 12 (2026-04-26)
+
+**Cron sync reliability fixes**
+
+*app/api/cron/refresh-data/route.ts + app/api/cron/weekly-digest/route.ts — subscription status filter*
+* Both cron routes were filtering `.in('subscription_status', ['trial', 'starter', 'pro'])`. These values don't exist in the DB — Lemon Squeezy writes `'on_trial'`, `'active'`, `'past_due'`. Result: zero users were ever selected, cron ran but processed nobody.
+* Fixed to `.in('subscription_status', ['on_trial', 'active', 'past_due'])` in both routes.
+* `'past_due'` included deliberately — `lib/access.ts` grants a 3-day grace period for past-due users so they should still receive syncs and digests during that window.
+
+*app/api/sync/route.ts — automatic token refresh on expiry*
+* OAuth access tokens expire after 1 hour. The NextAuth JWT callback in `auth.ts` refreshes tokens when the user browses the app — but cron runs at 3am with no active session, reads the stale token from DB, and gets `TOKEN_EXPIRED` from YouTube Analytics.
+* Added `refreshAccessToken(userId, refreshToken)` function: calls `https://oauth2.googleapis.com/token` with the stored `youtube_refresh_token`, writes the new access token + expiry back to the `users` table.
+* When `TOKEN_EXPIRED` is caught during analytics calls, the route now: (1) calls `refreshAccessToken`, (2) retries all 5 YouTube Analytics calls with the new token. Only returns 401 to the caller if the refresh itself fails (e.g. user revoked app access in Google settings).
+* This means crons will self-heal without requiring the user to log back in.
+
+---
 
 ### Week 2 — Day 10–11 (2026-04-20)
 
@@ -1188,6 +1265,10 @@ ALTER TABLE users
 
 **Topic coverage gap score is a stub that returns 0 (known limitation):** `topic_coverage_gap_score` is always 0 because topic analysis is not implemented. The gap score chart now filters it out — it was showing as a misleading zero bar alongside real scores. Will be re-added when topic analysis is built.
 
+**Cron not syncing daily — two root causes (fixed 2026-04-26):**
+* *Wrong subscription_status filter*: Both `refresh-data` and `weekly-digest` cron routes queried `.in('subscription_status', ['trial', 'starter', 'pro'])` but Lemon Squeezy uses `'on_trial'`, `'active'`, `'past_due'` — the `'trial'`/`'starter'`/`'pro'` values never match any row. Fixed to `['on_trial', 'active', 'past_due']` in both routes.
+* *Token expiry with no refresh path*: OAuth access tokens expire after 1 hour. `auth.ts` refreshes the token inside the NextAuth JWT callback — but that only fires when the user is browsing the app. The 3am cron runs with no active session, reads the stale token from DB, gets `TOKEN_EXPIRED` from YouTube Analytics, and fails silently. Fix: `app/api/sync/route.ts` now catches `TOKEN_EXPIRED`, uses the stored `youtube_refresh_token` to call `https://oauth2.googleapis.com/token`, writes the new access token back to DB, then retries the analytics calls. If the refresh itself fails (e.g. user revoked access), returns a clear 401 and logs the failure.
+
 \---
 
 ## Key Decisions Made
@@ -1223,7 +1304,7 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-26 — Day 10–11: Full competitors system built in two phases. Phase 1: sub-niche detection (Claude), dominator finder (niche-specific rules), plan limits (Starter 4/Pro 13), competitor-matcher, DB migration 002, rebuilt competitors page with filter tabs + tier badges, dashboard strip updated to Tier1+Tier2 only, 2 new cron routes (dominator-refresh, sub-niche-detection). Phase 2: channel search (URL/handle/ID resolver, 7-day cache), per-competitor 5-tab analysis page /competitors/[id], Claude insights generator, ChannelSearchBar component, 5 tab components, cache-cleanup cron. 
-Previous: 2026-04-19 — Day 9: saveChannelSnapshot field preservation bug fix; topic coverage removed from gap score chart; gap_scores DB correction
+*Last updated: 2026-04-26 — Day 13: Database foundation — competitor_snapshots table, 7 new columns on competitors, 6 new lib/db.ts functions, seed script fully rewritten to upsert mode with 31-day history for user + all 3 competitors, correct tier distribution (Tier1/Tier2/Dominator), 15 own videos.
+Previous: 2026-04-26 — Day 12: Cron sync fixed — wrong subscription_status filter + token expiry auto-refresh.
 Next update due: End of Week 3*
 
