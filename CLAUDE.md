@@ -62,7 +62,8 @@ showstencil/
 │   │   ├── dashboard/page.tsx        ← main dashboard
 │   │   ├── ideas/page.tsx            ← video idea suggestions
 │   │   ├── digest/page.tsx           ← weekly digest view
-│   │   ├── competitors/page.tsx      ← competitor management
+│   │   ├── competitors/page.tsx      ← competitor management (list + filter tabs)
+│   │   ├── competitors/[id]/page.tsx ← per-competitor deep analysis (5-tab view)
 │   │   └── settings/
 │   │       ├── page.tsx
 │   │       └── notifications/page.tsx
@@ -74,8 +75,21 @@ showstencil/
 │   │   ├── unsubscribe/route.ts      ← token-based one-click unsubscribe (no auth)
 │   │   ├── settings/
 │   │   │   └── notifications/route.ts ← GET/POST notification preferences
+│   │   ├── competitors/
+│   │   │   ├── [id]/route.ts         ← GET single competitor data
+│   │   │   ├── search/route.ts       ← POST channel search (URL/handle/ID)
+│   │   │   ├── track/route.ts        ← POST add searched channel as competitor
+│   │   │   └── insights/route.ts     ← POST generate Claude insights for a competitor
+│   │   ├── users/
+│   │   │   └── detect-sub-niche/route.ts ← POST trigger sub-niche detection
 │   │   └── cron/
-│   │       ├── daily/route.ts
+│   │       ├── daily/route.ts              ← stub (superseded)
+│   │       ├── weekly-digest/route.ts     ← Monday 9am UTC
+│   │       ├── refresh-data/route.ts      ← daily 3am UTC
+│   │       ├── trend-detection/route.ts   ← daily 6am UTC
+│   │       ├── cache-cleanup/route.ts     ← daily 2am UTC (new)
+│   │       ├── sub-niche-detection/route.ts ← daily 5am UTC (new)
+│   │       └── dominator-refresh/route.ts   ← daily 4am UTC (new)
 │   ├── page.tsx                      ← landing page (public)
 │   ├── pricing/page.tsx
 │   ├── privacy/page.tsx
@@ -89,10 +103,17 @@ showstencil/
 │   ├── digest-generator.ts           ← Claude API integration
 │   ├── idea-generator.ts             ← video idea generation
 │   ├── email.ts                      ← Resend email functions
-│   ├── stripe.ts                     ← Stripe client + helpers
+│   ├── stripe.ts                     ← replaced by Lemon Squeezy (stub)
 │   ├── access.ts                     ← plan gating (canAccess function)
 │   ├── db.ts                         ← all Supabase database operations
-│   └── utils.ts                      ← shared utilities
+│   ├── utils.ts                      ← shared utilities
+│   ├── sub-niche-detector.ts         ← Claude sub-niche classification (new)
+│   ├── dominator-finder.ts           ← finds Tier 3 dominator channels (new)
+│   ├── plan-limits.ts                ← competitor slot limits per plan (new)
+│   ├── competitor-matcher.ts         ← tier calculation + sub-niche matching (new)
+│   ├── channel-search.ts             ← channel URL/handle/ID resolver + cache (new)
+│   ├── competitor-insights.ts        ← Claude per-competitor insights generator (new)
+│   └── revenue-benchmarks.ts         ← niche CPM/RPM benchmarks (pure computation)
 ├── emails/
 │   ├── weekly-digest.tsx             ← React Email: weekly digest template
 │   └── trend-alert.tsx               ← React Email: viral trend alert template
@@ -100,6 +121,19 @@ showstencil/
 │   ├── ui/                           ← reusable UI components
 │   ├── charts/                       ← Recharts wrappers
 │   ├── dashboard/                    ← dashboard-specific components
+│   ├── competitors/                  ← competitor system components (new)
+│   │   ├── CompetitorsTable.tsx      ← filterable table with tier/dominator badges
+│   │   ├── CompetitorAnalysis.tsx    ← 5-tab analysis shell for /competitors/[id]
+│   │   ├── ChannelSearchBar.tsx      ← URL/handle/ID input + search results list
+│   │   ├── TierBadge.tsx             ← Tier 1/2/3 + Dominator label badge
+│   │   ├── UpgradeBanner.tsx         ← plan upgrade prompt when limit reached
+│   │   ├── PlanLimitIndicator.tsx    ← shows X/N competitors used
+│   │   └── tabs/
+│   │       ├── OverviewTab.tsx       ← subscriber/view/watch time comparison
+│   │       ├── ContentTab.tsx        ← upload patterns, formats, topic clusters
+│   │       ├── GrowthTab.tsx         ← growth velocity chart vs user
+│   │       ├── VideosTab.tsx         ← recent competitor videos with velocity
+│   │       └── InsightsTab.tsx       ← Claude-generated strategic insights
 │   └── emails/                       ← (legacy path — templates now in /emails)
 ├── types/
 │   └── index.ts                      ← all TypeScript interfaces
@@ -126,9 +160,15 @@ CREATE TABLE users (
   token\_expires\_at TIMESTAMPTZ,
   niche\_id TEXT,
   niche\_detected\_at TIMESTAMPTZ,
+  sub\_niche TEXT,                          -- granular sub-niche detected by Claude
+  sub\_niche\_keywords JSONB,               -- array of keyword strings
+  sub\_niche\_confidence FLOAT,
+  sub\_niche\_detected\_at TIMESTAMPTZ,
   subscription\_status TEXT DEFAULT 'free',
-  stripe\_customer\_id TEXT,
-  stripe\_subscription\_id TEXT,
+  subscription\_plan TEXT DEFAULT 'free',   -- 'free' | 'starter' | 'pro'
+  lemon\_squeezy\_customer\_id TEXT,         -- replaces stripe_customer_id
+  lemon\_squeezy\_subscription\_id TEXT,     -- replaces stripe_subscription_id
+  current\_period\_end TIMESTAMPTZ,
   trial\_ends\_at TIMESTAMPTZ,
   onboarding\_completed BOOLEAN DEFAULT false,
   created\_at TIMESTAMPTZ DEFAULT NOW(),
@@ -191,9 +231,15 @@ CREATE TABLE competitors (
   channel\_thumbnail TEXT,
   subscriber\_count INTEGER,
   total\_views BIGINT,
-  tier INTEGER,           -- 1 = similar, 2 = aspirational, 3 = dominator
+  tier INTEGER,                    -- 1 = Tier1, 2 = Tier2, 3 = Dominator
   is\_auto\_detected BOOLEAN DEFAULT true,
   is\_active BOOLEAN DEFAULT true,
+  is\_dominator BOOLEAN DEFAULT false,   -- true = Tier 3 dominator (>10x user subs)
+  is\_searched BOOLEAN DEFAULT false,    -- true = manually searched and added by user
+  searched\_at TIMESTAMPTZ,
+  sub\_niche TEXT,
+  sub\_niche\_keywords JSONB,
+  sub\_niche\_match\_score FLOAT,
   last\_synced\_at TIMESTAMPTZ,
   created\_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -272,7 +318,55 @@ CREATE TABLE user\_settings (
   updated\_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Required migration (run once in Supabase SQL editor):
+-- Dominator history (tracks which dominators have been assigned per user over time)
+CREATE TABLE dominator\_history (
+  id UUID PRIMARY KEY DEFAULT gen\_random\_uuid(),
+  user\_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  channel\_id TEXT NOT NULL,
+  channel\_name TEXT,
+  detected\_at TIMESTAMPTZ DEFAULT NOW(),
+  is\_current BOOLEAN DEFAULT true,
+  replaced\_at TIMESTAMPTZ
+);
+
+-- User search history (enforces Starter plan monthly search limit)
+CREATE TABLE user\_search\_history (
+  id UUID PRIMARY KEY DEFAULT gen\_random\_uuid(),
+  user\_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  channel\_id TEXT NOT NULL,
+  searched\_at TIMESTAMPTZ DEFAULT NOW(),
+  added\_as\_competitor BOOLEAN DEFAULT false
+);
+
+-- Cache for searched channels (avoid repeat YouTube API calls, TTL 7 days)
+CREATE TABLE searched\_channels\_cache (
+  channel\_id TEXT PRIMARY KEY,
+  channel\_name TEXT,
+  channel\_data JSONB,
+  niche\_id TEXT,
+  sub\_niche TEXT,
+  sub\_niche\_keywords JSONB,
+  cached\_at TIMESTAMPTZ DEFAULT NOW(),
+  expires\_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '7 days',
+  search\_count INTEGER DEFAULT 1
+);
+
+-- Required migrations (run once in Supabase SQL editor):
+-- File: supabase/migrations/002_competitors_phase1.sql
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_niche TEXT;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_niche_keywords JSONB;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_niche_confidence FLOAT;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_niche_detected_at TIMESTAMPTZ;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'free';
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS lemon_squeezy_customer_id TEXT;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS lemon_squeezy_subscription_id TEXT;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMPTZ;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS sub_niche TEXT;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS sub_niche_keywords JSONB;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS is_dominator BOOLEAN DEFAULT false;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS is_searched BOOLEAN DEFAULT false;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS searched_at TIMESTAMPTZ;
+-- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS sub_niche_match_score FLOAT;
 -- ALTER TABLE user\_settings ADD COLUMN IF NOT EXISTS last\_alert\_sent\_at TIMESTAMPTZ;
 -- ALTER TABLE user\_settings ADD COLUMN IF NOT EXISTS alerted\_video\_ids TEXT[] DEFAULT '{}';
 -- ALTER TABLE user\_settings ADD COLUMN IF NOT EXISTS unsubscribe\_token TEXT;
@@ -508,21 +602,35 @@ const planLimits = {
 | `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — see webhook route |
 | `lib/access.ts` | ✅ | canAccess, getCompetitorLimit, getIdeaLimit, getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage |
 | `lib/utils.ts` | 🔲 | Shared formatting/date utilities — added as needed |
+| `lib/sub-niche-detector.ts` | ✅ | detectSubNiche (Claude), calculateSubNicheSimilarity — granular sub-niche within a broad niche |
+| `lib/dominator-finder.ts` | ✅ | findDominatorsForUser — niche-specific rules (sub_niche match for gaming/fitness/tech/education, broad for others) |
+| `lib/plan-limits.ts` | ✅ | PLAN_LIMITS config, getPlanLimits, canSearchThisMonth — Starter: 4 total/1 searched, Pro: 13/3 searched |
+| `lib/competitor-matcher.ts` | ✅ | calculateTier, CompetitorMatch — tier from sub ratio, sub-niche enrichment |
+| `lib/channel-search.ts` | ✅ | normalizeChannelInput (URL/handle/channelId), getChannelData, cache read/write — 7-day TTL |
+| `lib/competitor-insights.ts` | ✅ | generateCompetitorInsights (Claude) — 5-7 typed insights (observation/recommendation/strength/gap) |
 
 ### API routes
 
 | Route | Status | Notes |
 |---|---|---|
 | `app/api/auth/[...nextauth]/route.ts` | ✅ | NextAuth v5 with Google + YouTube scopes |
-| `app/api/sync/route.ts` | ✅ | Auth-gated + cron bypass (x-cron-user-id + x-cron-secret headers) |
+| `app/api/sync/route.ts` | ✅ | Auth-gated + cron bypass; now also fires sub-niche detection fire-and-forget on first sync |
 | `app/api/cron/weekly-digest/route.ts` | ✅ | Runs every Monday 9am UTC; generateDigest for all active users |
 | `app/api/cron/refresh-data/route.ts` | ✅ | Runs daily 3am UTC; calls /api/sync for every active user via cron bypass |
-| `app/api/cron/trend-detection/route.ts` | ✅ | Runs every 6h; fetches competitor videos, calculates velocity + is_viral |
-| `app/api/cron/daily/route.ts` | 🚧 | Old stub — superseded by the 3 dedicated cron routes above |
-| `app/api/create-checkout-session/route.ts` | ✅ | Lemon Squeezy checkout redirect — Day 8 morning |
+| `app/api/cron/trend-detection/route.ts` | ✅ | Runs daily 6am UTC; fetches competitor videos, calculates velocity + is_viral |
+| `app/api/cron/cache-cleanup/route.ts` | ✅ | Runs daily 2am UTC; purges expired searched_channels_cache + search_history >90 days |
+| `app/api/cron/sub-niche-detection/route.ts` | ✅ | Runs daily 5am UTC; refreshes sub_niche for users missing it or stale >30 days |
+| `app/api/cron/dominator-refresh/route.ts` | ✅ | Runs daily 4am UTC; finds + updates Dominator (Tier 3) competitor for all active users |
+| `app/api/cron/daily/route.ts` | 🚧 | Old stub — superseded by the 5 dedicated cron routes above |
+| `app/api/create-checkout-session/route.ts` | ✅ | Lemon Squeezy checkout redirect |
 | `app/api/webhooks/lemonsqueezy/route.ts` | ✅ | LS webhook: subscription_created/updated/cancelled/payment_failed |
 | `app/api/unsubscribe/route.ts` | ✅ | Token-based one-click unsubscribe, no auth required, returns styled HTML |
 | `app/api/settings/notifications/route.ts` | ✅ | GET + POST notification prefs, auth required, validates multiplier range |
+| `app/api/competitors/[id]/route.ts` | ✅ | GET single competitor row (auth + ownership check) |
+| `app/api/competitors/search/route.ts` | ✅ | POST channel search — validates plan limit, normalises URL/handle/ID, checks cache, returns channel data |
+| `app/api/competitors/track/route.ts` | ✅ | POST add searched channel as competitor — enforces plan slot limit, calculates tier + sub-niche match |
+| `app/api/competitors/insights/route.ts` | ✅ | POST generate Claude insights for a specific competitor — loads user/competitor metrics, returns typed insights array |
+| `app/api/users/detect-sub-niche/route.ts` | ✅ | POST trigger sub-niche detection — session auth or cron bypass, reads user videos from DB, calls Claude |
 
 ### App pages
 
@@ -531,8 +639,9 @@ const planLimits = {
 | `app/(auth)/login/page.tsx` | ✅ | Google sign-in button |
 | `app/(auth)/callback/page.tsx` | 🔲 | OAuth callback — not yet needed (NextAuth handles it) |
 | `app/(dashboard)/layout.tsx` | ✅ | Auth guard + first-sync trigger |
-| `app/(dashboard)/dashboard/page.tsx` | ✅ | Full dashboard: gap score panel, 5-metric strip, competitors table, trend radar, views chart, top ideas, setup checklist, digest table |
-| `app/(dashboard)/competitors/page.tsx` | ✅ | Competitor management: list by tier, subscriber count, total views, last synced |
+| `app/(dashboard)/dashboard/page.tsx` | ✅ | Full dashboard: gap score panel, 5-metric strip, competitors table (Tier1+Tier2 only), trend radar, views chart, top ideas, "View all competitors →" link |
+| `app/(dashboard)/competitors/page.tsx` | ✅ | Rebuilt: filter tabs (All/Tier1/Tier2/Dominator), CompetitorsTable, UpgradeBanner, PlanLimitIndicator |
+| `app/(dashboard)/competitors/[id]/page.tsx` | ✅ | Per-competitor deep analysis: loads competitor + videos + user snapshots, renders CompetitorAnalysis (5 tabs) |
 | `app/(dashboard)/digest/page.tsx` | ✅ | Weekly digest view: list of past digests with preview, gap score, status |
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with why/angle/format/length |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, notification toggles, account actions |
@@ -548,9 +657,20 @@ const planLimits = {
 |---|---|---|
 | `components/sync-context.tsx` | ✅ | SyncProvider + useSyncStatus hook |
 | `components/BlackholeLoader.tsx` | ✅ | Animated loading spinner used during first sync |
-| `components/dashboard/DashboardClient.tsx` | ✅ | Full dashboard client component — all panels, chart, metric strip, gap rows |
+| `components/dashboard/DashboardClient.tsx` | ✅ | Full dashboard client component — all panels, chart, metric strip, gap rows; updated to show Tier1+Tier2 only + View all link |
 | `components/dashboard/SidebarNav.tsx` | ✅ | Left sidebar navigation: workspace + account links, active state |
 | `components/dashboard/SignOutButton.tsx` | ✅ | Sign-out button using next-auth signOut |
+| `components/competitors/CompetitorsTable.tsx` | ✅ | Filterable table — tier badge, sub-niche label, last synced, link to /competitors/[id] |
+| `components/competitors/CompetitorAnalysis.tsx` | ✅ | 5-tab shell (Overview/Content/Growth/Videos/Insights) for /competitors/[id] |
+| `components/competitors/ChannelSearchBar.tsx` | ✅ | URL/handle/ID input, search API call, results list with track button, plan limit guard |
+| `components/competitors/TierBadge.tsx` | ✅ | Tier 1/2/3 + Dominator label, colour-coded pill badges |
+| `components/competitors/UpgradeBanner.tsx` | ✅ | Plan upgrade prompt displayed when competitor slot limit is reached |
+| `components/competitors/PlanLimitIndicator.tsx` | ✅ | Shows X of N competitor slots used |
+| `components/competitors/tabs/OverviewTab.tsx` | ✅ | Subscriber/view/watch-time comparison cards between user and competitor |
+| `components/competitors/tabs/ContentTab.tsx` | ✅ | Upload patterns, video formats, topic cluster analysis |
+| `components/competitors/tabs/GrowthTab.tsx` | ✅ | Growth velocity chart comparing user vs competitor snapshots |
+| `components/competitors/tabs/VideosTab.tsx` | ✅ | Recent competitor videos list with velocity score and viral flag |
+| `components/competitors/tabs/InsightsTab.tsx` | ✅ | Fetches Claude insights via /api/competitors/insights, renders typed insight cards |
 | `components/ui/` | 🔲 | Reusable UI primitives — not yet extracted |
 | `components/charts/` | 🔲 | Recharts wrappers — not yet extracted |
 | `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
@@ -560,7 +680,7 @@ const planLimits = {
 
 | File | Status | Notes |
 |---|---|---|
-| `types/index.ts` | ✅ | All 17 interfaces: User, ChannelSnapshot, Video, Competitor, CompetitorVideo, GapScore, Digest, Trend, UserSettings, VideoIdea, NicheResult, CompetitorCandidate, UserMetrics, CompetitorMetrics, MetricScore, RevenueEstimate, GapScoreResult |
+| `types/index.ts` | ✅ | All interfaces + additions: User (sub_niche fields, LS payment fields), Competitor (is_dominator, is_searched, sub_niche fields), PlanType, SubscriptionStatus updated to Lemon Squeezy strings |
 | `types/next-auth.d.ts` | ✅ | NextAuth session type extensions |
 
 ### Scripts / Dev tooling
@@ -585,6 +705,88 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 2 — Day 10–11 (2026-04-20)
+
+**Competitors system — Phase 1: foundation**
+
+*lib/sub-niche-detector.ts*
+* `detectSubNiche(videos)` — calls Claude Sonnet 4.6 at temperature 0.3 to classify a creator's granular specialisation within their broad niche (e.g. "Finance → Credit Card Rewards & Travel Hacking"). Requires ≥3 videos; returns `{ sub_niche, keywords, confidence }`. Falls back to `{ sub_niche: 'General', keywords: [], confidence: 0 }` on insufficient data.
+* `calculateSubNicheSimilarity(a, b)` — keyword overlap ratio used to determine how well a competitor's sub-niche matches the user's. Used by dominator-finder and competitor-matcher.
+
+*lib/dominator-finder.ts*
+* `findDominatorsForUser(userId, nicheId, subNiche, subNicheKeywords)` — finds Tier 3 dominator channel (>10x user's subscribers) using niche-specific matching rules. Niches `gaming/fitness/tech/education` use sub-niche matching (similarity score required); `finance/beauty/travel/business/entertainment/diy/vlog/cooking` use broad niche matching. Saves winner to `competitors` table with `is_dominator=true`, records history in `dominator_history`.
+
+*lib/plan-limits.ts*
+* `PLAN_LIMITS` config: free → 0 competitors/no search; starter → 4 total (3 auto + 1 searched), 1 search/month; pro → 13 total (10 auto + 3 searched), unlimited searches.
+* `getPlanLimits(userId)` — loads user's plan from DB, returns the matching limits object.
+* `canSearchThisMonth(userId)` — counts `user_search_history` rows this calendar month, returns true/false.
+
+*lib/competitor-matcher.ts*
+* `calculateTier(userSubs, competitorSubs)` — ratio-based: ≤3x → Tier 1, ≤10x → Tier 2, >10x → Tier 3.
+* Exports `CompetitorMatch` interface with `{ tier, sub_niche, sub_niche_keywords, match_score }`.
+
+*DB migration: supabase/migrations/002_competitors_phase1.sql*
+* Adds `sub_niche`, `sub_niche_keywords`, `sub_niche_confidence`, `sub_niche_detected_at` to `users`.
+* Adds `sub_niche`, `sub_niche_keywords`, `is_dominator`, `is_searched`, `searched_at`, `sub_niche_match_score` to `competitors`.
+* Creates `dominator_history`, `user_search_history`, `searched_channels_cache` tables with indexes and RLS policies.
+
+*API: app/api/users/detect-sub-niche/route.ts*
+* `POST` — session auth or cron bypass. Reads user's stored videos from DB, calls `detectSubNiche`, writes result to `users` table. Called fire-and-forget from `/api/sync` after the first sync completes.
+
+*Updated: app/api/sync/route.ts*
+* After data sync completes, fires `POST /api/users/detect-sub-niche` with no await (fire-and-forget) so sub-niche detection doesn't block the sync response.
+
+*app/(dashboard)/competitors/page.tsx — rebuilt*
+* Replaced old basic list with filter tabs (All / Tier 1 / Tier 2 / Dominator), `CompetitorsTable`, `UpgradeBanner` (shown when plan limit reached), `PlanLimitIndicator` (X of N slots used).
+
+*Dashboard: DashboardClient.tsx*
+* Competitors section now shows 1 Tier 1 + 1 Tier 2 only (Dominators excluded from dashboard strip). Added "View all competitors →" link to `/competitors`.
+
+*Components added:*
+* `TierBadge` — colour-coded pill (Tier 1: blue, Tier 2: purple, Dominator: orange)
+* `UpgradeBanner` — plan upgrade nudge when limit reached
+* `PlanLimitIndicator` — "2 of 4 competitor slots used"
+* `CompetitorsTable` — sortable/filterable list with tier, sub-niche, last synced, link to detail page
+
+*New cron routes added to vercel.json:*
+* `/api/cron/dominator-refresh` → daily 4am UTC
+* `/api/cron/sub-niche-detection` → daily 5am UTC
+
+---
+
+**Competitors system — Phase 2: channel search + deep analysis**
+
+*lib/channel-search.ts*
+* `normalizeChannelInput(input)` — accepts YouTube channel URL, @handle, or raw channel ID. Resolves @handles to channel IDs via YouTube Data API (`forHandle` parameter). Validates `UC...` format.
+* `getChannelData(channelId)` — checks `searched_channels_cache` first (7-day TTL). On miss: calls YouTube Data API for channel stats + recent videos, runs `detectSubNiche`, writes to cache, returns `SearchedChannelData`.
+* Full `SearchedChannelData` interface: channel metadata, subscriber/view counts, recent videos array, `cached: boolean`.
+
+*lib/competitor-insights.ts*
+* `generateCompetitorInsights(user, competitor)` — calls Claude Sonnet 4.6 to produce 5-7 typed insights comparing user vs competitor. Returns `Insight[]` with `{ type: 'observation'|'recommendation'|'strength'|'gap', title, description, priority: 'high'|'medium'|'low' }`.
+
+*New API routes:*
+* `GET /api/competitors/[id]` — returns single competitor row, auth + ownership verified.
+* `POST /api/competitors/search` — validates plan allows search this month, normalises input, calls `getChannelData`, records to `user_search_history`, returns channel data.
+* `POST /api/competitors/track` — validates plan slot availability, inserts competitor with tier + sub-niche match score, records in `user_search_history.added_as_competitor`.
+* `POST /api/competitors/insights` — loads user snapshot and competitor data, calls `generateCompetitorInsights`, returns insights array.
+
+*New page: app/(dashboard)/competitors/[id]/page.tsx*
+* Server component — auth guard, ownership check (competitor.user_id === session.user.id), loads competitor + last 20 videos + user snapshots in parallel. Renders `CompetitorAnalysis`.
+
+*New components: components/competitors/*
+* `CompetitorAnalysis` — 5-tab shell: Overview / Content / Growth / Videos / Insights
+* `ChannelSearchBar` — text input accepting URL/handle/ID, calls `/api/competitors/search`, shows results with subscribe count and "Track" button, enforces plan limit guard before rendering
+* `tabs/OverviewTab` — side-by-side metrics cards: subscribers, avg views, avg watch time, viral video count
+* `tabs/ContentTab` — upload frequency, avg video length, top performing titles
+* `tabs/GrowthTab` — line chart (Recharts) comparing user vs competitor subscriber/view snapshots over time
+* `tabs/VideosTab` — recent competitor videos list with velocity score, viral flag, published date
+* `tabs/InsightsTab` — calls `/api/competitors/insights` on mount, renders typed insight cards colour-coded by priority
+
+*New cron: /api/cron/cache-cleanup/route.ts*
+* Runs daily 2am UTC. Deletes `searched_channels_cache` rows past `expires_at`, deletes `user_search_history` rows older than 90 days.
+
+---
 
 ### Week 2 — Day 9 (2026-04-19)
 
@@ -974,7 +1176,7 @@ ALTER TABLE users
 
 **Gap scorer weights are calibrated for finance niche (Day 3 decision):** The 35/30/25/10 weighting (views/CTR/watchTime/uploads) reflects what matters most for typical niches. Different niches (e.g. gaming where upload frequency matters a lot more) may need adjusted weights in a later milestone. For now all niches use the same weights.
 
-**app/api/cron/daily/route.ts is a stub (superseded):** This route is no longer used. The 3 dedicated cron routes (`weekly-digest`, `refresh-data`, `trend-detection`) replace it entirely. The stub can be deleted in a cleanup pass.
+**app/api/cron/daily/route.ts is a stub (superseded):** This route is no longer used. The 5 dedicated cron routes (`weekly-digest`, `refresh-data`, `trend-detection`, `cache-cleanup`, `sub-niche-detection`, `dominator-refresh`) replace it entirely. The stub can be deleted in a cleanup pass.
 
 **Vercel Hobby plan: one cron per day maximum:** Hobby plan crons cannot run more than once per day. The trend-detection cron was originally scheduled every 6 hours (`0 0,6,12,18 * * *`) and was downgraded to daily at 6 AM UTC (`0 6 * * *`) to fix Vercel deployment failures. Upgrading to Vercel Pro would allow the original 6-hour cadence.
 
@@ -997,10 +1199,13 @@ ALTER TABLE users
 * Using Stripe hosted checkout over custom payment form: saves 2+ weeks of work, PCI compliance handled
 * Using Claude Sonnet 4.6 NOT Opus for production digests: 40% cheaper, quality difference negligible for this use case
 * Web app not Chrome extension: extensions require store approval, cannot do server-side processing
-* Three competitor tiers: Tier 1 (1x-3x user's subs), Tier 2 (3x-10x), beyond 10x excluded as not actionable. findCompetitors searches 0.5x-3x range but gap scorer filters to larger-than-user only.
+* Three competitor tiers: Tier 1 (1x-3x user's subs), Tier 2 (3x-10x), Tier 3 = Dominator (>10x). findCompetitors searches 0.5x-3x range but gap scorer filters to larger-than-user only. Dominators are excluded from the dashboard strip — they appear only in /competitors with their own badge.
 * Vercel Hobby plan limits crons to once-per-day — trend detection downgraded from every 6 hours to daily at 6 AM UTC. Upgrade to Pro to restore 6-hour cadence.
 * Topic coverage removed from gap score display (Day 9): stub returns 0, showing it is misleading. Will be added back when topic analysis is implemented.
-* Week 2 pages built as server components with inline sub-components (no separate component files extracted yet) — fast to build, refactor into components/ui/ when patterns stabilise.
+* Competitor plan limits (Day 10): Starter = 4 total (3 auto + 1 searched), Pro = 13 total (10 auto + 3 searched). Free plan gets 0 competitors — must upgrade to see any.
+* Dominator matching uses niche-specific rules (Day 10): gaming/fitness/tech/education require sub-niche similarity; finance/beauty/travel/business/entertainment/diy/vlog/cooking use broad niche match. Avoids assigning a gaming Dominator to a fitness creator.
+* Channel search cache (Day 11): searched_channels_cache TTL is 7 days. This avoids repeat YouTube API quota usage for popular channels searched by multiple users.
+* Competitor insights use InsightsTab lazy-load pattern (Day 11): Claude insights are generated on-demand when the user clicks the Insights tab, not at page load. This avoids burning Claude API credits for users who never view insights.
 
 \---
 
@@ -1018,7 +1223,7 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-19 — Day 9: saveChannelSnapshot field preservation bug fix (avg watch 0:00 → 6:20); Topic coverage removed from gap score chart; gap_scores corrected in DB (watch_time=15, upload_freq=85); feature status table updated to reflect all Week 2 pages and components built
-Previous: 2026-04-15 — Day 8 night: payment failed email in LS webhook handler; Day 8 evening: Lemon Squeezy checkout + webhook + lib/access.ts plan gating; Day 7 night: lib/email.ts, React Email templates, unsubscribe route, notification settings API
+*Last updated: 2026-04-26 — Day 10–11: Full competitors system built in two phases. Phase 1: sub-niche detection (Claude), dominator finder (niche-specific rules), plan limits (Starter 4/Pro 13), competitor-matcher, DB migration 002, rebuilt competitors page with filter tabs + tier badges, dashboard strip updated to Tier1+Tier2 only, 2 new cron routes (dominator-refresh, sub-niche-detection). Phase 2: channel search (URL/handle/ID resolver, 7-day cache), per-competitor 5-tab analysis page /competitors/[id], Claude insights generator, ChannelSearchBar component, 5 tab components, cache-cleanup cron. 
+Previous: 2026-04-19 — Day 9: saveChannelSnapshot field preservation bug fix; topic coverage removed from gap score chart; gap_scores DB correction
 Next update due: End of Week 3*
 

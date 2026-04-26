@@ -16,6 +16,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { getUser, saveChannelSnapshot, saveVideoData } from '@/lib/db'
+import { createServiceClient } from '@/lib/supabase'
 import {
   getChannelOverview,
   getVideoPerformance,
@@ -24,6 +25,37 @@ import {
   getDailyAnalytics,
 } from '@/lib/youtube-analytics'
 import { getVideoDetails } from '@/lib/youtube-data'
+
+async function refreshAccessToken(userId: string, refreshToken: string): Promise<string | null> {
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID!,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    })
+    const data = (await res.json()) as { access_token?: string; expires_in?: number; error?: string }
+    if (!res.ok || !data.access_token) {
+      console.error(`[sync] Token refresh failed: ${data.error}`)
+      return null
+    }
+    const expiresAt = new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString()
+    const supabase = createServiceClient()
+    await supabase
+      .from('users')
+      .update({ youtube_access_token: data.access_token, token_expires_at: expiresAt, updated_at: new Date().toISOString() })
+      .eq('id', userId)
+    console.log(`[sync] Token refreshed for user ${userId}, expires ${expiresAt}`)
+    return data.access_token
+  } catch (err) {
+    console.error('[sync] refreshAccessToken error:', err)
+    return null
+  }
+}
 
 export async function POST(request: Request) {
   const start = Date.now()
@@ -62,10 +94,19 @@ export async function POST(request: Request) {
     )
   }
 
-  const accessToken = user.youtube_access_token
+  let accessToken = user.youtube_access_token
   console.log(`[sync] Starting full sync for user ${userId}`)
 
-  // ── 3. Parallel analytics calls ────────────────────────────────────────────
+  // ── 3. Parallel analytics calls (with one token-refresh retry) ─────────────
+  const runAnalytics = (token: string) =>
+    Promise.all([
+      getChannelOverview(token),
+      getVideoPerformance(token, 20),
+      getAudienceDemographics(token),
+      getTrafficSources(token),
+      getDailyAnalytics(token, 30),
+    ])
+
   let overview: Awaited<ReturnType<typeof getChannelOverview>> = null
   let videoPerformance: Awaited<ReturnType<typeof getVideoPerformance>> = []
   let demographics: Awaited<ReturnType<typeof getAudienceDemographics>> = null
@@ -74,26 +115,34 @@ export async function POST(request: Request) {
 
   try {
     ;[overview, videoPerformance, demographics, trafficSources, dailyAnalytics] =
-      await Promise.all([
-        getChannelOverview(accessToken),
-        getVideoPerformance(accessToken, 20),
-        getAudienceDemographics(accessToken),
-        getTrafficSources(accessToken),
-        getDailyAnalytics(accessToken, 30),
-      ])
+      await runAnalytics(accessToken)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error(`[sync] YouTube Analytics error for user ${userId}:`, message)
-    if (message === 'TOKEN_EXPIRED') {
+    if (message === 'TOKEN_EXPIRED' && user.youtube_refresh_token) {
+      console.log(`[sync] Token expired for user ${userId} — attempting refresh`)
+      const newToken = await refreshAccessToken(userId, user.youtube_refresh_token)
+      if (!newToken) {
+        return NextResponse.json(
+          { error: 'YouTube token expired and refresh failed — please reconnect your account' },
+          { status: 401 },
+        )
+      }
+      accessToken = newToken
+      try {
+        ;[overview, videoPerformance, demographics, trafficSources, dailyAnalytics] =
+          await runAnalytics(accessToken)
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
+        console.error(`[sync] Retry failed for user ${userId}:`, retryMsg)
+        return NextResponse.json({ error: `YouTube API error after token refresh: ${retryMsg}` }, { status: 502 })
+      }
+    } else {
+      console.error(`[sync] YouTube Analytics error for user ${userId}:`, message)
       return NextResponse.json(
-        { error: 'YouTube token expired — please reconnect your account' },
-        { status: 401 },
+        { error: `YouTube API error: ${message}` },
+        { status: message === 'TOKEN_EXPIRED' ? 401 : 502 },
       )
     }
-    return NextResponse.json(
-      { error: `YouTube API error: ${message}` },
-      { status: 502 },
-    )
   }
 
   // Log what we got back (helps debug quota issues)
