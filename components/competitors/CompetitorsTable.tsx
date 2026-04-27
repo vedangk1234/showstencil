@@ -20,6 +20,7 @@ interface CompetitorsTableProps {
   planLimits: PlanLimits
   lockedUntil?: string | null
   lockedChannelName?: string | null
+  userSubscriberCount?: number | null
 }
 
 type FilterType = 'all' | 'tier1' | 'tier2' | 'dominator'
@@ -41,7 +42,7 @@ function timeAgo(iso: string | null | undefined): string {
   return days === 1 ? '1d ago' : `${days}d ago`
 }
 
-export function CompetitorsTable({ competitors, user, planLimits, lockedUntil, lockedChannelName }: CompetitorsTableProps) {
+export function CompetitorsTable({ competitors, user, planLimits, lockedUntil, lockedChannelName, userSubscriberCount }: CompetitorsTableProps) {
   const [filter, setFilter] = useState<FilterType>('all')
 
   const counts = useMemo(() => ({
@@ -172,7 +173,7 @@ export function CompetitorsTable({ competitors, user, planLimits, lockedUntil, l
 
           {/* Rows */}
           {filtered.map((comp) => (
-            <CompetitorRow key={comp.id} competitor={comp} />
+            <CompetitorRow key={comp.id} competitor={comp} userSubscriberCount={userSubscriberCount} />
           ))}
         </div>
       )}
@@ -180,8 +181,17 @@ export function CompetitorsTable({ competitors, user, planLimits, lockedUntil, l
   )
 }
 
-function CompetitorRow({ competitor }: { competitor: Competitor }) {
+function CompetitorRow({ competitor, userSubscriberCount }: { competitor: Competitor; userSubscriberCount?: number | null }) {
   const router = useRouter()
+
+  const displayTier: 1 | 2 | 3 | null = competitor.tier ?? (() => {
+    if (!userSubscriberCount || !competitor.subscriber_count) return null
+    const ratio = competitor.subscriber_count / userSubscriberCount
+    if (ratio <= 3) return 1
+    if (ratio <= 10) return 2
+    return 3
+  })()
+
   const matchScore = competitor.sub_niche_match_score
   const matchLabel =
     matchScore == null
@@ -261,7 +271,7 @@ function CompetitorRow({ competitor }: { competitor: Competitor }) {
       </span>
 
       {/* Tier */}
-      <TierBadge tier={competitor.tier} isDominator={competitor.is_dominator} />
+      <TierBadge tier={displayTier} isDominator={competitor.is_dominator} />
 
       {/* Match */}
       <span style={{ fontSize: 11, fontFamily: 'monospace', color: matchLabel.color }}>

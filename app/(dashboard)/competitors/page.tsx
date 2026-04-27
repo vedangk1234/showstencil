@@ -19,24 +19,33 @@ export default async function CompetitorsPage() {
 
   if (!user) redirect('/login')
 
-  const [{ data: competitors }, { data: lockedSearched }] = await Promise.all([
-    supabase
-      .from('competitors')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .order('subscriber_count', { ascending: false }),
-    supabase
-      .from('competitors')
-      .select('channel_name, replacement_locked_until')
-      .eq('user_id', user.id)
-      .eq('is_searched', true)
-      .eq('is_active', true)
-      .not('replacement_locked_until', 'is', null)
-      .gt('replacement_locked_until', new Date().toISOString())
-      .limit(1)
-      .maybeSingle(),
-  ])
+  const [{ data: competitors }, { data: lockedSearched }, { data: latestSnapshot }] =
+    await Promise.all([
+      supabase
+        .from('competitors')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .order('subscriber_count', { ascending: false }),
+      supabase
+        .from('competitors')
+        .select('channel_name, replacement_locked_until')
+        .eq('user_id', user.id)
+        .eq('is_searched', true)
+        .eq('is_active', true)
+        .not('replacement_locked_until', 'is', null)
+        .gt('replacement_locked_until', new Date().toISOString())
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('channel_snapshots')
+        .select('subscriber_count')
+        .eq('user_id', session.user.id)
+        .not('subscriber_count', 'is', null)
+        .order('snapshot_date', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
 
   const planLimits = getPlanLimits(user.subscription_plan)
 
@@ -47,6 +56,7 @@ export default async function CompetitorsPage() {
       planLimits={planLimits}
       lockedUntil={lockedSearched?.replacement_locked_until ?? null}
       lockedChannelName={lockedSearched?.channel_name ?? null}
+      userSubscriberCount={latestSnapshot?.subscriber_count ?? null}
     />
   )
 }
