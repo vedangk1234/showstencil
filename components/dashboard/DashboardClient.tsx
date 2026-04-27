@@ -3,15 +3,17 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from 'next-auth/react'
+import Link from 'next/link'
 import {
   LineChart,
   Line,
   XAxis,
-  ResponsiveContainer,
   Tooltip,
+  ResponsiveContainer,
 } from 'recharts'
 import BlackholeLoader from '@/components/BlackholeLoader'
 import { useSyncStatus } from '@/components/sync-context'
+import SubscriberGrowthChart from '@/components/charts/SubscriberGrowthChart'
 import type {
   User,
   ChannelSnapshot,
@@ -19,6 +21,7 @@ import type {
   Competitor,
   Digest,
   Trend,
+  CompetitorSnapshot,
 } from '@/types'
 
 interface Props {
@@ -29,6 +32,7 @@ interface Props {
   recentDigests: Digest[]
   latestDigest: Digest | null
   latestTrend: Trend | null
+  competitorSnapshots: { competitorId: string; snapshots: CompetitorSnapshot[] }[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,7 +119,7 @@ function PulseDot() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardClient({
-  user, snapshots, gapScore, competitors, recentDigests, latestDigest, latestTrend,
+  user, snapshots, gapScore, competitors, recentDigests, latestDigest, competitorSnapshots,
 }: Props) {
   const { isSyncing } = useSyncStatus()
   const router = useRouter()
@@ -198,29 +202,54 @@ export default function DashboardClient({
   const watchDelta = (latest?.avg_view_duration_seconds ?? 0) - (earlier?.avg_view_duration_seconds ?? 0)
   const revDelta   = (latest?.estimated_monthly_revenue ?? 0) - (earlier?.estimated_monthly_revenue ?? 0)
 
+  // ── You vs Niche chart data ────────────────────────────────────────────────
+  // Niche line = avg avg_views_per_video across Tier 1 competitors per date
+  const activeCompetitors = competitors?.filter(c => c.is_active) ?? []
+  const tier1Ids = new Set(
+    activeCompetitors
+      .filter(c => c.tier === 1 && !c.is_dominator)
+      .map(c => c.id),
+  )
+
+  const nicheByDate = new Map<string, { sum: number; count: number }>()
+  for (const { competitorId, snapshots: compSnaps } of competitorSnapshots) {
+    if (!tier1Ids.has(competitorId)) continue
+    for (const s of compSnaps) {
+      if (s.avg_views_per_video == null) continue
+      const entry = nicheByDate.get(s.snapshot_date) ?? { sum: 0, count: 0 }
+      entry.sum += s.avg_views_per_video
+      entry.count += 1
+      nicheByDate.set(s.snapshot_date, entry)
+    }
+  }
+
   const chartData = snapshots.slice(-30).map((s) => ({
     date: new Date(s.snapshot_date).getTime(),
     you: s.avg_views_per_video ?? 0,
+    niche: nicheByDate.has(s.snapshot_date)
+      ? (nicheByDate.get(s.snapshot_date)!.sum / nicheByDate.get(s.snapshot_date)!.count)
+      : null,
   }))
 
-  const checklist = [
-    { label: 'Connect YouTube channel',    done: !!user?.youtube_channel_id },
-    { label: 'Add competitor channels',    done: (competitors?.length ?? 0) > 0 },
-    { label: 'First digest generated',     done: !!latestDigest },
-    { label: 'Upgrade to paid plan',       done: user?.subscription_plan !== 'free' },
-    { label: 'Enable weekly trend alerts', done: user?.subscription_plan !== 'free' },
-  ]
-  const doneCount = checklist.filter(c => c.done).length
+  const hasNicheData = [...nicheByDate.values()].length > 0
 
+  // ── Subscriber growth chart data ──────────────────────────────────────────
+  const competitorDataForChart = activeCompetitors
+    .map(c => ({
+      competitor: c,
+      snapshots: competitorSnapshots.find(cs => cs.competitorId === c.id)?.snapshots ?? [],
+    }))
+    .filter(cd => cd.snapshots.length > 0)
+
+  // ── Gap score rows with unit labels ───────────────────────────────────────
   const gapRows = gapScore ? [
-    { label: 'Avg views / video', score: gapScore.views_gap_score ?? 0 },
-    { label: 'Click-through rate', score: gapScore.ctr_gap_score ?? 0 },
-    { label: 'Watch time',         score: gapScore.watch_time_gap_score ?? 0 },
-    { label: 'Upload frequency',   score: gapScore.upload_frequency_gap_score ?? 0 },
+    { label: 'Avg views / video', unit: 'last 30 days',           score: gapScore.views_gap_score ?? 0 },
+    { label: 'Click-through rate', unit: '% of impressions',       score: gapScore.ctr_gap_score ?? 0 },
+    { label: 'Watch time',         unit: 'avg minutes per video',  score: gapScore.watch_time_gap_score ?? 0 },
+    { label: 'Upload frequency',   unit: 'videos per month',       score: gapScore.upload_frequency_gap_score ?? 0 },
   ] : []
 
   const userAvg = latest?.avg_views_per_video ?? 1
-  const activeCompetitors = competitors?.filter(c => c.is_active) ?? []
   // Show 1 Tier 1 + 1 Tier 2 on the dashboard; Dominators are excluded here
   const dashboardCompetitors = [
     activeCompetitors.find(c => c.tier === 1 && !c.is_dominator) ?? null,
@@ -317,8 +346,11 @@ export default function DashboardClient({
             {gapRows.length > 0 && (
               <div className="flex flex-col gap-[14px]">
                 {gapRows.map(row => (
-                  <div key={row.label} className="grid grid-cols-[180px_1fr_60px] gap-[14px] items-center font-mono text-[11.5px] text-stencil-ink2">
-                    <span className="text-stencil-ink">{row.label}</span>
+                  <div key={row.label} className="grid grid-cols-[200px_1fr_60px] gap-[14px] items-center font-mono text-[11.5px] text-stencil-ink2">
+                    <div>
+                      <div className="text-stencil-ink">{row.label}</div>
+                      <div className="text-[10px] text-stencil-ink4">{row.unit}</div>
+                    </div>
                     <span className="h-[6px] bg-stencil-surface relative overflow-hidden">
                       <span
                         className={`block h-full ${gapFillClass(row.score)}`}
@@ -385,8 +417,8 @@ export default function DashboardClient({
         />
       </div>
 
-      {/* ===== SPLIT: COMPETITORS + TRENDS ===== */}
-      <div className="grid grid-cols-[1.55fr_1fr] mt-10 border border-stencil-line">
+      {/* ===== SPLIT: COMPETITORS + SUBSCRIBER GROWTH ===== */}
+      <div className="grid grid-cols-[1fr_1.5fr] mt-10 border border-stencil-line">
         <Col title="Competitors" sub={`${competitors?.length ?? 0} tracked`}>
           {dashboardCompetitors.length === 0 ? (
             <Empty>
@@ -426,127 +458,125 @@ export default function DashboardClient({
           </a>
         </Col>
 
-        <Col title="Trend Radar" actions={['7d', '30d']}>
-          {latestTrend ? (
-            <TrendRow
-              channel={latestTrend.channel_name ?? 'Unknown'}
-              what=" went viral with "
-              obj={latestTrend.title ?? '—'}
-              sub={`${fmt(latestTrend.view_count)} views · velocity ${fmt(latestTrend.velocity_score)}/h`}
-              time={timeAgo(latestTrend.detected_at)}
-              kind="viral"
+        <Col title="Subscriber growth" sub="last 30 days">
+          {mounted ? (
+            <SubscriberGrowthChart
+              userSnapshots={snapshots}
+              competitorData={competitorDataForChart}
+              userName={user?.name ?? null}
             />
           ) : (
-            <Empty>No viral activity detected this week. The radar is quiet.</Empty>
+            <Empty>Loading chart…</Empty>
           )}
-          <TrendRow
-            channel="Topic shift"
-            what=" — niche velocity rising on "
-            obj="housing market 2026"
-            sub="14 videos this week vs. 4 last · suggested angle: contrarian take"
-            time="1d"
-            kind="topic"
-          />
-          <TrendRow
-            channel="Coverage gap"
-            what=" — competitors covering "
-            obj="Roth IRA conversion ladder"
-            sub="8 of your tracked channels · uncovered by you"
-            time="2d"
-            kind="topic"
-          />
         </Col>
       </div>
 
-      {/* ===== LOWER GRID: chart + ideas + checklist ===== */}
-      <div className="grid grid-cols-[1.1fr_1fr_1fr] mt-6 border border-stencil-line">
-        <Col title="You vs. niche" sub="avg views / video" actions={['7d', '30d', '90d']} activeIdx={1}>
+      {/* ===== LOWER GRID: You vs Niche + Top idea ===== */}
+      <div className="grid grid-cols-[1.4fr_1fr] mt-6 border border-stencil-line">
+        <Col title="You vs. niche" sub="avg views / video — last 30 days">
           {mounted && chartData.length > 1 ? (
-            <div style={{ height: 170, width: '100%' }}>
-              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
-                <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
-                  <XAxis dataKey="date" type="number" domain={['dataMin', 'dataMax']} hide />
-                  <Line
-                    type="monotone"
-                    dataKey="you"
-                    stroke="oklch(78% 0.19 145)"
-                    strokeWidth={1.5}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: '#0A0A0A',
-                      border: '1px solid #222222',
-                      fontFamily: 'Geist Mono, monospace',
-                      fontSize: 11,
-                      padding: '4px 8px',
-                      color: '#EDEDED',
-                    }}
-                    cursor={{ stroke: '#2A2A2A', strokeWidth: 1 }}
-                    labelFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    formatter={(v) => [fmt(typeof v === 'number' ? v : null), 'you']}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            <>
+              <div style={{ height: 170, width: '100%' }}>
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
+                  <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 4, left: 4 }}>
+                    <XAxis dataKey="date" type="number" domain={['dataMin', 'dataMax']} hide />
+                    <Line
+                      type="monotone"
+                      dataKey="you"
+                      name="you"
+                      stroke="#22c55e"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                    {hasNicheData && (
+                      <Line
+                        type="monotone"
+                        dataKey="niche"
+                        name="Tier 1 niche avg"
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        strokeDasharray="5 3"
+                        dot={false}
+                        isAnimationActive={false}
+                        connectNulls
+                      />
+                    )}
+                    <Tooltip
+                      contentStyle={{
+                        background: '#0A0A0A',
+                        border: '1px solid #222222',
+                        fontFamily: 'Geist Mono, monospace',
+                        fontSize: 11,
+                        padding: '4px 8px',
+                        color: '#EDEDED',
+                      }}
+                      cursor={{ stroke: '#2A2A2A', strokeWidth: 1 }}
+                      labelFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      formatter={(v, name) => [fmt(typeof v === 'number' ? v : null), name]}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex gap-[14px] font-mono text-[10px] text-stencil-ink3 mt-[10px] pt-[10px] border-t border-dashed border-stencil-line">
+                <span>
+                  <span className="inline-block size-2 bg-stencil-accent mr-[6px] align-[-1px]" />
+                  you
+                </span>
+                {hasNicheData ? (
+                  <span>
+                    <span className="inline-block w-4 border-t border-dashed border-stencil-blue mr-[6px] align-middle" />
+                    Tier 1 niche average
+                  </span>
+                ) : (
+                  <span className="text-stencil-ink4">No Tier 1 competitors to compare against</span>
+                )}
+                <span className="ml-auto">{snapshots.length} snapshots tracked</span>
+              </div>
+            </>
           ) : (
             <Empty>Not enough data yet.</Empty>
           )}
-          <div className="flex gap-[14px] font-mono text-[10px] text-stencil-ink3 mt-[10px] pt-[10px] border-t border-dashed border-stencil-line">
-            <span>
-              <span className="inline-block size-2 bg-stencil-accent mr-[6px] align-[-1px]" />
-              you
-            </span>
-            <span className="ml-auto">{snapshots.length} snapshots tracked</span>
-          </div>
         </Col>
 
-        <Col title="Top ideas" sub="this week" actions={['all']}>
+        <Col title="Top idea this week" sub="from latest digest">
           {(latestDigest?.video_ideas ?? []).length > 0 ? (
-            (latestDigest?.video_ideas ?? []).slice(0, 3).map((idea, i) => (
-              <div key={i} className="grid grid-cols-[24px_1fr_50px] gap-3 items-start py-[11px] border-b border-dashed border-stencil-line">
-                <div className="font-serif italic text-[22px] text-stencil-ink3 leading-none">
-                  {String(i + 1).padStart(2, '0')}
-                </div>
-                <div>
-                  <div className="text-[13px] leading-[1.35] tracking-[-0.005em]">
-                    &ldquo;{idea.title}&rdquo;
+            <>
+              {(latestDigest?.video_ideas ?? []).slice(0, 1).map((idea, i) => (
+                <div key={i} className="grid grid-cols-[24px_1fr_50px] gap-3 items-start py-[11px] border-b border-dashed border-stencil-line">
+                  <div className="font-serif italic text-[22px] text-stencil-ink3 leading-none">
+                    {String(i + 1).padStart(2, '0')}
                   </div>
-                  <div className="font-mono text-[10.5px] text-stencil-ink3 mt-[3px] flex gap-2">
-                    {idea.suggestedLength && (
-                      <span className="px-[5px] py-[1px] border border-stencil-line">
-                        {idea.suggestedLength}
-                      </span>
-                    )}
-                    {idea.thumbnailApproach && (
-                      <span>{idea.thumbnailApproach.slice(0, 24)}</span>
-                    )}
+                  <div>
+                    <div className="text-[13px] leading-[1.35] tracking-[-0.005em]">
+                      &ldquo;{idea.title}&rdquo;
+                    </div>
+                    <div className="font-mono text-[10.5px] text-stencil-ink3 mt-[3px] flex gap-2">
+                      {idea.suggestedLength && (
+                        <span className="px-[5px] py-[1px] border border-stencil-line">
+                          {idea.suggestedLength}
+                        </span>
+                      )}
+                      {idea.thumbnailApproach && (
+                        <span>{idea.thumbnailApproach.slice(0, 24)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="font-mono text-[11.5px] text-stencil-accent text-right font-medium">
+                    {idea.opportunityScore}
                   </div>
                 </div>
-                <div className="font-mono text-[11.5px] text-stencil-accent text-right font-medium">
-                  {idea.opportunityScore}
-                </div>
-              </div>
-            ))
+              ))}
+              <Link
+                href="/ideas"
+                className="font-mono text-[11px] text-stencil-ink3 hover:text-stencil-ink mt-3 pt-3 border-t border-dashed border-stencil-line block no-underline"
+              >
+                See all ideas →
+              </Link>
+            </>
           ) : (
-            <Empty>No ideas yet. Generate a digest to populate this list.</Empty>
+            <Empty>No ideas yet. Generate a digest to populate this.</Empty>
           )}
-        </Col>
-
-        <Col title="Setup checklist" actions={[`${doneCount}/${checklist.length}`]}>
-          <div className="flex flex-col gap-[11px]">
-            {checklist.map(({ label, done }) => (
-              <div key={label} className="flex items-center gap-[10px] text-[13px]">
-                <div className={`size-[14px] border grid place-items-center shrink-0 text-[9px] text-stencil-bg ${done ? 'border-stencil-accent bg-stencil-accent' : 'border-stencil-line2 bg-transparent'}`}>
-                  {done && '✓'}
-                </div>
-                <span className={done ? 'text-stencil-ink3 line-through' : 'text-stencil-ink'}>
-                  {label}
-                </span>
-              </div>
-            ))}
-          </div>
         </Col>
       </div>
 
@@ -637,12 +667,10 @@ function Metric({
 }
 
 function Col({
-  title, sub, actions, activeIdx = 0, children,
+  title, sub, children,
 }: {
   title: string
   sub?: string
-  actions?: string[]
-  activeIdx?: number
   children: React.ReactNode
 }) {
   return (
@@ -652,52 +680,8 @@ function Col({
           {title}
           {sub && <span className="text-stencil-ink3 font-normal"> &nbsp;→ {sub}</span>}
         </Eyebrow>
-        {actions && (
-          <div className="flex gap-[6px]">
-            {actions.map((a, i) => (
-              <span key={a} className={`font-mono text-[10.5px] px-[6px] py-[2px] border cursor-pointer ${i === activeIdx ? 'border-stencil-ink2 text-stencil-ink' : 'border-stencil-line text-stencil-ink3'}`}>
-                {a}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
       {children}
-    </div>
-  )
-}
-
-function TrendRow({
-  channel, what, obj, sub, time, kind,
-}: {
-  channel: string
-  what: string
-  obj: string
-  sub: string
-  time: string
-  kind: 'viral' | 'topic' | 'default'
-}) {
-  const dotClass = kind === 'viral' ? 'bg-stencil-red' : kind === 'topic' ? 'bg-stencil-blue' : 'bg-stencil-amber'
-  return (
-    <div className="grid grid-cols-[14px_1fr_auto] gap-[14px] items-start py-3 border-b border-dashed border-stencil-line">
-      <div className="w-px bg-stencil-line2 h-full justify-self-center relative">
-        <span className={`absolute top-1 left-1/2 size-[7px] rounded-full -translate-x-1/2 ${dotClass}`} />
-      </div>
-      <div>
-        <div className="text-[13px] leading-[1.45]">
-          <span className="text-stencil-ink font-medium">{channel}</span>
-          <span className="text-stencil-ink2">{what}</span>
-          <span className="font-mono text-[11.5px] px-1 bg-stencil-surface border border-stencil-line text-stencil-ink">
-            {obj}
-          </span>
-        </div>
-        <div className="font-mono text-[10.5px] text-stencil-ink3 mt-[3px]">
-          {sub}
-        </div>
-      </div>
-      <div className="font-mono text-[10.5px] text-stencil-ink3 whitespace-nowrap">
-        {time}
-      </div>
     </div>
   )
 }
