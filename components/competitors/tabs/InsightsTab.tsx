@@ -27,18 +27,27 @@ export function InsightsTab({ competitor }: InsightsTabProps) {
   const [insights, setInsights] = useState<Insight[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [retryable, setRetryable] = useState(false)
   const [cached, setCached] = useState(false)
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
 
   async function fetchInsights(forceRegenerate = false) {
     setLoading(true)
     setError(null)
+    setRetryable(false)
     try {
       const res = await fetch('/api/competitors/insights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ competitor_id: competitor.id, force_regenerate: forceRegenerate }),
       })
+
+      if (res.status === 422) {
+        const data = await res.json()
+        setError(data.error || 'Not enough data yet.')
+        setRetryable(true)
+        return
+      }
 
       if (!res.ok) {
         const data = await res.json()
@@ -90,6 +99,34 @@ export function InsightsTab({ competitor }: InsightsTabProps) {
   }
 
   if (error) {
+    if (retryable) {
+      return (
+        <div style={{ padding: '48px 24px', textAlign: 'center', background: '#0a0a0a', border: '1px dashed #1a1a1a', borderRadius: 8 }}>
+          <p style={{ color: '#888888', fontSize: 13, margin: '0 0 8px' }}>
+            Gathering data for this channel…
+          </p>
+          <p style={{ color: '#555555', fontSize: 12, margin: '0 0 16px', lineHeight: 1.6 }}>
+            Insights will be available once video data has been fetched.
+            This usually takes less than a minute after adding a competitor.
+          </p>
+          <button
+            onClick={() => fetchInsights()}
+            style={{
+              fontSize: 12,
+              fontFamily: 'monospace',
+              color: '#60a5fa',
+              background: 'transparent',
+              border: '1px solid #1d3a6e',
+              borderRadius: 4,
+              padding: '6px 14px',
+              cursor: 'pointer',
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      )
+    }
     return (
       <div style={{ padding: '32px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8, textAlign: 'center' }}>
         <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>{error}</p>

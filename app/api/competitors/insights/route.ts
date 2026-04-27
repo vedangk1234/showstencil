@@ -38,6 +38,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Competitor not found' }, { status: 404 })
     }
 
+    // Require enough data to generate meaningful insights
+    const hasEnoughData =
+      competitor.avg_views_per_video != null &&
+      competitor.subscriber_count != null &&
+      competitor.video_count != null
+
+    if (!hasEnoughData) {
+      return NextResponse.json(
+        {
+          error:
+            'Not enough data to generate insights yet. Video data is being fetched — try again in a moment.',
+          retryable: true,
+        },
+        { status: 422 },
+      )
+    }
+
     // Load user snapshot + user info
     const [{ data: userSnapshot }, { data: user }] = await Promise.all([
       supabase
