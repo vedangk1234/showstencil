@@ -12,9 +12,15 @@ import {
   Legend,
 } from 'recharts'
 
+interface CompetitorSnapshotRow {
+  snapshot_date: string
+  subscriber_count: number | null
+}
+
 interface GrowthTabProps {
   userSnapshots: Record<string, unknown>[]
   competitor: Record<string, unknown>
+  competitorSnapshots: CompetitorSnapshotRow[]
 }
 
 function fmtK(n: number): string {
@@ -23,15 +29,26 @@ function fmtK(n: number): string {
   return String(n)
 }
 
-export function GrowthTab({ userSnapshots, competitor }: GrowthTabProps) {
+export function GrowthTab({ userSnapshots, competitor, competitorSnapshots }: GrowthTabProps) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
-  const chartData = userSnapshots.map((s) => ({
-    date: new Date(s.snapshot_date as string).getTime(),
-    You: (s.subscriber_count as number) || 0,
-    [competitor.channel_name as string]: (competitor.subscriber_count as number) || 0,
-  }))
+  const compName = competitor.channel_name as string
+
+  const allDates = Array.from(new Set([
+    ...userSnapshots.map((s) => s.snapshot_date as string),
+    ...competitorSnapshots.map((s) => s.snapshot_date),
+  ])).sort()
+
+  const chartData = allDates.map((date) => {
+    const userSnap = userSnapshots.find((s) => (s.snapshot_date as string) === date)
+    const compSnap = competitorSnapshots.find((s) => s.snapshot_date === date)
+    return {
+      date,
+      You: userSnap?.subscriber_count != null ? (userSnap.subscriber_count as number) : null,
+      [compName]: compSnap?.subscriber_count ?? null,
+    }
+  })
 
   if (chartData.length < 2) {
     return (
@@ -54,12 +71,10 @@ export function GrowthTab({ userSnapshots, competitor }: GrowthTabProps) {
     )
   }
 
-  const compName = competitor.channel_name as string
-
   return (
     <div>
       <p style={{ color: '#555555', fontSize: 12, marginBottom: 20 }}>
-        Your subscriber growth vs. {compName}&apos;s current count (historical competitor data not available).
+        Your subscriber growth vs. {compName}&apos;s historical subscriber count.
       </p>
 
       <div
@@ -77,22 +92,28 @@ export function GrowthTab({ userSnapshots, competitor }: GrowthTabProps) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
                 <XAxis
                   dataKey="date"
-                  type="number"
-                  domain={['dataMin', 'dataMax']}
-                  tickFormatter={(v) =>
+                  tickFormatter={(v: string) =>
                     new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                   }
                   stroke="#444444"
                   tick={{ fontSize: 11, fontFamily: 'monospace' }}
                 />
                 <YAxis
-                  tickFormatter={fmtK}
+                  scale="log"
+                  domain={['auto', 'auto']}
+                  tickFormatter={(v: number) => fmtK(v)}
                   stroke="#444444"
                   tick={{ fontSize: 11, fontFamily: 'monospace' }}
+                  label={{
+                    value: 'Subscribers (log scale)',
+                    angle: -90,
+                    position: 'insideLeft',
+                    style: { fontSize: 10, fill: '#666' },
+                  }}
                 />
                 <Tooltip
                   labelFormatter={(v) =>
-                    new Date(v).toLocaleDateString('en-US', {
+                    new Date(String(v)).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',
@@ -116,6 +137,7 @@ export function GrowthTab({ userSnapshots, competitor }: GrowthTabProps) {
                   stroke="#4ade80"
                   strokeWidth={2}
                   dot={false}
+                  connectNulls={true}
                 />
                 <Line
                   type="monotone"
@@ -124,6 +146,7 @@ export function GrowthTab({ userSnapshots, competitor }: GrowthTabProps) {
                   strokeWidth={2}
                   strokeDasharray="5 5"
                   dot={false}
+                  connectNulls={true}
                 />
               </LineChart>
             </ResponsiveContainer>

@@ -17,6 +17,11 @@ interface UserVideoRow {
   view_count: number | null
 }
 
+interface CompetitorSnapshotRow {
+  snapshot_date: string
+  subscriber_count: number | null
+}
+
 interface CompetitorAnalysisProps {
   user: Record<string, unknown>
   userSnapshot: Record<string, unknown> | null
@@ -24,6 +29,7 @@ interface CompetitorAnalysisProps {
   userVideos: UserVideoRow[]
   competitor: Record<string, unknown>
   competitorVideos: Record<string, unknown>[]
+  competitorSnapshots: CompetitorSnapshotRow[]
 }
 
 function fmt(n: number): string {
@@ -47,6 +53,7 @@ export function CompetitorAnalysis({
   userVideos,
   competitor,
   competitorVideos,
+  competitorSnapshots,
 }: CompetitorAnalysisProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview')
 
@@ -217,7 +224,11 @@ export function CompetitorAnalysis({
           />
         )}
         {activeTab === 'growth' && (
-          <GrowthTab userSnapshots={userSnapshots} competitor={competitor} />
+          <GrowthTab
+            userSnapshots={userSnapshots}
+            competitor={competitor}
+            competitorSnapshots={competitorSnapshots}
+          />
         )}
         {activeTab === 'videos' && <VideosTab competitorVideos={competitorVideos} />}
         {activeTab === 'insights' && <InsightsTab user={user} competitor={competitor} />}

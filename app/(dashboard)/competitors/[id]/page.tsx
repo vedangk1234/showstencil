@@ -36,6 +36,7 @@ export default async function CompetitorAnalysisPage({
     { data: userSnapshot },
     { data: userSnapshots },
     { data: userVideos },
+    { data: competitorSnapshots },
   ] = await Promise.all([
     supabase
       .from('competitor_videos')
@@ -62,6 +63,12 @@ export default async function CompetitorAnalysisPage({
       .eq('user_id', user.id)
       .order('published_at', { ascending: false })
       .limit(50),
+    supabase
+      .from('competitor_snapshots')
+      .select('snapshot_date, subscriber_count')
+      .eq('competitor_id', id)
+      .order('snapshot_date', { ascending: true })
+      .limit(31),
   ])
 
   return (
@@ -72,6 +79,7 @@ export default async function CompetitorAnalysisPage({
       userVideos={userVideos ?? []}
       competitor={competitor}
       competitorVideos={competitorVideos ?? []}
+      competitorSnapshots={competitorSnapshots ?? []}
     />
   )
 }
