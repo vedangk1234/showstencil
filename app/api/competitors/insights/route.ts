@@ -129,6 +129,20 @@ export async function POST(request: Request) {
       .gte('published_at', thirtyDaysAgoIso)
     const userUploadsPerMonth = recentUserUploads ?? 0
 
+    const { data: userVideos } = await supabase
+      .from('videos')
+      .select('duration_seconds')
+      .eq('user_id', session.user.id)
+      .not('duration_seconds', 'is', null)
+      .gt('duration_seconds', 0)
+
+    const userAvgVideoLengthSeconds =
+      userVideos && userVideos.length > 0
+        ? Math.round(
+            userVideos.reduce((sum, v) => sum + (v.duration_seconds ?? 0), 0) / userVideos.length,
+          )
+        : null
+
     const insights = await generateCompetitorInsights(
       {
         channel_name: user?.name || 'Your Channel',
@@ -136,6 +150,7 @@ export async function POST(request: Request) {
         avg_views_per_video: userSnapshot?.avg_views_per_video || 0,
         avg_ctr: userSnapshot?.avg_ctr || 0,
         avg_view_duration_seconds: userSnapshot?.avg_view_duration_seconds || 0,
+        avg_video_length_seconds: userAvgVideoLengthSeconds,
         upload_frequency_per_month: userUploadsPerMonth,
         sub_niche: user?.sub_niche || 'General',
       },

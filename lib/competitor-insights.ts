@@ -9,6 +9,7 @@ export interface InsightUserMetrics {
   avg_views_per_video: number
   avg_ctr: number
   avg_view_duration_seconds: number
+  avg_video_length_seconds: number | null
   upload_frequency_per_month: number
   sub_niche: string
 }
@@ -35,6 +36,7 @@ USER CHANNEL: ${user.channel_name}
 - Avg views/video: ${user.avg_views_per_video.toLocaleString()}
 - CTR: ${user.avg_ctr.toFixed(1)}%
 - Avg watch time: ${Math.floor(user.avg_view_duration_seconds / 60)}:${String(user.avg_view_duration_seconds % 60).padStart(2, '0')}
+- Avg video length: ${user.avg_video_length_seconds ? `${Math.floor(user.avg_video_length_seconds / 60)}m ${user.avg_video_length_seconds % 60}s` : 'Unknown'}
 - Upload frequency: ${user.upload_frequency_per_month} videos/month (last 30 days)
 - Sub-niche: ${user.sub_niche}
 
