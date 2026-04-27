@@ -64,7 +64,7 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
   // ── Posting days ─────────────────────────────────────────────────────────
   const dayFrequency = competitorVideos.reduce((acc: Record<string, number>, video) => {
     if (!video.published_at) return acc
-    const day = new Date(video.published_at as string).toLocaleDateString('en-US', { weekday: 'long' })
+    const day = new Date(video.published_at as string).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })
     acc[day] = (acc[day] || 0) + 1
     return acc
   }, {} as Record<string, number>)
