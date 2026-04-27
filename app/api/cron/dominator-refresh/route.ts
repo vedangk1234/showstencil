@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { findDominatorsForUser } from '@/lib/dominator-finder'
 
-// Runs daily at 4 AM UTC — refreshes Dominator competitors for all active users
+// Runs daily at 4 AM UTC — assigns a Dominator competitor for users who don't have one yet.
+// Once assigned, the dominator is never replaced by this cron — their data is updated daily
+// by /api/cron/refresh-data like any other competitor.
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -24,12 +26,29 @@ export async function GET(request: Request) {
 
   let processed = 0
   let succeeded = 0
+  let skipped = 0
   let failed = 0
 
   for (const user of users) {
     processed++
     try {
       if (!user.niche_id) continue
+
+      // Skip-if-exists: if this user already has an active dominator, don't replace it.
+      // The dominator's data is refreshed daily by refresh-data cron.
+      const { data: existingDominator } = await supabase
+        .from('competitors')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_dominator', true)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (existingDominator) {
+        console.log(`[cron/dominator-refresh] User ${user.id} already has a dominator — skipping`)
+        skipped++
+        continue
+      }
 
       const dominatorCount = user.subscription_plan === 'pro' ? 2 : 1
 
@@ -53,14 +72,7 @@ export async function GET(request: Request) {
         continue
       }
 
-      // Deactivate old dominator entries for this user
-      await supabase
-        .from('competitors')
-        .update({ is_active: false })
-        .eq('user_id', user.id)
-        .eq('is_dominator', true)
-
-      // Insert fresh dominators
+      // Insert new dominators (no deactivation of existing — there are none)
       for (const dom of dominators) {
         await supabase.from('competitors').upsert(
           {
@@ -107,5 +119,5 @@ export async function GET(request: Request) {
     await new Promise((r) => setTimeout(r, 500))
   }
 
-  return NextResponse.json({ processed, succeeded, failed })
+  return NextResponse.json({ processed, succeeded, skipped, failed })
 }

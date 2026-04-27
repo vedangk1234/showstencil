@@ -244,6 +244,11 @@ function defaultNiche(reason: string): NicheResult {
  * Primary range: 0.5x–3x user's sub count.
  * If no results, widens to 0.2x–5x and retries once.
  *
+ * AUTO-DETECTION IS ONE-TIME: This function is called exactly once per user —
+ * during the initial onboarding sync when no auto-detected competitors exist yet.
+ * After that, the daily refresh-data cron updates competitor data in-place.
+ * No API route re-runs findCompetitors for existing users.
+ *
  * @quota 101 YouTube Data API units per attempt (100 search.list + 1 channels.list)
  * @param nicheId       One of the 12 valid niche IDs
  * @param userSubCount  User's current subscriber count

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
 import { generateCompetitorInsights } from '@/lib/competitor-insights'
+import { getCachedInsights, saveCompetitorInsights } from '@/lib/db'
 
 export async function POST(request: Request) {
   try {
@@ -15,41 +16,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'competitor_id required' }, { status: 400 })
     }
 
-    const supabase = createServiceClient()
-
-    // Check cache first (unless force_regenerate)
+    // Check on-row cache first (competitors.insights column — wiped daily by refresh-data cron)
     if (!force_regenerate) {
-      const { data: cached } = await supabase
-        .from('competitor_insights')
-        .select('insights, generated_at')
-        .eq('user_id', session.user.id)
-        .eq('competitor_id', competitor_id)
-        .single()
-
-      if (cached) {
-        return NextResponse.json({
-          success: true,
-          insights: cached.insights,
-          cached: true,
-          generated_at: cached.generated_at,
-        })
+      const cached = await getCachedInsights(competitor_id, 7)
+      if (cached && cached.length > 0) {
+        return NextResponse.json({ insights: cached, cached: true })
       }
     }
 
-    // Load user snapshot
-    const { data: userSnapshot } = await supabase
-      .from('channel_snapshots')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    const { data: user } = await supabase
-      .from('users')
-      .select('name, sub_niche')
-      .eq('id', session.user.id)
-      .single()
+    const supabase = createServiceClient()
 
     // Load competitor (must belong to this user)
     const { data: competitor } = await supabase
@@ -62,6 +37,22 @@ export async function POST(request: Request) {
     if (!competitor) {
       return NextResponse.json({ error: 'Competitor not found' }, { status: 404 })
     }
+
+    // Load user snapshot + user info
+    const [{ data: userSnapshot }, { data: user }] = await Promise.all([
+      supabase
+        .from('channel_snapshots')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single(),
+      supabase
+        .from('users')
+        .select('name, sub_niche')
+        .eq('id', session.user.id)
+        .single(),
+    ])
 
     // Load competitor videos for metrics
     const { data: competitorVideos } = await supabase
@@ -130,33 +121,21 @@ export async function POST(request: Request) {
       {
         channel_name: competitor.channel_name || 'Competitor',
         subscriber_count: competitor.subscriber_count || 0,
-        avg_views: avgViews,
-        avg_video_length_seconds: avgDuration,
-        upload_frequency_per_week: uploadsPerWeek,
+        avg_views: competitor.avg_views_per_video ?? avgViews,
+        avg_video_length_seconds: competitor.avg_video_length_seconds ?? avgDuration,
+        upload_frequency_per_week: competitor.upload_frequency_30d
+          ? competitor.upload_frequency_30d / 4.3
+          : uploadsPerWeek,
         sub_niche: competitor.sub_niche || 'General',
         top_videos: topVideos,
         publishing_days: publishingDays,
       },
     )
 
-    // Save to cache (upsert on user_id + competitor_id)
-    await supabase.from('competitor_insights').upsert(
-      {
-        user_id: session.user.id,
-        competitor_id,
-        insights,
-        generated_at: new Date().toISOString(),
-        generation_count: 1,
-      },
-      { onConflict: 'user_id,competitor_id' },
-    )
+    // Save to competitors.insights column (wiped daily by refresh-data cron)
+    await saveCompetitorInsights(competitor_id, insights)
 
-    return NextResponse.json({
-      success: true,
-      insights,
-      cached: false,
-      generated_at: new Date().toISOString(),
-    })
+    return NextResponse.json({ insights, cached: false })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Insights generation failed'
     console.error('[competitors/insights]', error)

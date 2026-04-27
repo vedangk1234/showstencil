@@ -1076,6 +1076,41 @@ export async function saveCompetitorInsights(
 }
 
 // ---------------------------------------------------------------------------
+// getRecentCompetitorVideos
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns competitor videos published within the last N days, sorted by
+ * published_at descending. Used by the daily refresh cron to compute metrics.
+ *
+ * @returns CompetitorVideo[] — empty array on error or no recent videos
+ */
+export async function getRecentCompetitorVideos(
+  competitorId: string,
+  days: number = 30,
+): Promise<CompetitorVideo[]> {
+  const supabase = createServiceClient()
+
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceDate = since.toISOString()
+
+  const { data, error } = await supabase
+    .from('competitor_videos')
+    .select('*')
+    .eq('competitor_id', competitorId)
+    .gte('published_at', sinceDate)
+    .order('published_at', { ascending: false })
+
+  if (error) {
+    console.error('[db] getRecentCompetitorVideos error:', error.message)
+    return []
+  }
+
+  return (data ?? []) as CompetitorVideo[]
+}
+
+// ---------------------------------------------------------------------------
 // getCachedInsights
 // ---------------------------------------------------------------------------
 
