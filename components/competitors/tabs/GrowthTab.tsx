@@ -84,9 +84,14 @@ export function GrowthTab({ userSnapshots, competitor, competitorSnapshots }: Gr
 
   return (
     <div>
-      <p style={{ color: '#555555', fontSize: 12, marginBottom: 20 }}>
+      <p style={{ color: '#555555', fontSize: 12, marginBottom: 8 }}>
         Your subscriber growth vs. {compName}&apos;s historical subscriber count.
       </p>
+      {competitorSnapshots.length < 2 && (
+        <p style={{ color: '#555555', fontSize: 11, marginBottom: 20, fontStyle: 'italic' }}>
+          Note: Historical subscriber data for this channel is not yet available. The competitor line reflects the current subscriber count and will be plotted accurately as daily snapshots are collected going forward.
+        </p>
+      )}
 
       <div
         style={{
