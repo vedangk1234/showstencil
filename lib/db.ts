@@ -400,6 +400,35 @@ export async function getVideos(userId: string, limit: number = 20): Promise<Vid
 }
 
 // ---------------------------------------------------------------------------
+// countVideosLast30Days
+// ---------------------------------------------------------------------------
+
+/**
+ * Counts how many of the user's own videos were published in the last 30 days.
+ * Used by the digest generator for an accurate upload frequency figure that matches
+ * what OverviewTab shows in the UI.
+ *
+ * @returns count (0 on error or no data)
+ */
+export async function countVideosLast30Days(userId: string): Promise<number> {
+  const supabase = createServiceClient()
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { count, error } = await supabase
+    .from('videos')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('published_at', cutoff)
+
+  if (error) {
+    console.error('[db] countVideosLast30Days error:', error.message)
+    return 0
+  }
+
+  return count ?? 0
+}
+
+// ---------------------------------------------------------------------------
 // getWorstVideos
 // ---------------------------------------------------------------------------
 
@@ -474,10 +503,10 @@ export async function getCompetitorMetricsFromDB(userId: string): Promise<Compet
   }
   const watchDuration = NICHE_WATCH_DURATION[nicheId] ?? 360
 
-  // Fetch active competitors
+  // Fetch active competitors — include upload_frequency_30d so we use the stored value
   const { data: competitors, error: compError } = await supabase
     .from('competitors')
-    .select('id, youtube_channel_id, channel_name, subscriber_count')
+    .select('id, youtube_channel_id, channel_name, subscriber_count, upload_frequency_30d')
     .eq('user_id', userId)
     .eq('is_active', true)
 
@@ -523,8 +552,13 @@ export async function getCompetitorMetricsFromDB(userId: string): Promise<Compet
           )
         : 0
 
-    // Uploads per month — stored videos span ~90 days, divide by 3
-    const uploadsPerMonth = Math.round((videoRows.length / 3) * 10) / 10
+    // Uploads per month — prefer stored upload_frequency_30d (count of videos in last 30 days),
+    // fall back to dividing total stored videos by 3 (videos span ~90 days)
+    const storedFreq = (comp as { upload_frequency_30d?: number | null }).upload_frequency_30d
+    const uploadsPerMonth =
+      storedFreq != null
+        ? Math.round(storedFreq * 10) / 10
+        : Math.round((videoRows.length / 3) * 10) / 10
 
     // Estimated CTR
     const estimatedCtr =
