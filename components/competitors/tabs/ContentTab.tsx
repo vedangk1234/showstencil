@@ -62,14 +62,14 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
       : null
 
   // ── Posting days ─────────────────────────────────────────────────────────
-  const dayCounts: Record<string, number> = {}
-  competitorVideos.forEach((v) => {
-    if (!v.published_at) return
-    const day = new Date(v.published_at as string).toLocaleDateString('en-US', { weekday: 'long' })
-    dayCounts[day] = (dayCounts[day] || 0) + 1
-  })
+  const dayFrequency = competitorVideos.reduce((acc: Record<string, number>, video) => {
+    if (!video.published_at) return acc
+    const day = new Date(video.published_at as string).toLocaleDateString('en-US', { weekday: 'long' })
+    acc[day] = (acc[day] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
 
-  const topDays = Object.entries(dayCounts)
+  const topDays = Object.entries(dayFrequency)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
     .map(([day]) => day)
