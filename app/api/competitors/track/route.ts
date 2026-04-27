@@ -209,10 +209,20 @@ export async function POST(request: Request) {
     let metricsPopulated = false
     let fullProfile = null
 
+    console.log('[track] Fetching full profile for:', newCompetitor.youtube_channel_id)
+    console.log('[track] YouTube API key present:', !!process.env.YOUTUBE_API_KEY)
+
     try {
       fullProfile = await getCompetitorFullProfile(newCompetitor.youtube_channel_id)
+      console.log('[track] Profile fetched. Videos count:', fullProfile?.recentVideos?.length ?? 0)
     } catch (err) {
-      console.error('[track] Failed to fetch competitor profile:', err)
+      console.error('[track] getCompetitorFullProfile failed:', err)
+    }
+
+    if (!fullProfile) {
+      console.warn('[track] No profile returned from YouTube API — skipping video/metrics pipeline')
+    } else if (!fullProfile.recentVideos?.length) {
+      console.warn('[track] No videos returned from YouTube API for', newCompetitor.youtube_channel_id)
     }
 
     if (fullProfile) {
@@ -244,11 +254,16 @@ export async function POST(request: Request) {
       })
 
       if (videoRows.length > 0) {
+        console.log('[track] Inserting', videoRows.length, 'videos for competitor', competitorId)
+        // Delete any existing videos first (no unique constraint on competitor_id,youtube_video_id)
+        await supabase.from('competitor_videos').delete().eq('competitor_id', competitorId)
         const { error: videoError } = await supabase
           .from('competitor_videos')
-          .upsert(videoRows, { onConflict: 'competitor_id,youtube_video_id' })
+          .insert(videoRows)
         if (videoError) {
-          console.error('[track] Failed to upsert competitor videos:', videoError.message)
+          console.error('[track] Failed to insert competitor videos:', videoError.message)
+        } else {
+          console.log('[track] Videos inserted successfully')
         }
       }
 
