@@ -122,10 +122,13 @@ export async function POST(request: Request) {
       const day = new Date(v.published_at).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })
       dayCounts[day] = (dayCounts[day] || 0) + 1
     }
-    const publishingDays = Object.entries(dayCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([day]) => day)
+    const sortedDayCounts = Object.entries(dayCounts).sort((a, b) => b[1] - a[1])
+    const allDaysEqualInsights = sortedDayCounts.length > 1 && sortedDayCounts.every(([, c]) => c === 1)
+    const publishingDays: string[] = allDaysEqualInsights
+      ? ['Varies — consistent uploading on different days']
+      : sortedDayCounts.length > 0
+        ? [sortedDayCounts[0][0]]
+        : []
 
     const topVideos = [...videos]
       .sort(

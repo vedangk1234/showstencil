@@ -94,10 +94,9 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
     return acc
   }, {} as Record<string, number>)
 
-  const topDays = Object.entries(dayFrequency)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([day]) => day)
+  const sortedDays = Object.entries(dayFrequency).sort((a, b) => b[1] - a[1])
+  const allDaysEqual = sortedDays.length > 1 && sortedDays.every(([, c]) => c === 1)
+  const topDay: string | null = sortedDays.length > 0 ? sortedDays[0][0] : null
 
   const keywords = (competitor.sub_niche_keywords as string[]) || []
   const nicheName = (nicheId && NICHE_NAMES[nicheId]) ?? 'this niche'
@@ -139,10 +138,12 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
             Top publishing days
           </div>
           <div style={{ fontSize: 15, color: '#ffffff', fontWeight: 500, lineHeight: 1.5 }}>
-            {topDays.length > 0 ? topDays.join(', ') : '—'}
+            {allDaysEqual ? 'Varies' : topDay ?? '—'}
           </div>
           <div style={{ fontSize: 11, color: '#555555', marginTop: 4 }}>
-            Based on last {daysWindowLabel} uploads
+            {allDaysEqual
+              ? 'Consistent uploading on different days'
+              : `Based on last ${daysWindowLabel} uploads`}
           </div>
         </div>
       </div>
