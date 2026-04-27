@@ -732,6 +732,69 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 2 — Day 14 (2026-04-27)
+
+**Cron wiring, insights caching, dashboard UI overhaul, competitor analysis tabs, manual add lock**
+
+*app/api/cron/refresh-data/route.ts — full rewrite*
+* After syncing competitor videos for each user, now computes 5 metrics from the fetched videos: `avg_views_per_video`, `avg_video_length_seconds`, `upload_frequency_30d` (30-day count), `velocity_score_avg`, plus reads `video_count` and `subscriber_count`/`total_views` from the channel stats call.
+* Calls `updateCompetitorMetrics(competitorId, metrics)` and `saveCompetitorSnapshot(competitorId, metrics)` for every refreshed competitor — writes to both `competitors` row and `competitor_snapshots` table.
+* After all users processed: wipes `competitors.insights` and `competitors.insights_generated_at` for all rows so insights are regenerated fresh on next user visit.
+* Added `getRecentCompetitorVideos(competitorId, days)` to `lib/db.ts`.
+
+*app/api/cron/dominator-refresh/route.ts — skip-if-exists logic*
+* Now checks for an existing `is_dominator=true, is_active=true` competitor before running `findDominatorsForUser`. If one exists, logs and skips — prevents re-assigning Dominators on every daily cron run.
+
+*app/api/competitors/insights/route.ts — rewrite to use on-row cache*
+* Was wrongly querying a non-existent `competitor_insights` table. Now uses `getCachedInsights(competitorId, 7)` (reads `competitors.insights` column) and `saveCompetitorInsights(competitorId, insights)` from `lib/db.ts`. Returns `{ insights, cached: true/false }`.
+
+*components/charts/SubscriberGrowthChart.tsx — NEW*
+* Log-scale multi-line Recharts chart showing subscriber growth over time for user + all competitors.
+* Color coding: user=green, Tier 1=blue, Tier 2=purple, Dominator=amber, manual (is_searched)=yellow.
+* `YAxis scale="log"`, `connectNulls`, custom legend below chart. 280px height.
+
+*components/dashboard/DashboardClient.tsx — major rewrite*
+* Removed: Trend Radar section (hardcoded fake rows), Setup Checklist section.
+* Added: `SubscriberGrowthChart` component (requires `competitorSnapshots` prop from page).
+* You vs Niche chart: added dashed blue `niche` line = average of Tier 1 competitor snapshots' `avg_views_per_video` per date.
+* Gap score rows now show unit labels below the metric name: `last 30 days` / `% of impressions` / `avg minutes per video` / `videos per month`.
+* Top Ideas panel reduced to 1 idea + "See all ideas →" link to `/ideas`.
+* Layout reworked: two-col grid for Competitors+SubscriberGrowthChart, two-col for YouVsNiche+TopIdea.
+
+*app/(dashboard)/dashboard/page.tsx*
+* Added `getAllCompetitorSnapshotsForUser(userId, 30)` to parallel fetch. Passes `competitorSnapshots` to DashboardClient.
+
+*components/competitors/CompetitorAnalysis.tsx*
+* Added `userVideos: UserVideoRow[]` prop, forwarded to OverviewTab and ContentTab. Passes `nicheId` to ContentTab.
+
+*components/competitors/tabs/OverviewTab.tsx — complete rewrite*
+* User avg video length and upload frequency computed from `userVideos` prop.
+* Competitor side prefers stored columns (set by cron); falls back to computing from videos array.
+* CTR and watch time for competitor: renders "Not publicly available" with YouTube explainer — no fake estimates.
+* Total videos row added for both sides.
+
+*components/competitors/tabs/ContentTab.tsx — complete rewrite*
+* User avg video length from `userVideos`. Top posting days from competitor videos.
+* Sub-niche explainer: "The specific angle this channel focuses on within {nicheName}".
+* Keywords empty state: "No specific keywords detected yet — sub-niche is still being analyzed".
+
+*components/competitors/tabs/VideosTab.tsx — complete rewrite*
+* Shows 10 most recent videos sorted by `published_at` desc.
+* Thumbnail 96×54, clickable title link to YouTube, views, likes, duration, velocity (views/hr), 🔥 VIRAL badge, amber border highlight for viral videos.
+
+*app/api/competitors/track/route.ts + components/competitors/ChannelSearchBar.tsx — manual lock*
+* `track/route.ts`: checks `replacement_locked_until > NOW()` before inserting — returns 409 with `unlock_date` if locked. Sets `replacement_locked_until = NOW()+30d` on every insert. Replacement soft-delete only runs if existing lock is expired.
+* `ChannelSearchBar`: new `lockedUntil` and `lockedChannelName` props. Shows amber warning banner when slot is locked; disables input, search, and Track button. Track button now opens a confirmation modal showing unlock date (today+30) before calling the API.
+
+*app/(dashboard)/competitors/page.tsx + CompetitorsTable.tsx — lock wiring*
+* Page now fetches the active searched competitor with a future `replacement_locked_until` in the same Promise.all as the competitors list.
+* Passes `lockedUntil` and `lockedChannelName` through `CompetitorsTable` → `ChannelSearchBar`.
+
+*app/(dashboard)/competitors/[id]/page.tsx*
+* Added 4th parallel fetch: user's own videos (duration, published_at, view_count, last 50). Passes as `userVideos` to CompetitorAnalysis.
+
+---
+
 ### Week 2 — Day 13 (2026-04-26)
 
 **Database foundation + seed data expansion**
@@ -1304,7 +1367,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-26 — Day 13: Database foundation — competitor_snapshots table, 7 new columns on competitors, 6 new lib/db.ts functions, seed script fully rewritten to upsert mode with 31-day history for user + all 3 competitors, correct tier distribution (Tier1/Tier2/Dominator), 15 own videos.
+*Last updated: 2026-04-27 — Day 14: Cron wiring (refresh-data writes competitor metrics + snapshots, wipes insights cache; dominator-refresh skip-if-exists), insights route fixed to use on-row cache, dashboard UI overhauled (SubscriberGrowthChart, niche avg line, gap unit labels, 1 top idea), competitor tabs rewritten (OverviewTab, ContentTab, VideosTab), manual add lock wired end-to-end (track route + ChannelSearchBar modal + competitors page lock query).
+Previous: 2026-04-26 — Day 13: Database foundation — competitor_snapshots table, 7 new columns on competitors, 6 new lib/db.ts functions, seed script fully rewritten to upsert mode with 31-day history for user + all 3 competitors, correct tier distribution (Tier1/Tier2/Dominator), 15 own videos.
 Previous: 2026-04-26 — Day 12: Cron sync fixed — wrong subscription_status filter + token expiry auto-refresh.
 Next update due: End of Week 3*
 

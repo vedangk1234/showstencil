@@ -18,6 +18,8 @@ interface CompetitorsTableProps {
     niche_id: string | null
   }
   planLimits: PlanLimits
+  lockedUntil?: string | null
+  lockedChannelName?: string | null
 }
 
 type FilterType = 'all' | 'tier1' | 'tier2' | 'dominator'
@@ -39,7 +41,7 @@ function timeAgo(iso: string | null | undefined): string {
   return days === 1 ? '1d ago' : `${days}d ago`
 }
 
-export function CompetitorsTable({ competitors, user, planLimits }: CompetitorsTableProps) {
+export function CompetitorsTable({ competitors, user, planLimits, lockedUntil, lockedChannelName }: CompetitorsTableProps) {
   const [filter, setFilter] = useState<FilterType>('all')
 
   const counts = useMemo(() => ({
@@ -93,7 +95,12 @@ export function CompetitorsTable({ competitors, user, planLimits }: CompetitorsT
           description="Upgrade to Starter or Pro to search and compare your channel against any YouTuber on YouTube."
         />
       ) : (
-        <ChannelSearchBar planLimits={planLimits} plan={user.subscription_plan} />
+        <ChannelSearchBar
+          planLimits={planLimits}
+          plan={user.subscription_plan}
+          lockedUntil={lockedUntil}
+          lockedChannelName={lockedChannelName}
+        />
       )}
 
       {/* Filter tabs */}
