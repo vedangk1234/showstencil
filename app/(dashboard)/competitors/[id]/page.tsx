@@ -55,8 +55,9 @@ export default async function CompetitorAnalysisPage({
       .from('channel_snapshots')
       .select('*')
       .eq('user_id', user.id)
+      .not('subscriber_count', 'is', null)
       .order('snapshot_date', { ascending: true })
-      .limit(30),
+      .limit(90),
     supabase
       .from('videos')
       .select('duration_seconds, published_at, view_count')
@@ -67,8 +68,9 @@ export default async function CompetitorAnalysisPage({
       .from('competitor_snapshots')
       .select('snapshot_date, subscriber_count')
       .eq('competitor_id', id)
+      .not('subscriber_count', 'is', null)
       .order('snapshot_date', { ascending: true })
-      .limit(31),
+      .limit(90),
   ])
 
   return (

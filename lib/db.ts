@@ -361,6 +361,7 @@ export async function getChannelSnapshots(
     .select('*')
     .eq('user_id', userId)
     .gte('snapshot_date', sinceDate)
+    .not('subscriber_count', 'is', null)
     .order('snapshot_date', { ascending: true })
 
   if (error) {
