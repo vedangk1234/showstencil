@@ -4,6 +4,9 @@ import { createServiceClient } from '@/lib/supabase'
 import { getPlanLimits, canTrackThisMonth } from '@/lib/plan-limits'
 import { calculateTier } from '@/lib/competitor-matcher'
 import { calculateSubNicheSimilarity } from '@/lib/sub-niche-detector'
+import { getCompetitorFullProfile } from '@/lib/youtube-data'
+import { updateCompetitorMetrics, saveCompetitorSnapshot } from '@/lib/db'
+import { calculateCompetitorMetrics } from '@/lib/competitor-metrics'
 
 export async function POST(request: Request) {
   try {
@@ -179,7 +182,7 @@ export async function POST(request: Request) {
         is_searched: true,
         searched_at: new Date().toISOString(),
         is_active: true,
-        is_dominator: false,
+        is_dominator: tier === 3,
         sub_niche: channelData.sub_niche as string,
         sub_niche_keywords: channelData.sub_niche_keywords as string[],
         sub_niche_match_score: matchScore,
@@ -200,10 +203,89 @@ export async function POST(request: Request) {
       .eq('user_id', user.id)
       .eq('channel_id', channel_id)
 
+    const competitorId = newCompetitor.id
+
+    // ── Full data pipeline: fetch videos, metrics, snapshot ────────────────
+    let metricsPopulated = false
+    let fullProfile = null
+
+    try {
+      fullProfile = await getCompetitorFullProfile(newCompetitor.youtube_channel_id)
+    } catch (err) {
+      console.error('[track] Failed to fetch competitor profile:', err)
+    }
+
+    if (fullProfile) {
+      const velocityMap = new Map(
+        fullProfile.velocityData.videos.map((v) => [v.videoId, v]),
+      )
+      const channelAvgViews = fullProfile.velocityData.channelAvgViews
+
+      const videoRows = fullProfile.recentVideos.map((video) => {
+        const vel = velocityMap.get(video.videoId)
+        const performanceVsAvg =
+          channelAvgViews > 0
+            ? Math.round((video.viewCount / channelAvgViews) * 100) / 100
+            : 1
+        return {
+          competitor_id: competitorId,
+          youtube_video_id: video.videoId,
+          title: video.title,
+          published_at: video.publishedAt,
+          view_count: video.viewCount,
+          like_count: video.likeCount,
+          comment_count: video.commentCount,
+          duration_seconds: video.duration,
+          thumbnail_url: video.thumbnailHighRes || video.thumbnailDefault || null,
+          velocity_score: vel?.velocityScore ?? null,
+          performance_vs_avg: performanceVsAvg,
+          is_viral: vel?.isViral ?? false,
+        }
+      })
+
+      if (videoRows.length > 0) {
+        const { error: videoError } = await supabase
+          .from('competitor_videos')
+          .upsert(videoRows, { onConflict: 'competitor_id,youtube_video_id' })
+        if (videoError) {
+          console.error('[track] Failed to upsert competitor videos:', videoError.message)
+        }
+      }
+
+      const metrics = calculateCompetitorMetrics(videoRows, fullProfile.channel.videoCount)
+
+      await updateCompetitorMetrics(competitorId, {
+        video_count: metrics.video_count,
+        avg_views_per_video: metrics.avg_views_per_video,
+        avg_video_length_seconds: metrics.avg_video_length_seconds,
+        upload_frequency_30d: metrics.upload_frequency_30d,
+        subscriber_count: fullProfile.channel.subscriberCount,
+        total_views: fullProfile.channel.totalViews,
+        last_synced_at: new Date().toISOString(),
+      })
+
+      await saveCompetitorSnapshot(competitorId, {
+        subscriber_count: fullProfile.channel.subscriberCount,
+        total_views: fullProfile.channel.totalViews,
+        video_count: metrics.video_count,
+        avg_views_per_video: metrics.avg_views_per_video,
+        avg_video_length_seconds: metrics.avg_video_length_seconds,
+        upload_frequency_30d: metrics.upload_frequency_30d,
+        velocity_score_avg: metrics.velocity_score_avg,
+      })
+
+      metricsPopulated = true
+    }
+
     return NextResponse.json({
       success: true,
       competitor: newCompetitor,
       replacement_locked_until: replacementLockedUntil,
+      tier,
+      metricsPopulated,
+      ...(!metricsPopulated
+        ? { warning: 'Video data could not be fetched. It will sync overnight.' }
+        : {}),
     })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Failed to track channel'
