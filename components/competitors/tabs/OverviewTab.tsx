@@ -20,11 +20,36 @@ function fmt(n: number): string {
   return Math.round(n).toLocaleString()
 }
 
+function fmtOrDash(n: number | null | undefined): string {
+  if (n == null) return '—'
+  return fmt(n)
+}
+
 function fmtDuration(s: number): string {
   const m = Math.floor(s / 60)
   const sec = Math.round(s % 60)
   return `${m}m ${String(sec).padStart(2, '0')}s`
 }
+
+function fmtDurationOrDash(s: number | null | undefined): string {
+  if (s == null || s === 0) return '—'
+  return fmtDuration(s)
+}
+
+const DASH_SPAN = (
+  <span style={{ color: '#444444', fontSize: 13, fontFamily: 'monospace' }}>—</span>
+)
+
+const NOT_PUBLIC = (
+  <div>
+    <div style={{ color: '#888888', fontSize: 13, fontFamily: 'monospace', fontStyle: 'italic' }}>
+      Not publicly available
+    </div>
+    <div style={{ color: '#333333', fontSize: 10, fontFamily: 'monospace', marginTop: 2 }}>
+      YouTube doesn&apos;t expose this for other channels
+    </div>
+  </div>
+)
 
 export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVideos }: OverviewTabProps) {
   // ── User-side computed metrics ───────────────────────────────────────────
@@ -39,79 +64,89 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
   const recentUserVideos = userVideos.filter(
     (v) => v.published_at && new Date(v.published_at) >= thirtyDaysAgo,
   )
-  const userUploadFrequency = recentUserVideos.length // videos in last 30 days
+  const userUploadFrequency = recentUserVideos.length
 
   // ── Competitor-side computed metrics ─────────────────────────────────────
-  // Prefer stored columns on the competitors row (written by daily refresh cron).
-  // Fall back to computing from the loaded videos array.
-  const compAvgViews =
+  // Prefer stored columns (written by daily cron / track pipeline).
+  // Fall back to computing from loaded videos array.
+  // Return null (not 0) when there is genuinely no data — renders "—".
+  const compAvgViews: number | null =
     (competitor.avg_views_per_video as number | null) ??
     (competitorVideos.length > 0
       ? competitorVideos.reduce((sum, v) => sum + ((v.view_count as number) || 0), 0) /
         competitorVideos.length
-      : 0)
+      : null)
 
-  const compAvgLength =
+  const compAvgLength: number | null =
     (competitor.avg_video_length_seconds as number | null) ??
     (competitorVideos.length > 0
       ? competitorVideos.reduce((sum, v) => sum + ((v.duration_seconds as number) || 0), 0) /
         competitorVideos.length
-      : 0)
+      : null)
 
-  const compUploadFreq =
+  const compUploadFreq: number | null =
     (competitor.upload_frequency_30d as number | null) ??
-    (() => {
-      const recent = competitorVideos.filter(
-        (v) => v.published_at && new Date(v.published_at as string) >= thirtyDaysAgo,
-      )
-      return recent.length
-    })()
+    (competitorVideos.length > 0
+      ? competitorVideos.filter(
+          (v) => v.published_at && new Date(v.published_at as string) >= thirtyDaysAgo,
+        ).length
+      : null)
 
-  const compVideoCount =
-    (competitor.video_count as number | null) ?? competitorVideos.length
+  const compVideoCount: number | null =
+    (competitor.video_count as number | null) ??
+    (competitorVideos.length > 0 ? competitorVideos.length : null)
 
+  // "—" when no videos loaded; actual count (possibly 0) when videos are present
   const viralCount = competitorVideos.filter((v) => v.is_viral).length
+  const viralDisplay = competitorVideos.length === 0 ? '—' : String(viralCount)
 
-  const NOT_PUBLIC = (
-    <div>
-      <div style={{ color: '#888888', fontSize: 13, fontFamily: 'monospace', fontStyle: 'italic' }}>
-        Not publicly available
-      </div>
-      <div style={{ color: '#333333', fontSize: 10, fontFamily: 'monospace', marginTop: 2 }}>
-        YouTube doesn&apos;t expose this for other channels
-      </div>
-    </div>
-  )
+  // Gap for avg views (null when we have no data to compare)
+  const avgViewsGap =
+    compAvgViews != null
+      ? compAvgViews - ((userSnapshot?.avg_views_per_video as number) || 0)
+      : null
 
   const metrics = [
     {
       label: 'Subscribers',
       user: fmt((userSnapshot?.subscriber_count as number) || 0),
-      competitorEl: <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmt((competitor.subscriber_count as number) || 0)}</span>,
+      competitorEl: (
+        <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>
+          {fmt((competitor.subscriber_count as number) || 0)}
+        </span>
+      ),
       gap: ((competitor.subscriber_count as number) || 0) - ((userSnapshot?.subscriber_count as number) || 0),
     },
     {
       label: 'Total videos',
-      user: fmt((userSnapshot?.videos_count as number) || userVideos.length || 0),
-      competitorEl: <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmt(compVideoCount)}</span>,
+      user: fmtOrDash((userSnapshot?.videos_count as number | null) ?? (userVideos.length || null)),
+      competitorEl: compVideoCount != null
+        ? <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmt(compVideoCount)}</span>
+        : DASH_SPAN,
       gap: null as number | null,
     },
     {
       label: 'Avg views / video',
-      user: fmt((userSnapshot?.avg_views_per_video as number) || 0),
-      competitorEl: <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmt(compAvgViews)}</span>,
-      gap: compAvgViews - ((userSnapshot?.avg_views_per_video as number) || 0),
+      user: fmtOrDash((userSnapshot?.avg_views_per_video as number | null)),
+      competitorEl: compAvgViews != null
+        ? <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmt(compAvgViews)}</span>
+        : DASH_SPAN,
+      gap: avgViewsGap,
     },
     {
       label: 'Avg video length',
-      user: userAvgVideoLength != null ? fmtDuration(userAvgVideoLength) : '—',
-      competitorEl: <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmtDuration(compAvgLength)}</span>,
+      user: fmtDurationOrDash(userAvgVideoLength),
+      competitorEl: (compAvgLength != null && compAvgLength > 0)
+        ? <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmtDuration(compAvgLength)}</span>
+        : DASH_SPAN,
       gap: null,
     },
     {
       label: 'Upload frequency',
       user: `${userUploadFrequency} / month`,
-      competitorEl: <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{compUploadFreq} / month</span>,
+      competitorEl: compUploadFreq != null
+        ? <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{compUploadFreq} / month</span>
+        : DASH_SPAN,
       gap: null,
       note: 'Based on last 30 days',
     },
@@ -133,7 +168,11 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
     {
       label: 'Viral videos',
       user: '—',
-      competitorEl: <span style={{ color: viralCount > 0 ? '#fbbf24' : '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{viralCount}</span>,
+      competitorEl: (
+        <span style={{ color: viralCount > 0 ? '#fbbf24' : '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>
+          {viralDisplay}
+        </span>
+      ),
       gap: null,
       note: 'Videos with 3× normal velocity in first 48h',
     },

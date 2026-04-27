@@ -28,23 +28,33 @@ const NICHE_NAMES: Record<string, string> = {
   vlog: 'Vlog',
 }
 
-function fmtDuration(s: number): string {
-  const m = Math.floor(s / 60)
-  const sec = Math.round(s % 60)
-  return `${m}m ${String(sec).padStart(2, '0')}s`
+function formatDuration(seconds: number | null): string {
+  if (!seconds || seconds === 0) return '—'
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return s > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${m}m`
 }
 
 export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }: ContentTabProps) {
   // ── Competitor avg length ────────────────────────────────────────────────
-  const compAvgLength =
+  const compAvgLength: number | null =
     (competitor.avg_video_length_seconds as number | null) ??
     (competitorVideos.length > 0
       ? competitorVideos.reduce((sum, v) => sum + ((v.duration_seconds as number) || 0), 0) /
         competitorVideos.length
-      : 0)
+      : null)
+
+  // ── Upload frequency ─────────────────────────────────────────────────────
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const uploadFreqDisplay =
+    (competitor.upload_frequency_30d as number | null) != null
+      ? `${(competitor.upload_frequency_30d as number).toFixed(1)} videos / month`
+      : competitorVideos.length > 0
+      ? `${competitorVideos.filter((v) => v.published_at && new Date(v.published_at as string) >= thirtyDaysAgo).length} videos / month`
+      : '—'
 
   // ── User avg length ──────────────────────────────────────────────────────
-  const userAvgLength =
+  const userAvgLength: number | null =
     userVideos.length > 0
       ? Math.round(
           userVideos.reduce((sum, v) => sum + (v.duration_seconds ?? 0), 0) / userVideos.length,
@@ -76,10 +86,12 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
             Their avg video length
           </div>
           <div style={{ fontSize: 24, fontFamily: 'monospace', color: '#ffffff', fontWeight: 600 }}>
-            {fmtDuration(compAvgLength)}
+            {formatDuration(compAvgLength)}
           </div>
           <div style={{ fontSize: 11, color: '#555555', marginTop: 4 }}>
-            Based on {competitorVideos.length} recent videos
+            {competitorVideos.length > 0
+              ? `Based on ${competitorVideos.length} recent videos`
+              : 'No videos synced yet'}
           </div>
         </div>
 
@@ -89,7 +101,7 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
             Your avg video length
           </div>
           <div style={{ fontSize: 24, fontFamily: 'monospace', color: '#ffffff', fontWeight: 600 }}>
-            {userAvgLength != null ? fmtDuration(userAvgLength) : '—'}
+            {formatDuration(userAvgLength)}
           </div>
           <div style={{ fontSize: 11, color: '#555555', marginTop: 4 }}>
             {userVideos.length > 0 ? `Based on ${userVideos.length} synced videos` : 'No videos synced yet'}
@@ -102,11 +114,21 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
             Top publishing days
           </div>
           <div style={{ fontSize: 15, color: '#ffffff', fontWeight: 500, lineHeight: 1.5 }}>
-            {topDays.length > 0 ? topDays.join(', ') : 'No pattern detected'}
+            {topDays.length > 0 ? topDays.join(', ') : '—'}
           </div>
           <div style={{ fontSize: 11, color: '#555555', marginTop: 4 }}>
             Most common upload days
           </div>
+        </div>
+      </div>
+
+      {/* Upload frequency */}
+      <div style={{ padding: '12px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8, marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: '#444444', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+          Upload frequency (last 30 days)
+        </div>
+        <div style={{ fontSize: 18, fontFamily: 'monospace', color: '#ffffff', fontWeight: 600 }}>
+          {uploadFreqDisplay}
         </div>
       </div>
 

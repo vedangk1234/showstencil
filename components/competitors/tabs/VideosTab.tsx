@@ -39,10 +39,10 @@ export function VideosTab({ competitorVideos }: VideosTabProps) {
         }}
       >
         <p style={{ color: '#888888', fontSize: 13, margin: '0 0 6px' }}>
-          No recent videos data available.
+          No videos found yet.
         </p>
         <p style={{ color: '#444444', fontSize: 12, margin: 0 }}>
-          Videos will sync during the next daily refresh.
+          Video data syncs overnight — check back tomorrow.
         </p>
       </div>
     )
