@@ -732,6 +732,49 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 2 — Day 15 (2026-04-28)
+
+**Manual competitor add — full data fetch on track**
+
+*lib/competitor-metrics.ts — NEW*
+* Pure function `calculateCompetitorMetrics(videos, totalVideoCount?)` — takes video rows matching the `competitor_videos` shape and returns `{ video_count, avg_views_per_video, avg_video_length_seconds, upload_frequency_30d, velocity_score_avg }`. No DB calls, no side effects.
+
+*app/api/competitors/track/route.ts — post-insert pipeline*
+* Fixed `is_dominator` from hardcoded `false` to `tier === 3`.
+* After inserting the competitor row, immediately calls `getCompetitorFullProfile(channelId)` to fetch channel stats + recent videos + velocity data from the YouTube Data API.
+* Builds `videoRows` from the full profile (merging velocity scores) and upserts them to `competitor_videos`.
+* Calls `calculateCompetitorMetrics` on the video rows, then `updateCompetitorMetrics` and `saveCompetitorSnapshot` to populate all metric columns and write the first snapshot row.
+* If the YouTube API call fails (quota, network, invalid ID), logs the error, skips steps 1C–1F, and returns `{ success: true, warning: '...' }` — the competitor row is already inserted, partial success beats total failure.
+* Response now includes `{ tier, metricsPopulated, warning? }`.
+
+*app/(dashboard)/competitors/page.tsx*
+* Added `channel_snapshots` fetch (latest valid subscriber_count) to the parallel Promise.all. Passes `userSubscriberCount` to `CompetitorsTable`.
+
+*components/competitors/CompetitorsTable.tsx*
+* Added `userSubscriberCount?: number | null` prop. `CompetitorRow` computes a client-side fallback tier via the same ≤3x/≤10x/>10x ratio when `competitor.tier` is null. Passes `displayTier` to `TierBadge` instead of `competitor.tier` directly.
+
+*components/competitors/tabs/OverviewTab.tsx — null-safety rewrite*
+* All competitor-side metrics (`compAvgViews`, `compAvgLength`, `compUploadFreq`, `compVideoCount`) now return `null` (not `0`) when there is genuinely no data — triggers "—" in the UI.
+* Added `fmtOrDash` and `fmtDurationOrDash` helpers.
+* Viral count shows "—" when `competitorVideos` is empty; actual count (including 0) when videos are loaded.
+* Gap for avg views is null when `compAvgViews` is null — no misleading negative gap.
+
+*components/competitors/tabs/ContentTab.tsx — null-safety rewrite*
+* `formatDuration(seconds: number | null)` replaces `fmtDuration` — returns "—" for null or 0.
+* Upload frequency computed defensively: prefers `competitor.upload_frequency_30d`, falls back to counting recent videos, shows "—" if neither is available.
+* `topDays` shows "—" when no videos loaded instead of "No pattern detected".
+
+*components/competitors/tabs/VideosTab.tsx*
+* Empty state message updated: "No videos found yet. Video data syncs overnight — check back tomorrow."
+
+*app/api/competitors/insights/route.ts — data completeness guard*
+* Before calling `generateCompetitorInsights`, checks that `avg_views_per_video`, `subscriber_count`, and `video_count` are all non-null. Returns `{ error, retryable: true }` with HTTP 422 if any are missing — prevents Claude receiving a prompt full of null values.
+
+*components/competitors/tabs/InsightsTab.tsx — 422 handling*
+* On 422 response, sets `retryable: true` and renders a "Gathering data for this channel…" state with a "Try again" button instead of a red error message.
+
+---
+
 ### Week 2 — Day 14 (2026-04-27)
 
 **Cron wiring, insights caching, dashboard UI overhaul, competitor analysis tabs, manual add lock**
@@ -1336,6 +1379,8 @@ ALTER TABLE users
 
 **Duplicate competitor rows from repeated seed runs (fixed 2026-04-27):** Multiple seed runs created 2 rows each for "Finance With Sarah" and "Money With Marcus" because the old `upsertCompetitor` helper matched on `youtube_channel_id`, which differed between runs (old seeds generated different fake IDs). Fix: `upsertCompetitor` in `scripts/seed-test-data.ts` now matches on `(user_id, channel_name)` — a stable, meaningful dedup key. The update path also syncs `youtube_channel_id` to the canonical constant value in case surviving rows have stale IDs. The 2 duplicate rows were removed manually via Supabase SQL (children first: `competitor_videos` → `competitor_snapshots` → `competitors`). The seed script also deletes any all-null `channel_snapshots` row for today before upserting the historical rows, preventing the null-row problem from re-appearing on future seed runs.
 
+**Manually added competitor shows blank detail page (fixed 2026-04-28):** The track route inserted the competitor row but never fetched video data, calculated metrics, or wrote a snapshot. Result: all metric columns null, `competitor_videos` empty, `competitor_snapshots` empty — every tab showed "—" or nothing. Fix: after insert, track route now calls `getCompetitorFullProfile`, upserts videos to `competitor_videos`, calls `calculateCompetitorMetrics`, writes metrics to the competitors row via `updateCompetitorMetrics`, and writes the first `competitor_snapshots` row. If the YouTube API call fails the competitor row is kept (partial success) and a warning is returned. Also: `is_dominator` was hardcoded `false` — fixed to `tier === 3`. Insight route now returns 422 (not 500) when data is insufficient, and InsightsTab shows a retryable "Gathering data…" state instead of an error.
+
 \---
 
 ## Key Decisions Made
@@ -1354,6 +1399,7 @@ ALTER TABLE users
 * Dominator matching uses niche-specific rules (Day 10): gaming/fitness/tech/education require sub-niche similarity; finance/beauty/travel/business/entertainment/diy/vlog/cooking use broad niche match. Avoids assigning a gaming Dominator to a fitness creator.
 * Channel search cache (Day 11): searched_channels_cache TTL is 7 days. This avoids repeat YouTube API quota usage for popular channels searched by multiple users.
 * Competitor insights use InsightsTab lazy-load pattern (Day 11): Claude insights are generated on-demand when the user clicks the Insights tab, not at page load. This avoids burning Claude API credits for users who never view insights.
+* Manual competitor add always fetches full profile immediately on track (Day 15): `getCompetitorFullProfile` is called synchronously inside the track route after insert — the response is not returned until videos, metrics, and snapshot are written. This means the competitor detail page always shows real data immediately. The trade-off is ~2s added latency to the Track button, which is acceptable for a one-time action. If the YouTube API fails, the competitor row is kept and a warning is returned; data will sync overnight via the refresh-data cron.
 
 \---
 
@@ -1371,7 +1417,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-27 — Day 14 (part 2): Dashboard metric strip null-guard (filter to validSnapshots), saveChannelSnapshot null write guard, seed script competitor dedup fix (match by channel_name not youtube_channel_id), null snapshot cleanup step in seed, duplicate competitor rows removed from DB. Day 14 (part 1): Cron wiring (refresh-data writes competitor metrics + snapshots, wipes insights cache; dominator-refresh skip-if-exists), insights route fixed to use on-row cache, dashboard UI overhauled (SubscriberGrowthChart, niche avg line, gap unit labels, 1 top idea), competitor tabs rewritten (OverviewTab, ContentTab, VideosTab), manual add lock wired end-to-end (track route + ChannelSearchBar modal + competitors page lock query).
+*Last updated: 2026-04-28 — Day 15: Manual competitor add now fetches full profile immediately on track (videos, metrics, snapshot). lib/competitor-metrics.ts added. is_dominator fixed to tier===3. OverviewTab/ContentTab null-safe ("—" not "0"). InsightsTab 422 retryable state. Tier badge fallback from userSubscriberCount. CLAUDE.md Known Issues + Key Decisions updated.
+Previous: 2026-04-27 — Day 14 (part 2): Dashboard metric strip null-guard (filter to validSnapshots), saveChannelSnapshot null write guard, seed script competitor dedup fix (match by channel_name not youtube_channel_id), null snapshot cleanup step in seed, duplicate competitor rows removed from DB. Day 14 (part 1): Cron wiring (refresh-data writes competitor metrics + snapshots, wipes insights cache; dominator-refresh skip-if-exists), insights route fixed to use on-row cache, dashboard UI overhauled (SubscriberGrowthChart, niche avg line, gap unit labels, 1 top idea), competitor tabs rewritten (OverviewTab, ContentTab, VideosTab), manual add lock wired end-to-end (track route + ChannelSearchBar modal + competitors page lock query).
 Previous: 2026-04-26 — Day 13: Database foundation — competitor_snapshots table, 7 new columns on competitors, 6 new lib/db.ts functions, seed script fully rewritten to upsert mode with 31-day history for user + all 3 competitors, correct tier distribution (Tier1/Tier2/Dominator), 15 own videos.
 Previous: 2026-04-26 — Day 12: Cron sync fixed — wrong subscription_status filter + token expiry auto-refresh.
 Next update due: End of Week 3*
