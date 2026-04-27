@@ -40,13 +40,24 @@ export function GrowthTab({ userSnapshots, competitor, competitorSnapshots }: Gr
     ...competitorSnapshots.map((s) => s.snapshot_date),
   ])).sort()
 
-  const chartData = allDates.map((date) => {
+  const startDate = new Date(allDates[0])
+  const endDate = new Date(allDates[allDates.length - 1])
+  const continuousDates: string[] = []
+  const cur = new Date(startDate)
+  while (cur <= endDate) {
+    continuousDates.push(cur.toISOString().split('T')[0])
+    cur.setDate(cur.getDate() + 1)
+  }
+
+  const chartData = continuousDates.map((date) => {
     const userSnap = userSnapshots.find((s) => (s.snapshot_date as string) === date)
     const compSnap = competitorSnapshots.find((s) => s.snapshot_date === date)
     return {
       date,
       You: userSnap?.subscriber_count != null ? (userSnap.subscriber_count as number) : null,
-      [compName]: compSnap?.subscriber_count ?? null,
+      [compName]: competitorSnapshots.length >= 2
+        ? (compSnap?.subscriber_count ?? null)
+        : (competitor.subscriber_count as number),
     }
   })
 
@@ -97,6 +108,7 @@ export function GrowthTab({ userSnapshots, competitor, competitorSnapshots }: Gr
                   }
                   stroke="#444444"
                   tick={{ fontSize: 11, fontFamily: 'monospace' }}
+                  interval={6}
                 />
                 <YAxis
                   scale="log"
