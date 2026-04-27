@@ -62,7 +62,32 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
       : null
 
   // ── Posting days ─────────────────────────────────────────────────────────
-  const dayFrequency = competitorVideos.reduce((acc: Record<string, number>, video) => {
+  const nowMs = Date.now()
+  const thirtyDaysAgoMs = nowMs - 30 * 24 * 60 * 60 * 1000
+  const sixtyDaysAgoMs = nowMs - 60 * 24 * 60 * 60 * 1000
+
+  let videosForDays = competitorVideos.filter(
+    (v) => v.published_at && new Date(v.published_at as string).getTime() >= thirtyDaysAgoMs,
+  )
+  if (videosForDays.length < 3) {
+    videosForDays = competitorVideos.filter(
+      (v) => v.published_at && new Date(v.published_at as string).getTime() >= sixtyDaysAgoMs,
+    )
+  }
+  if (videosForDays.length < 3) {
+    videosForDays = competitorVideos
+  }
+
+  const daysWindowLabel: string =
+    videosForDays === competitorVideos
+      ? 'all synced'
+      : videosForDays.every(
+            (v) => v.published_at && new Date(v.published_at as string).getTime() >= thirtyDaysAgoMs,
+          )
+        ? '30 days'
+        : '60 days'
+
+  const dayFrequency = videosForDays.reduce((acc: Record<string, number>, video) => {
     if (!video.published_at) return acc
     const day = new Date(video.published_at as string).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })
     acc[day] = (acc[day] || 0) + 1
@@ -117,7 +142,7 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
             {topDays.length > 0 ? topDays.join(', ') : '—'}
           </div>
           <div style={{ fontSize: 11, color: '#555555', marginTop: 4 }}>
-            Most common upload days
+            Based on last {daysWindowLabel} uploads
           </div>
         </div>
       </div>

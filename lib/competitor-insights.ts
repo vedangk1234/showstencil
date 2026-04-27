@@ -46,7 +46,7 @@ COMPETITOR: ${competitor.channel_name}
 - Avg video length: ${Math.floor(competitor.avg_video_length_seconds / 60)} min
 - Upload frequency: ${competitor.upload_frequency_per_month} videos/month (last 30 days)
 - Sub-niche: ${competitor.sub_niche}
-- Publishing days: ${competitor.publishing_days.join(', ')}
+- Top publishing days (last 30 days): ${competitor.publishing_days.join(', ')}
 - Top videos:
 ${competitor.top_videos
   .slice(0, 5)

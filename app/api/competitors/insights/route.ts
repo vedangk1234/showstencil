@@ -100,11 +100,28 @@ export async function POST(request: Request) {
     const competitorUploadsPerMonth = videos.filter(
       (v: Record<string, unknown>) => new Date(v.published_at as string) > thirtyDaysAgo,
     ).length
+    const nowMs = Date.now()
+    const thirtyDaysAgoIsoForDays = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const sixtyDaysAgoIsoForDays = new Date(nowMs - 60 * 24 * 60 * 60 * 1000).toISOString()
+
+    let videosForDays: Record<string, unknown>[] = videos.filter(
+      (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= thirtyDaysAgoIsoForDays,
+    )
+    if (videosForDays.length < 3) {
+      videosForDays = videos.filter(
+        (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= sixtyDaysAgoIsoForDays,
+      )
+    }
+    if (videosForDays.length < 3) {
+      videosForDays = videos
+    }
+
     const dayCounts: Record<string, number> = {}
-    videos.forEach((v: Record<string, unknown>) => {
-      const day = new Date(v.published_at as string).toLocaleDateString('en-US', { weekday: 'long' })
+    for (const v of videosForDays) {
+      if (typeof v.published_at !== 'string') continue
+      const day = new Date(v.published_at).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })
       dayCounts[day] = (dayCounts[day] || 0) + 1
-    })
+    }
     const publishingDays = Object.entries(dayCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
