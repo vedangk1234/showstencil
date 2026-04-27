@@ -29,7 +29,11 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? 'https://nixlytics-u6k1.vercel.app'
 const FROM_EMAIL =
-  process.env.RESEND_FROM_EMAIL ?? 'digest@showstencil-u6k1.vercel.app'
+  process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev'
+
+if (!process.env.RESEND_FROM_EMAIL) {
+  console.warn('[email] RESEND_FROM_EMAIL not set — using Resend shared domain fallback')
+}
 
 // ---------------------------------------------------------------------------
 // generateUnsubscribeToken
@@ -404,7 +408,7 @@ export async function checkAndSendAlerts(): Promise<{ checked: number; sent: num
     .from('users')
     .select('id')
     .eq('onboarding_completed', true)
-    .in('subscription_status', ['trial', 'starter', 'pro'])
+    .in('subscription_status', ['on_trial', 'active', 'past_due'])
 
   if (usersError) {
     console.error('[email] checkAndSendAlerts: users query error:', usersError.message)

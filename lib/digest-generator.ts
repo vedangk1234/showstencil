@@ -29,6 +29,7 @@ import { createServiceClient } from '@/lib/supabase';
 import { getUser, getChannelSnapshots, getVideos, getWorstVideos, getCompetitorMetricsFromDB } from '@/lib/db';
 import { calculateGapScore } from '@/lib/gap-scorer';
 import { getTrendingInNiche, findUncoveredTopics } from '@/lib/trend-detector';
+import { sendWeeklyDigest } from '@/lib/email';
 import type { DigestResult, DigestVideoIdea, UncoveredTopic, ViralVideo, Video } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -572,9 +573,9 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
   }
 
   // -------------------------------------------------------------------------
-  // Step 9: Return DigestResult
+  // Step 9: Send digest email + return DigestResult
   // -------------------------------------------------------------------------
-  return {
+  const digestResult: DigestResult = {
     userId,
     generatedAt,
     overallGapScore: gapScore.overallScore,
@@ -582,6 +583,13 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
     rawMarkdown,
     videoIdeasParsed,
   };
+
+  const emailSent = await sendWeeklyDigest(userId, digestResult);
+  if (!emailSent) {
+    console.error(`[digest-generator] Email failed to send for user ${userId}`);
+  }
+
+  return digestResult;
 }
 
 // ---------------------------------------------------------------------------
