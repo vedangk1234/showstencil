@@ -100,6 +100,13 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
   const viralCount = competitorVideos.filter((v) => v.is_viral).length
   const viralDisplay = competitorVideos.length === 0 ? '—' : String(viralCount)
 
+  // Gap for total videos (positive = competitor has more, shown as −X in red)
+  const totalVideosGap = (() => {
+    const userCount = (userSnapshot?.videos_count as number | null) ?? (userVideos.length || null)
+    if (userCount == null || compVideoCount == null) return null
+    return compVideoCount - userCount
+  })()
+
   // Gap for avg views (null when we have no data to compare)
   const avgViewsGap =
     compAvgViews != null
@@ -123,7 +130,7 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
       competitorEl: compVideoCount != null
         ? <span style={{ color: '#ffffff', fontSize: 13, fontFamily: 'monospace' }}>{fmt(compVideoCount)}</span>
         : DASH_SPAN,
-      gap: null as number | null,
+      gap: totalVideosGap,
     },
     {
       label: 'Avg views / video',
@@ -152,7 +159,7 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
     },
     {
       label: 'CTR',
-      user: `${(((userSnapshot?.avg_ctr as number) || 0) * 100).toFixed(1)}%`,
+      user: `${((userSnapshot?.avg_ctr as number) || 0).toFixed(1)}%`,
       competitorEl: NOT_PUBLIC,
       gap: null,
     },

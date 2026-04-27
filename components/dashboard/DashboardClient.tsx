@@ -388,11 +388,11 @@ export default function DashboardClient({
         />
         <Metric
           k="CTR"
-          v={latest?.avg_ctr != null ? `${(latest.avg_ctr * 100).toFixed(1)}` : '—'}
+          v={latest?.avg_ctr != null ? `${latest.avg_ctr.toFixed(1)}` : '—'}
           unit={latest?.avg_ctr != null ? '%' : undefined}
           delta={ctrDelta >= 0
-            ? `▲ ${(ctrDelta * 100).toFixed(2)} pts`
-            : `▼ ${(Math.abs(ctrDelta) * 100).toFixed(2)} pts`}
+            ? `▲ ${ctrDelta.toFixed(2)} pts`
+            : `▼ ${Math.abs(ctrDelta).toFixed(2)} pts`}
           up={ctrDelta >= 0}
           context={gapScore?.ctr_gap_score != null
             ? `${gapScore.ctr_gap_score}pt gap vs niche avg`

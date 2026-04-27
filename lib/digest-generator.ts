@@ -26,7 +26,7 @@ config({ path: '.env.local', override: true })
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
-import { getUser, getChannelSnapshots, getVideos, getWorstVideos, getCompetitorMetricsFromDB } from '@/lib/db';
+import { getUser, getChannelSnapshots, getVideos, getWorstVideos, getCompetitorMetricsFromDB, countVideosLast30Days } from '@/lib/db';
 import { calculateGapScore } from '@/lib/gap-scorer';
 import { getTrendingInNiche, findUncoveredTopics } from '@/lib/trend-detector';
 import { sendWeeklyDigest } from '@/lib/email';
@@ -232,7 +232,7 @@ interface DigestContext {
     name: string;
     subscribers: number;
     avgViews: number;
-    uploadsPerMonth: number;
+    uploadsPerMonth: string;
   }>;
   viralVideosThisWeek: Array<{
     title: string;
@@ -347,12 +347,13 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
   // -------------------------------------------------------------------------
   // Step 1: Load user data from DB (best + worst videos in parallel)
   // -------------------------------------------------------------------------
-  const [user, snapshots, bestVideos, worstVideos, competitorMetrics] = await Promise.all([
+  const [user, snapshots, bestVideos, worstVideos, competitorMetrics, uploadsLast30d] = await Promise.all([
     getUser(userId),
     getChannelSnapshots(userId, 30),
     getVideos(userId, 10),           // sorted views DESC — best performers
     getWorstVideos(userId, 3),       // sorted views ASC  — worst performers
     getCompetitorMetricsFromDB(userId),
+    countVideosLast30Days(userId),   // accurate 30-day upload count matching OverviewTab
   ]);
 
   if (!user) {
@@ -385,16 +386,14 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
         )
       : 0;
 
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const recentUploads = bestVideos.filter(
-    (v) => v.published_at && new Date(v.published_at) >= thirtyDaysAgo,
-  ).length;
-  const uploadsPerMonth = recentUploads > 0 ? recentUploads : bestVideos.length / 3;
+  // Use DB-counted 30-day upload figure so this matches what OverviewTab shows in the UI.
+  // (bestVideos is top-10 by views and may not include all recent uploads.)
+  const uploadsPerMonth = uploadsLast30d > 0 ? uploadsLast30d : bestVideos.length / 3;
 
   const userMetrics = {
     avgViewsPerVideo,
-    ctr: Math.round(avgCtr * 10000) / 10000,
+    // videos.ctr is stored as a percentage (e.g. 2.86 = 2.86%); gap scorer expects decimal
+    ctr: Math.round((avgCtr / 100) * 10000) / 10000,
     avgViewDurationSeconds: avgWatchSeconds,
     uploadsPerMonth: Math.round(uploadsPerMonth * 10) / 10,
     subscriberCount: latestSnapshot?.subscriber_count ?? 0,
@@ -465,7 +464,7 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
       name: c.channelName,
       subscribers: c.subscriberCount,
       avgViews: c.avgViewsPerVideo,
-      uploadsPerMonth: c.uploadsPerMonth,
+      uploadsPerMonth: `${c.uploadsPerMonth.toFixed(1)} videos/month (last 30 days)`,
     }));
 
   const context: DigestContext = {
@@ -474,9 +473,9 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
     channelStats: {
       subscriberCount: latestSnapshot?.subscriber_count ?? 0,
       avgViewsPerVideo,
-      ctr: `${(avgCtr * 100).toFixed(1)}%`,
+      ctr: `${avgCtr.toFixed(1)}%`,
       avgWatchTime: `${Math.floor(avgWatchSeconds / 60)}m ${avgWatchSeconds % 60}s`,
-      uploadsPerMonth: uploadsPerMonth.toFixed(1),
+      uploadsPerMonth: `${uploadsPerMonth.toFixed(1)} videos/month (last 30 days)`,
       estimatedMonthlyRevenue: latestSnapshot?.estimated_monthly_revenue ?? 0,
     },
     bestVideos: top3Best,
@@ -713,9 +712,9 @@ if (process.env.RUN_NICHE_TEST === 'true') {
         gapMonthly: 1_520,
       },
       topCompetitors: [
-        { name: 'Finance With Sarah', subscribers: 112_000, avgViews: 19_600, uploadsPerMonth: 6 },
-        { name: 'Money With Marcus', subscribers: 89_000, avgViews: 15_200, uploadsPerMonth: 5 },
-        { name: 'Smart Money Moves', subscribers: 67_000, avgViews: 11_800, uploadsPerMonth: 4 },
+        { name: 'Finance With Sarah', subscribers: 112_000, avgViews: 19_600, uploadsPerMonth: '6.0 videos/month (last 30 days)' },
+        { name: 'Money With Marcus', subscribers: 89_000, avgViews: 15_200, uploadsPerMonth: '5.0 videos/month (last 30 days)' },
+        { name: 'Smart Money Moves', subscribers: 67_000, avgViews: 11_800, uploadsPerMonth: '4.0 videos/month (last 30 days)' },
       ],
       viralVideosThisWeek: [
         { title: 'I Invested $1,000 in 10 Different Stocks — Here\'s What Happened', channelName: 'Finance With Sarah', viewCount: 184_000, performanceVsAvg: 9.4 },
@@ -767,9 +766,9 @@ if (process.env.RUN_NICHE_TEST === 'true') {
         gapMonthly: 660,
       },
       topCompetitors: [
-        { name: 'NightOwlGames', subscribers: 210_000, avgViews: 35_400, uploadsPerMonth: 14 },
-        { name: 'CriticalHit', subscribers: 145_000, avgViews: 29_800, uploadsPerMonth: 11 },
-        { name: 'SpeedRun Society', subscribers: 98_000, avgViews: 27_000, uploadsPerMonth: 10 },
+        { name: 'NightOwlGames', subscribers: 210_000, avgViews: 35_400, uploadsPerMonth: '14.0 videos/month (last 30 days)' },
+        { name: 'CriticalHit', subscribers: 145_000, avgViews: 29_800, uploadsPerMonth: '11.0 videos/month (last 30 days)' },
+        { name: 'SpeedRun Society', subscribers: 98_000, avgViews: 27_000, uploadsPerMonth: '10.0 videos/month (last 30 days)' },
       ],
       viralVideosThisWeek: [
         { title: 'Beating Elden Ring With Only Starting Equipment — No Deaths', channelName: 'NightOwlGames', viewCount: 1_200_000, performanceVsAvg: 33.9 },
@@ -821,9 +820,9 @@ if (process.env.RUN_NICHE_TEST === 'true') {
         gapMonthly: 580,
       },
       topCompetitors: [
-        { name: 'Chef\'s Kitchen', subscribers: 58_000, avgViews: 20_400, uploadsPerMonth: 9 },
-        { name: 'Weeknight Wonders', subscribers: 41_000, avgViews: 17_200, uploadsPerMonth: 8 },
-        { name: 'Home Plate Cooking', subscribers: 29_000, avgViews: 16_400, uploadsPerMonth: 7 },
+        { name: 'Chef\'s Kitchen', subscribers: 58_000, avgViews: 20_400, uploadsPerMonth: '9.0 videos/month (last 30 days)' },
+        { name: 'Weeknight Wonders', subscribers: 41_000, avgViews: 17_200, uploadsPerMonth: '8.0 videos/month (last 30 days)' },
+        { name: 'Home Plate Cooking', subscribers: 29_000, avgViews: 16_400, uploadsPerMonth: '7.0 videos/month (last 30 days)' },
       ],
       viralVideosThisWeek: [
         { title: 'I Ate at 5 Michelin Star Restaurants — Honest Ranking', channelName: "Chef's Kitchen", viewCount: 420_000, performanceVsAvg: 20.6 },
