@@ -97,11 +97,9 @@ export async function POST(request: Request) {
 
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-    const recentUploads = videos.filter(
+    const competitorUploadsPerMonth = videos.filter(
       (v: Record<string, unknown>) => new Date(v.published_at as string) > thirtyDaysAgo,
     ).length
-    const uploadsPerWeek = recentUploads / 4.3
-
     const dayCounts: Record<string, number> = {}
     videos.forEach((v: Record<string, unknown>) => {
       const day = new Date(v.published_at as string).toLocaleDateString('en-US', { weekday: 'long' })
@@ -123,7 +121,13 @@ export async function POST(request: Request) {
         views: (v.view_count as number) || 0,
       }))
 
-    const userUploadsPerWeek = (userSnapshot?.videos_count || 0) / 52
+    const thirtyDaysAgoIso = thirtyDaysAgo.toISOString()
+    const { count: recentUserUploads } = await supabase
+      .from('videos')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', session.user.id)
+      .gte('published_at', thirtyDaysAgoIso)
+    const userUploadsPerMonth = recentUserUploads ?? 0
 
     const insights = await generateCompetitorInsights(
       {
@@ -132,7 +136,7 @@ export async function POST(request: Request) {
         avg_views_per_video: userSnapshot?.avg_views_per_video || 0,
         avg_ctr: userSnapshot?.avg_ctr || 0,
         avg_view_duration_seconds: userSnapshot?.avg_view_duration_seconds || 0,
-        upload_frequency_per_week: userUploadsPerWeek,
+        upload_frequency_per_month: userUploadsPerMonth,
         sub_niche: user?.sub_niche || 'General',
       },
       {
@@ -140,9 +144,7 @@ export async function POST(request: Request) {
         subscriber_count: competitor.subscriber_count || 0,
         avg_views: competitor.avg_views_per_video ?? avgViews,
         avg_video_length_seconds: competitor.avg_video_length_seconds ?? avgDuration,
-        upload_frequency_per_week: competitor.upload_frequency_30d
-          ? competitor.upload_frequency_30d / 4.3
-          : uploadsPerWeek,
+        upload_frequency_per_month: competitor.upload_frequency_30d ?? competitorUploadsPerMonth,
         sub_niche: competitor.sub_niche || 'General',
         top_videos: topVideos,
         publishing_days: publishingDays,

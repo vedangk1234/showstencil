@@ -9,7 +9,7 @@ export interface InsightUserMetrics {
   avg_views_per_video: number
   avg_ctr: number
   avg_view_duration_seconds: number
-  upload_frequency_per_week: number
+  upload_frequency_per_month: number
   sub_niche: string
 }
 
@@ -18,7 +18,7 @@ export interface InsightCompetitorMetrics {
   subscriber_count: number
   avg_views: number
   avg_video_length_seconds: number
-  upload_frequency_per_week: number
+  upload_frequency_per_month: number
   sub_niche: string
   top_videos: Array<{ title: string; views: number }>
   publishing_days: string[]
@@ -33,16 +33,16 @@ export async function generateCompetitorInsights(
 USER CHANNEL: ${user.channel_name}
 - Subscribers: ${user.subscriber_count.toLocaleString()}
 - Avg views/video: ${user.avg_views_per_video.toLocaleString()}
-- CTR: ${(user.avg_ctr * 100).toFixed(1)}%
+- CTR: ${user.avg_ctr.toFixed(1)}%
 - Avg watch time: ${Math.floor(user.avg_view_duration_seconds / 60)}:${String(user.avg_view_duration_seconds % 60).padStart(2, '0')}
-- Upload frequency: ${user.upload_frequency_per_week}/week
+- Upload frequency: ${user.upload_frequency_per_month} videos/month (last 30 days)
 - Sub-niche: ${user.sub_niche}
 
 COMPETITOR: ${competitor.channel_name}
 - Subscribers: ${competitor.subscriber_count.toLocaleString()}
 - Avg views: ${competitor.avg_views.toLocaleString()}
 - Avg video length: ${Math.floor(competitor.avg_video_length_seconds / 60)} min
-- Upload frequency: ${competitor.upload_frequency_per_week}/week
+- Upload frequency: ${competitor.upload_frequency_per_month} videos/month (last 30 days)
 - Sub-niche: ${competitor.sub_niche}
 - Publishing days: ${competitor.publishing_days.join(', ')}
 - Top videos:
