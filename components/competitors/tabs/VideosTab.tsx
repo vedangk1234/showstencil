@@ -1,5 +1,7 @@
 'use client'
 
+import { Eye, ThumbsUp, Clock, TrendingUp, TrendingDown } from 'lucide-react'
+
 interface VideosTabProps {
   competitorVideos: Record<string, unknown>[]
 }
@@ -48,6 +50,10 @@ export function VideosTab({ competitorVideos }: VideosTabProps) {
     )
   }
 
+  const avgViews = competitorVideos.length > 0
+    ? competitorVideos.reduce((sum, v) => sum + ((v.view_count as number) ?? 0), 0) / competitorVideos.length
+    : 0
+
   // Sort by published date descending, show up to 10
   const sorted = [...competitorVideos]
     .sort((a, b) => {
@@ -73,7 +79,6 @@ export function VideosTab({ competitorVideos }: VideosTabProps) {
           const views = (video.view_count as number) || 0
           const likes = (video.like_count as number) || 0
           const duration = (video.duration_seconds as number) || 0
-          const velocity = video.velocity_score as number | null
           const isViral = video.is_viral as boolean
           const publishedAt = video.published_at as string | null
           const videoId = video.youtube_video_id as string
@@ -150,14 +155,29 @@ export function VideosTab({ competitorVideos }: VideosTabProps) {
 
                 {/* Stats row */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, fontFamily: 'monospace', color: '#888888' }}>
-                  <span>👁 {fmt(views)} views</span>
-                  <span>👍 {fmt(likes)}</span>
-                  {duration > 0 && <span>⏱ {fmtDuration(duration)}</span>}
-                  {velocity != null && (
-                    <span style={{ color: velocity > 100 ? '#fbbf24' : '#888888' }}>
-                      ⚡ {velocity.toFixed(1)} views/hr
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <Eye style={{ width: 12, height: 12 }} /> {fmt(views)} views
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <ThumbsUp style={{ width: 12, height: 12 }} /> {fmt(likes)}
+                  </span>
+                  {duration > 0 && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <Clock style={{ width: 12, height: 12 }} /> {fmtDuration(duration)}
                     </span>
                   )}
+                  {(() => {
+                    const diffPct = avgViews > 0 ? ((views - avgViews) / avgViews) * 100 : 0
+                    const isAbove = diffPct >= 0
+                    return (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: isAbove ? '#4ade80' : '#f87171' }}>
+                        {isAbove
+                          ? <TrendingUp style={{ width: 12, height: 12 }} />
+                          : <TrendingDown style={{ width: 12, height: 12 }} />}
+                        {Math.abs(Math.round(diffPct))}% {isAbove ? 'above' : 'below'} avg
+                      </span>
+                    )
+                  })()}
                 </div>
 
                 {/* Date */}
