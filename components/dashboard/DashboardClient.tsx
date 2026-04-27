@@ -192,10 +192,13 @@ export default function DashboardClient({
   }
 
   // ── Safe data extraction ───────────────────────────────────────────────────
-  const latest = snapshots[snapshots.length - 1]
+  // Filter out null rows (e.g. today's row inserted before real data arrived)
+  // so we always display the most recent snapshot that has real subscriber data.
+  const validSnapshots = snapshots.filter(s => s.subscriber_count !== null)
+  const latest = validSnapshots.at(-1)
   const lastSynced = timeAgo(latest?.created_at)
 
-  const earlier = snapshots[Math.max(0, snapshots.length - 8)] ?? snapshots[0]
+  const earlier = validSnapshots.at(-8) ?? validSnapshots.at(0)
   const subDelta   = (latest?.subscriber_count ?? 0)          - (earlier?.subscriber_count ?? 0)
   const viewsDelta = (latest?.avg_views_per_video ?? 0)       - (earlier?.avg_views_per_video ?? 0)
   const ctrDelta   = (latest?.avg_ctr ?? 0)                   - (earlier?.avg_ctr ?? 0)

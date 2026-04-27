@@ -100,22 +100,27 @@ async function run() {
     .eq('user_id', userId)
     .eq('youtube_channel_id', OLD_SMART_CHANNEL_ID);
 
-  // Upsert helper: check existence first, then insert or update
+  // Upsert helper: match by (user_id, channel_name) — stable dedup key.
+  // youtube_channel_id can differ between seed runs if old IDs were generated differently,
+  // so we never use it as the lookup key to avoid creating duplicate rows.
   async function upsertCompetitor(
     channelId: string,
     fields: Record<string, unknown>,
   ): Promise<string> {
+    const channelName = fields.channel_name as string;
+
     const { data: existing } = await supabase
       .from('competitors')
       .select('id')
       .eq('user_id', userId)
-      .eq('youtube_channel_id', channelId)
+      .eq('channel_name', channelName)
       .maybeSingle();
 
     if (existing) {
+      // Also sync youtube_channel_id to the canonical value in case old rows differ
       await supabase
         .from('competitors')
-        .update({ ...fields, last_synced_at: now })
+        .update({ youtube_channel_id: channelId, ...fields, last_synced_at: now })
         .eq('id', existing.id);
       return existing.id as string;
     }
@@ -126,7 +131,7 @@ async function run() {
       .select('id')
       .single();
 
-    if (error || !inserted) throw new Error(`Failed to insert competitor ${channelId}: ${error?.message}`);
+    if (error || !inserted) throw new Error(`Failed to insert competitor ${channelName}: ${error?.message}`);
     return inserted.id as string;
   }
 
@@ -426,6 +431,17 @@ async function run() {
   // -------------------------------------------------------------------------
   // 5. Channel snapshots — 30 days of history (own channel)
   // -------------------------------------------------------------------------
+
+  // Remove any all-null snapshot rows for today — these are written by sync
+  // runs that fire before real data is available (e.g. token not yet refreshed,
+  // or a cron that ran before the seed completed). Without this, the dashboard
+  // reads today's null row as the "latest" and shows dashes for every metric.
+  await supabase
+    .from('channel_snapshots')
+    .delete()
+    .eq('user_id', userId)
+    .eq('snapshot_date', new Date().toISOString().split('T')[0])
+    .is('subscriber_count', null);
 
   // Random walk from 42000 to ~45000 over 30 days
   let subs = 42000;

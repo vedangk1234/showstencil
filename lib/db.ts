@@ -28,6 +28,15 @@ export async function saveChannelSnapshot(
   userId: string,
   data: ChannelOverview,
 ): Promise<boolean> {
+  // Don't write a null row — if the Analytics API returned no real data at all,
+  // skip the write entirely so the dashboard falls back to the last good snapshot.
+  // A zero totalViews means the API returned nothing (quota exhausted, token issue, etc.)
+  const hasRealData = data.totalViews > 0 || data.avgViewDurationSeconds > 0
+  if (!hasRealData) {
+    console.warn(`[saveChannelSnapshot] Skipping null snapshot for user ${userId} — no real data from Analytics API`)
+    return false
+  }
+
   const supabase = createServiceClient()
   const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD UTC
 
