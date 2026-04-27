@@ -13,19 +13,20 @@ function fmt(n: number): string {
 function fmtDuration(s: number): string {
   const m = Math.floor(s / 60)
   const sec = Math.round(s % 60)
-  return `${m}:${String(sec).padStart(2, '0')}`
+  return `${m}m ${String(sec).padStart(2, '0')}s`
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const days = Math.floor(diff / 86_400_000)
+  if (days === 0) return 'today'
+  if (days === 1) return '1 day ago'
+  if (days < 30) return `${days} days ago`
+  const months = Math.floor(days / 30)
+  return months === 1 ? '1 month ago' : `${months} months ago`
 }
 
 export function VideosTab({ competitorVideos }: VideosTabProps) {
-  // Average from top 10 for a stable baseline
-  const avgViews =
-    competitorVideos.length > 0
-      ? competitorVideos
-          .slice(0, 10)
-          .reduce((sum, v) => sum + ((v.view_count as number) || 0), 0) /
-        Math.min(competitorVideos.length, 10)
-      : 0
-
   if (competitorVideos.length === 0) {
     return (
       <div
@@ -47,14 +48,20 @@ export function VideosTab({ competitorVideos }: VideosTabProps) {
     )
   }
 
-  // Show latest 3 videos
-  const latestVideos = competitorVideos.slice(0, 3)
+  // Sort by published date descending, show up to 10
+  const sorted = [...competitorVideos]
+    .sort((a, b) => {
+      const ta = a.published_at ? new Date(a.published_at as string).getTime() : 0
+      const tb = b.published_at ? new Date(b.published_at as string).getTime() : 0
+      return tb - ta
+    })
+    .slice(0, 10)
 
   return (
     <div>
       <p style={{ color: '#555555', fontSize: 12, marginBottom: 20, fontFamily: 'monospace' }}>
-        Their 3 most recent uploads
-        {competitorVideos.length > 3 && (
+        {sorted.length} most recent uploads
+        {competitorVideos.length > sorted.length && (
           <span style={{ marginLeft: 8, color: '#333333' }}>
             ({competitorVideos.length} total synced)
           </span>
@@ -62,39 +69,66 @@ export function VideosTab({ competitorVideos }: VideosTabProps) {
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {latestVideos.map((video) => {
+        {sorted.map((video, idx) => {
           const views = (video.view_count as number) || 0
-          const ratio = avgViews > 0 ? views / avgViews : 0
-          const isAbove = ratio >= 1
+          const likes = (video.like_count as number) || 0
+          const duration = (video.duration_seconds as number) || 0
+          const velocity = video.velocity_score as number | null
           const isViral = video.is_viral as boolean
+          const publishedAt = video.published_at as string | null
+          const videoId = video.youtube_video_id as string
 
           return (
             <div
-              key={video.id as string}
+              key={idx}
               style={{
                 padding: '16px 20px',
                 background: '#0a0a0a',
-                border: '1px solid #1a1a1a',
+                border: `1px solid ${isViral ? '#3d2e00' : '#1a1a1a'}`,
                 borderRadius: 8,
                 display: 'flex',
                 gap: 16,
                 alignItems: 'flex-start',
               }}
             >
-              {!!(video.thumbnail_url as string) && (
+              {/* Thumbnail */}
+              {video.thumbnail_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={video.thumbnail_url as string}
                   alt={video.title as string}
-                  style={{ width: 128, height: 80, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
+                  style={{ width: 96, height: 54, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
                 />
+              ) : (
+                <div
+                  style={{
+                    width: 96,
+                    height: 54,
+                    background: '#1a1a1a',
+                    borderRadius: 4,
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#333333',
+                    fontSize: 20,
+                  }}
+                >
+                  ▶
+                </div>
               )}
 
               <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Title row */}
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-                  <div style={{ color: '#ffffff', fontSize: 13, fontWeight: 500, lineHeight: 1.4, flex: 1 }}>
+                  <a
+                    href={`https://youtube.com/watch?v=${videoId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#ffffff', fontSize: 13, fontWeight: 500, lineHeight: 1.4, flex: 1, textDecoration: 'none' }}
+                  >
                     {video.title as string}
-                  </div>
+                  </a>
                   {isViral && (
                     <span
                       style={{
@@ -106,38 +140,32 @@ export function VideosTab({ competitorVideos }: VideosTabProps) {
                         borderRadius: 3,
                         padding: '2px 5px',
                         flexShrink: 0,
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      VIRAL
+                      🔥 VIRAL
                     </span>
                   )}
                 </div>
 
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', fontSize: 12, fontFamily: 'monospace', color: '#888888', marginBottom: 8 }}>
-                  <span>👁 {fmt(views)}</span>
-                  <span>💬 {fmt((video.comment_count as number) || 0)}</span>
-                  <span>👍 {fmt((video.like_count as number) || 0)}</span>
-                  <span>⏱ {fmtDuration((video.duration_seconds as number) || 0)}</span>
+                {/* Stats row */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, fontFamily: 'monospace', color: '#888888' }}>
+                  <span>👁 {fmt(views)} views</span>
+                  <span>👍 {fmt(likes)}</span>
+                  {duration > 0 && <span>⏱ {fmtDuration(duration)}</span>}
+                  {velocity != null && (
+                    <span style={{ color: velocity > 100 ? '#fbbf24' : '#888888' }}>
+                      ⚡ {velocity.toFixed(1)} views/hr
+                    </span>
+                  )}
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#444444' }}>
-                    {new Date(video.published_at as string).toLocaleDateString('en-US', {
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: isAbove ? '#4ade80' : '#555555',
-                    }}
-                  >
-                    {ratio.toFixed(1)}× avg{isAbove ? ' ↑' : ''}
-                  </span>
-                </div>
+                {/* Date */}
+                {publishedAt && (
+                  <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#444444', marginTop: 6 }}>
+                    {timeAgo(publishedAt)} · {new Date(publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                )}
               </div>
             </div>
           )

@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
     const limits = getPlanLimits(user.subscription_plan)
 
-    // Check monthly track quota before slot capacity
+    // Check monthly track quota
     const trackCheck = await canTrackThisMonth(user.id)
     if (!trackCheck.allowed) {
       return NextResponse.json(
@@ -58,6 +58,31 @@ export async function POST(request: Request) {
       )
     }
 
+    // Check if any existing manually-added competitor is still within the 30-day replacement lock
+    const { data: lockedCompetitor } = await supabase
+      .from('competitors')
+      .select('id, channel_name, replacement_locked_until')
+      .eq('user_id', user.id)
+      .eq('is_searched', true)
+      .eq('is_active', true)
+      .not('replacement_locked_until', 'is', null)
+      .gt('replacement_locked_until', new Date().toISOString())
+      .limit(1)
+      .single()
+
+    if (lockedCompetitor) {
+      const unlockDate = new Date(lockedCompetitor.replacement_locked_until as string)
+      return NextResponse.json(
+        {
+          error: 'Replacement locked',
+          message: `You can replace this competitor on ${unlockDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. This slot is locked until then.`,
+          unlock_date: lockedCompetitor.replacement_locked_until,
+          locked_channel_name: lockedCompetitor.channel_name,
+        },
+        { status: 409 },
+      )
+    }
+
     const { count: searchedCount } = await supabase
       .from('competitors')
       .select('*', { count: 'exact', head: true })
@@ -67,19 +92,29 @@ export async function POST(request: Request) {
 
     if ((searchedCount || 0) >= limits.searchedChannelsMax) {
       if (user.subscription_plan === 'starter' && limits.canReplaceSearched) {
-        // Replace oldest searched competitor
+        // Replace oldest searched competitor whose lock has expired
         const { data: oldest } = await supabase
           .from('competitors')
           .select('id')
           .eq('user_id', user.id)
           .eq('is_searched', true)
           .eq('is_active', true)
+          .or(`replacement_locked_until.is.null,replacement_locked_until.lte.${new Date().toISOString()}`)
           .order('searched_at', { ascending: true })
           .limit(1)
           .single()
 
         if (oldest) {
           await supabase.from('competitors').update({ is_active: false }).eq('id', oldest.id)
+        } else {
+          return NextResponse.json(
+            {
+              error: 'Limit reached',
+              message: 'Your manual competitor slot is still locked. You cannot replace it yet.',
+              upgrade_required: true,
+            },
+            { status: 403 },
+          )
         }
       } else {
         return NextResponse.json(
@@ -127,6 +162,9 @@ export async function POST(request: Request) {
       },
     )
 
+    // Lock this slot for 30 days from now
+    const replacementLockedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
     const { data: newCompetitor, error } = await supabase
       .from('competitors')
       .insert({
@@ -145,6 +183,7 @@ export async function POST(request: Request) {
         sub_niche: channelData.sub_niche as string,
         sub_niche_keywords: channelData.sub_niche_keywords as string[],
         sub_niche_match_score: matchScore,
+        replacement_locked_until: replacementLockedUntil,
         last_synced_at: new Date().toISOString(),
       })
       .select()
@@ -161,7 +200,11 @@ export async function POST(request: Request) {
       .eq('user_id', user.id)
       .eq('channel_id', channel_id)
 
-    return NextResponse.json({ success: true, competitor: newCompetitor })
+    return NextResponse.json({
+      success: true,
+      competitor: newCompetitor,
+      replacement_locked_until: replacementLockedUntil,
+    })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Failed to track channel'
     console.error('[competitors/track]', error)

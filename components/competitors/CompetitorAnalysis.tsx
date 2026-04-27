@@ -11,10 +11,17 @@ import { InsightsTab } from './tabs/InsightsTab'
 
 type TabType = 'overview' | 'content' | 'growth' | 'videos' | 'insights'
 
+interface UserVideoRow {
+  duration_seconds: number | null
+  published_at: string | null
+  view_count: number | null
+}
+
 interface CompetitorAnalysisProps {
   user: Record<string, unknown>
   userSnapshot: Record<string, unknown> | null
   userSnapshots: Record<string, unknown>[]
+  userVideos: UserVideoRow[]
   competitor: Record<string, unknown>
   competitorVideos: Record<string, unknown>[]
 }
@@ -37,6 +44,7 @@ export function CompetitorAnalysis({
   user,
   userSnapshot,
   userSnapshots,
+  userVideos,
   competitor,
   competitorVideos,
 }: CompetitorAnalysisProps) {
@@ -195,12 +203,18 @@ export function CompetitorAnalysis({
           <OverviewTab
             user={user}
             userSnapshot={userSnapshot}
+            userVideos={userVideos}
             competitor={competitor}
             competitorVideos={competitorVideos}
           />
         )}
         {activeTab === 'content' && (
-          <ContentTab competitor={competitor} competitorVideos={competitorVideos} />
+          <ContentTab
+            competitor={competitor}
+            competitorVideos={competitorVideos}
+            userVideos={userVideos}
+            nicheId={(user.niche_id as string) || null}
+          />
         )}
         {activeTab === 'growth' && (
           <GrowthTab userSnapshots={userSnapshots} competitor={competitor} />

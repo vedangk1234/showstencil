@@ -1,23 +1,57 @@
 'use client'
 
+interface UserVideoRow {
+  duration_seconds: number | null
+  published_at: string | null
+  view_count: number | null
+}
+
 interface ContentTabProps {
   competitor: Record<string, unknown>
   competitorVideos: Record<string, unknown>[]
+  userVideos: UserVideoRow[]
+  nicheId: string | null
+}
+
+const NICHE_NAMES: Record<string, string> = {
+  finance: 'Finance',
+  tech: 'Tech',
+  gaming: 'Gaming',
+  cooking: 'Cooking',
+  fitness: 'Fitness',
+  beauty: 'Beauty',
+  travel: 'Travel',
+  education: 'Education',
+  business: 'Business',
+  entertainment: 'Entertainment',
+  diy: 'DIY',
+  vlog: 'Vlog',
 }
 
 function fmtDuration(s: number): string {
   const m = Math.floor(s / 60)
   const sec = Math.round(s % 60)
-  return `${m}:${String(sec).padStart(2, '0')}`
+  return `${m}m ${String(sec).padStart(2, '0')}s`
 }
 
-export function ContentTab({ competitor, competitorVideos }: ContentTabProps) {
-  const avgLength =
-    competitorVideos.length > 0
+export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }: ContentTabProps) {
+  // ── Competitor avg length ────────────────────────────────────────────────
+  const compAvgLength =
+    (competitor.avg_video_length_seconds as number | null) ??
+    (competitorVideos.length > 0
       ? competitorVideos.reduce((sum, v) => sum + ((v.duration_seconds as number) || 0), 0) /
         competitorVideos.length
-      : 0
+      : 0)
 
+  // ── User avg length ──────────────────────────────────────────────────────
+  const userAvgLength =
+    userVideos.length > 0
+      ? Math.round(
+          userVideos.reduce((sum, v) => sum + (v.duration_seconds ?? 0), 0) / userVideos.length,
+        )
+      : null
+
+  // ── Posting days ─────────────────────────────────────────────────────────
   const dayCounts: Record<string, number> = {}
   competitorVideos.forEach((v) => {
     if (!v.published_at) return
@@ -31,37 +65,39 @@ export function ContentTab({ competitor, competitorVideos }: ContentTabProps) {
     .map(([day]) => day)
 
   const keywords = (competitor.sub_niche_keywords as string[]) || []
+  const nicheName = (nicheId && NICHE_NAMES[nicheId]) ?? 'this niche'
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
-        <div
-          style={{
-            padding: '16px 20px',
-            background: '#0a0a0a',
-            border: '1px solid #1a1a1a',
-            borderRadius: 8,
-          }}
-        >
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 24 }}>
+        {/* Competitor avg video length */}
+        <div style={{ padding: '16px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8 }}>
           <div style={{ fontSize: 10, color: '#444444', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-            Average video length
+            Their avg video length
           </div>
-          <div style={{ fontSize: 28, fontFamily: 'monospace', color: '#ffffff', fontWeight: 600 }}>
-            {fmtDuration(avgLength)}
+          <div style={{ fontSize: 24, fontFamily: 'monospace', color: '#ffffff', fontWeight: 600 }}>
+            {fmtDuration(compAvgLength)}
           </div>
           <div style={{ fontSize: 11, color: '#555555', marginTop: 4 }}>
             Based on {competitorVideos.length} recent videos
           </div>
         </div>
 
-        <div
-          style={{
-            padding: '16px 20px',
-            background: '#0a0a0a',
-            border: '1px solid #1a1a1a',
-            borderRadius: 8,
-          }}
-        >
+        {/* User avg video length */}
+        <div style={{ padding: '16px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8 }}>
+          <div style={{ fontSize: 10, color: '#444444', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+            Your avg video length
+          </div>
+          <div style={{ fontSize: 24, fontFamily: 'monospace', color: '#ffffff', fontWeight: 600 }}>
+            {userAvgLength != null ? fmtDuration(userAvgLength) : '—'}
+          </div>
+          <div style={{ fontSize: 11, color: '#555555', marginTop: 4 }}>
+            {userVideos.length > 0 ? `Based on ${userVideos.length} synced videos` : 'No videos synced yet'}
+          </div>
+        </div>
+
+        {/* Top posting days */}
+        <div style={{ padding: '16px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8 }}>
           <div style={{ fontSize: 10, color: '#444444', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
             Top publishing days
           </div>
@@ -74,45 +110,44 @@ export function ContentTab({ competitor, competitorVideos }: ContentTabProps) {
         </div>
       </div>
 
-      <div
-        style={{
-          padding: '16px 20px',
-          background: '#0a0a0a',
-          border: '1px solid #1a1a1a',
-          borderRadius: 8,
-        }}
-      >
-        <div style={{ fontSize: 10, color: '#444444', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+      {/* Sub-niche focus */}
+      <div style={{ padding: '16px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8 }}>
+        <div style={{ fontSize: 10, color: '#444444', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
           Sub-niche focus
         </div>
-        <div style={{ fontSize: 20, fontStyle: 'italic', fontFamily: 'Georgia, serif', color: '#ffffff', marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: '#444444', marginBottom: 10 }}>
+          The specific angle this channel focuses on within {nicheName}
+        </div>
+        <div style={{ fontSize: 20, fontStyle: 'italic', fontFamily: 'Georgia, serif', color: '#ffffff', marginBottom: 16 }}>
           {(competitor.sub_niche as string) || 'General'}
         </div>
 
-        {keywords.length > 0 && (
-          <>
-            <div style={{ fontSize: 10, color: '#555555', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-              Key topics
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {keywords.map((kw, i) => (
-                <span
-                  key={i}
-                  style={{
-                    padding: '3px 10px',
-                    background: '#111111',
-                    border: '1px solid #1a1a1a',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    color: '#888888',
-                    fontFamily: 'monospace',
-                  }}
-                >
-                  {kw}
-                </span>
-              ))}
-            </div>
-          </>
+        <div style={{ fontSize: 10, color: '#555555', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+          Key topics
+        </div>
+        {keywords.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {keywords.map((kw, i) => (
+              <span
+                key={i}
+                style={{
+                  padding: '3px 10px',
+                  background: '#111111',
+                  border: '1px solid #1a1a1a',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  color: '#888888',
+                  fontFamily: 'monospace',
+                }}
+              >
+                {kw}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#444444', fontStyle: 'italic', fontFamily: 'monospace' }}>
+            No specific keywords detected yet — sub-niche is still being analyzed
+          </div>
         )}
       </div>
     </div>

@@ -31,34 +31,45 @@ export default async function CompetitorAnalysisPage({
 
   if (!competitor) notFound()
 
-  const [{ data: competitorVideos }, { data: userSnapshot }, { data: userSnapshots }] =
-    await Promise.all([
-      supabase
-        .from('competitor_videos')
-        .select('*')
-        .eq('competitor_id', id)
-        .order('published_at', { ascending: false })
-        .limit(20),
-      supabase
-        .from('channel_snapshots')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single(),
-      supabase
-        .from('channel_snapshots')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('snapshot_date', { ascending: true })
-        .limit(30),
-    ])
+  const [
+    { data: competitorVideos },
+    { data: userSnapshot },
+    { data: userSnapshots },
+    { data: userVideos },
+  ] = await Promise.all([
+    supabase
+      .from('competitor_videos')
+      .select('*')
+      .eq('competitor_id', id)
+      .order('published_at', { ascending: false })
+      .limit(20),
+    supabase
+      .from('channel_snapshots')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single(),
+    supabase
+      .from('channel_snapshots')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('snapshot_date', { ascending: true })
+      .limit(30),
+    supabase
+      .from('videos')
+      .select('duration_seconds, published_at, view_count')
+      .eq('user_id', user.id)
+      .order('published_at', { ascending: false })
+      .limit(50),
+  ])
 
   return (
     <CompetitorAnalysis
       user={user}
       userSnapshot={userSnapshot ?? null}
       userSnapshots={userSnapshots ?? []}
+      userVideos={userVideos ?? []}
       competitor={competitor}
       competitorVideos={competitorVideos ?? []}
     />
