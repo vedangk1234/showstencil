@@ -18,6 +18,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { saveCompetitorSnapshot, updateCompetitorMetrics, getRecentCompetitorVideos } from '@/lib/db'
+import { detectSubNiche } from '@/lib/sub-niche-detector'
 
 function parseDuration(duration: string): number {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
@@ -234,7 +235,7 @@ export async function GET(request: Request) {
     try {
       const { data: userCompetitors, error: compErr } = await supabase
         .from('competitors')
-        .select('id, youtube_channel_id, channel_name, video_count')
+        .select('id, youtube_channel_id, channel_name, video_count, sub_niche')
         .eq('user_id', user.id)
         .eq('is_active', true)
 
@@ -293,6 +294,28 @@ export async function GET(request: Request) {
             console.log(`[cron/refresh-data]   ${comp.channel_name}: ${syncResult.count} videos, snapshot written`)
           } else {
             console.warn(`[cron/refresh-data]   ${comp.channel_name}: no subscriber_count — snapshot skipped`)
+          }
+
+          // Run sub-niche detection if not yet set and we have enough videos
+          if (!comp.sub_niche && recentVideos.length >= 3) {
+            try {
+              const videoTitles = recentVideos.map((v) => ({ title: v.title ?? '', description: null }))
+              const subNicheResult = await detectSubNiche(videoTitles)
+              if (subNicheResult && subNicheResult.sub_niche !== 'General') {
+                await supabase
+                  .from('competitors')
+                  .update({
+                    sub_niche: subNicheResult.sub_niche,
+                    sub_niche_keywords: subNicheResult.keywords,
+                  })
+                  .eq('id', comp.id)
+                console.log(
+                  `[cron/refresh-data]   ${comp.channel_name}: sub-niche detected — ${subNicheResult.sub_niche}`,
+                )
+              }
+            } catch {
+              // Never block cron because of sub-niche failure
+            }
           }
 
           competitorCount++

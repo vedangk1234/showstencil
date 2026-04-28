@@ -14,9 +14,10 @@ config({ path: '.env.local', override: true })
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
-import { getCompetitorFullProfile } from '@/lib/youtube-data';
+import { getCompetitorFullProfile, getRecentVideos } from '@/lib/youtube-data';
 import { calculateCompetitorMetrics } from '@/lib/competitor-metrics';
 import { updateCompetitorMetrics, saveCompetitorSnapshot } from '@/lib/db';
+import { detectSubNiche } from '@/lib/sub-niche-detector';
 import type { NicheResult, CompetitorCandidate } from '@/types';
 
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
@@ -568,6 +569,30 @@ async function assignCompetitor(
       console.log(
         `[niche-engine] assignCompetitor: inserted ${videoRows.length} videos for "${candidate.channelName}"`,
       );
+    }
+  }
+
+  // Detect sub-niche immediately from saved video titles
+  if (videoRows.length >= 3) {
+    try {
+      const videoTitles = videoRows.map((v) => ({ title: v.title ?? '', description: null }));
+      const subNicheResult = await detectSubNiche(videoTitles);
+      if (subNicheResult && subNicheResult.sub_niche !== 'General') {
+        await supabase
+          .from('competitors')
+          .update({
+            sub_niche: subNicheResult.sub_niche,
+            sub_niche_keywords: subNicheResult.keywords,
+            sub_niche_match_score: subNicheResult.confidence,
+          })
+          .eq('id', competitorId);
+        console.log(
+          `[niche-engine] assignCompetitor: sub-niche detected for "${candidate.channelName}": ${subNicheResult.sub_niche}`,
+        );
+      }
+    } catch (err) {
+      console.error('[niche-engine] assignCompetitor: sub-niche detection failed:', err);
+      // Never block competitor assignment because of sub-niche failure
     }
   }
 
