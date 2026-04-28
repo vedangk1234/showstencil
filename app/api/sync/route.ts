@@ -183,20 +183,24 @@ export async function POST(request: Request) {
     }
   }
 
-  // ── 6. Auto-detect competitors if none assigned yet ─────────────────────────
-  // Runs once per user lifetime (condition: 0 active auto-detected competitors).
-  // Never blocks or crashes the sync response — wrapped in its own try/catch.
+  // ── 6. Auto-detect competitors if any tier slot is empty ───────────────────
+  // Runs when at least one tier (1, 2, or Dominator) has no active auto-detected
+  // competitor. This handles both first-time detection and recovery after inactive
+  // channels are removed. Never blocks or crashes the sync response.
   try {
     const supabase = createServiceClient()
-    const { count: existingAutoCount } = await supabase
+    const { data: existingAutoRows } = await supabase
       .from('competitors')
-      .select('*', { count: 'exact', head: true })
+      .select('tier')
       .eq('user_id', userId)
       .eq('is_auto_detected', true)
       .eq('is_active', true)
 
-    if (existingAutoCount === 0) {
-      console.log(`[sync] No auto-detected competitors — running detection for user ${userId}`)
+    const assignedTiers = new Set((existingAutoRows ?? []).map((r: { tier: number | null }) => r.tier))
+    const missingTier = !assignedTiers.has(1) || !assignedTiers.has(2) || !assignedTiers.has(3)
+
+    if (missingTier) {
+      console.log(`[sync] Missing competitor tiers ${[1,2,3].filter(t => !assignedTiers.has(t)).join(',')} — running detection for user ${userId}`)
 
       const { data: latestSnapshot } = await supabase
         .from('channel_snapshots')
