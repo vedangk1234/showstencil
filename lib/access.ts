@@ -111,10 +111,12 @@ export async function getCompetitorLimit(userId: string): Promise<number> {
   return plan === 'pro' ? 10 : 3
 }
 
-/** Maximum number of video ideas generated per week. */
+/** Maximum number of video ideas generated per batch. Starter=3, Pro=10, Free=0. */
 export async function getIdeaLimit(userId: string): Promise<number> {
   const plan = await getUserPlan(userId)
-  return plan === 'pro' ? 6 : 3
+  if (plan === 'pro') return 10
+  if (plan === 'starter') return 3
+  return 0
 }
 
 /** Maximum number of viral videos shown. */

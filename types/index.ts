@@ -316,6 +316,24 @@ export interface DigestVideoIdea {
   reasoning: string;
 }
 
+// Video idea stored as an individual DB row (new schema from Day 20)
+export interface Idea {
+  id: string;
+  user_id: string;
+  title: string;
+  opportunity_score: number;
+  thumbnail_description: string;
+  content_brief: string;
+  suggested_duration_min: number;
+  suggested_duration_max: number;
+  duration_reasoning: string;
+  why_now: string;
+  topic_source: string | null;
+  generated_at: string;
+  planned_at: string | null;
+  made_at: string | null;
+}
+
 // Idea generator — a single generated video idea
 export interface GeneratedVideoIdea {
   rank: number;             // 1, 2, or 3

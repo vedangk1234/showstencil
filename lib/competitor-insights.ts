@@ -1,7 +1,285 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { Insight } from '@/types'
+import { createServiceClient } from '@/lib/supabase'
+import { saveCompetitorInsights } from '@/lib/db'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+type GapScoreRow = {
+  overall_score: number | null
+  views_gap_score: number | null
+  ctr_gap_score: number | null
+  watch_time_gap_score: number | null
+  upload_frequency_gap_score: number | null
+  estimated_revenue_gap: number | null
+  primary_bottleneck: string | null
+}
+
+/**
+ * Loads all necessary data for a competitor, calls generateCompetitorInsights,
+ * saves the result to the competitors row, and returns the insight array.
+ *
+ * Returns [] when:
+ *  - competitor not found / doesn't belong to userId
+ *  - not enough data (avg_views, subscriber_count, or video_count missing)
+ *  - Claude returns an empty array
+ *
+ * Never throws — errors are logged and [] is returned so callers can continue.
+ */
+export async function generateAndCacheInsightsForCompetitor(
+  competitorId: string,
+  userId: string,
+): Promise<Insight[]> {
+  try {
+    const supabase = createServiceClient()
+
+    // Load competitor — must belong to this user
+    const { data: competitor } = await supabase
+      .from('competitors')
+      .select('*')
+      .eq('id', competitorId)
+      .eq('user_id', userId)
+      .single()
+
+    if (!competitor) {
+      console.warn('[competitor-insights] Competitor not found or wrong user:', competitorId)
+      return []
+    }
+
+    // Effective video count — fall back to DB count when column is null
+    let effectiveVideoCount = competitor.video_count
+    if (effectiveVideoCount == null) {
+      const { count } = await supabase
+        .from('competitor_videos')
+        .select('*', { count: 'exact', head: true })
+        .eq('competitor_id', competitorId)
+      effectiveVideoCount = count ?? 0
+    }
+
+    const hasEnoughData =
+      competitor.avg_views_per_video != null &&
+      competitor.subscriber_count != null &&
+      effectiveVideoCount > 0
+
+    if (!hasEnoughData) {
+      console.warn('[competitor-insights] Not enough data for', competitor.channel_name, {
+        avg_views: competitor.avg_views_per_video,
+        subscribers: competitor.subscriber_count,
+        video_count: effectiveVideoCount,
+      })
+      return []
+    }
+
+    const nowMs = Date.now()
+    const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000)
+    const thirtyDaysAgoIso = thirtyDaysAgo.toISOString()
+    const thirtyDaysAgoDate = thirtyDaysAgo.toISOString().split('T')[0]
+    const sevenDaysAgo = new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const sixtyDaysAgoIso = new Date(nowMs - 60 * 24 * 60 * 60 * 1000).toISOString()
+
+    const [
+      { data: userSnapshot },
+      { data: user },
+      { data: competitorVideos },
+      { data: bestVideos },
+      { data: worstVideos },
+      { data: gapScoreRaw },
+      { data: oldSnapshot },
+      { count: recentUserUploads },
+      { data: userVideos },
+    ] = await Promise.all([
+      supabase
+        .from('channel_snapshots')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single(),
+      supabase
+        .from('users')
+        .select('name, sub_niche')
+        .eq('id', userId)
+        .single(),
+      supabase
+        .from('competitor_videos')
+        .select('*')
+        .eq('competitor_id', competitorId)
+        .order('published_at', { ascending: false })
+        .limit(20),
+      supabase
+        .from('videos')
+        .select('title, view_count, duration_seconds, published_at')
+        .eq('user_id', userId)
+        .not('view_count', 'is', null)
+        .order('view_count', { ascending: false })
+        .limit(3),
+      supabase
+        .from('videos')
+        .select('title, view_count, duration_seconds, published_at')
+        .eq('user_id', userId)
+        .not('view_count', 'is', null)
+        .lt('published_at', sevenDaysAgo)
+        .order('view_count', { ascending: true })
+        .limit(3),
+      supabase
+        .from('gap_scores')
+        .select(
+          'overall_score, views_gap_score, ctr_gap_score, ' +
+          'watch_time_gap_score, upload_frequency_gap_score, ' +
+          'estimated_revenue_gap, primary_bottleneck',
+        )
+        .eq('user_id', userId)
+        .order('calculated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('channel_snapshots')
+        .select('subscriber_count, snapshot_date')
+        .eq('user_id', userId)
+        .not('subscriber_count', 'is', null)
+        .gte('snapshot_date', thirtyDaysAgoDate)
+        .order('snapshot_date', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('videos')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .gte('published_at', thirtyDaysAgoIso),
+      supabase
+        .from('videos')
+        .select('duration_seconds')
+        .eq('user_id', userId)
+        .not('duration_seconds', 'is', null)
+        .gt('duration_seconds', 0),
+    ])
+
+    const gapScore = gapScoreRaw as GapScoreRow | null
+    const videos = competitorVideos || []
+
+    const avgViews =
+      videos.length > 0
+        ? videos.reduce((sum: number, v: Record<string, unknown>) => sum + ((v.view_count as number) || 0), 0) / videos.length
+        : 0
+
+    const avgDuration =
+      videos.length > 0
+        ? videos.reduce((sum: number, v: Record<string, unknown>) => sum + ((v.duration_seconds as number) || 0), 0) / videos.length
+        : 0
+
+    const competitorUploadsPerMonth = videos.filter(
+      (v: Record<string, unknown>) => new Date(v.published_at as string) > thirtyDaysAgo,
+    ).length
+
+    let videosForDays: Record<string, unknown>[] = videos.filter(
+      (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= thirtyDaysAgoIso,
+    )
+    if (videosForDays.length < 3) {
+      videosForDays = videos.filter(
+        (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= sixtyDaysAgoIso,
+      )
+    }
+    if (videosForDays.length < 3) videosForDays = videos
+
+    const dayCounts: Record<string, number> = {}
+    for (const v of videosForDays) {
+      if (typeof v.published_at !== 'string') continue
+      const day = new Date(v.published_at).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })
+      dayCounts[day] = (dayCounts[day] || 0) + 1
+    }
+    const sortedDayCounts = Object.entries(dayCounts).sort((a, b) => b[1] - a[1])
+    const allDaysEqual = sortedDayCounts.length > 1 && sortedDayCounts.every(([, c]) => c === 1)
+    const publishingDays: string[] = allDaysEqual
+      ? ['Varies — consistent uploading on different days']
+      : sortedDayCounts.length > 0
+        ? [sortedDayCounts[0][0]]
+        : []
+
+    const topVideos = [...videos]
+      .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+        ((b.view_count as number) || 0) - ((a.view_count as number) || 0))
+      .slice(0, 5)
+      .map((v: Record<string, unknown>) => ({
+        title: (v.title as string) || 'Untitled',
+        views: (v.view_count as number) || 0,
+      }))
+
+    const viralVideos = videos
+      .filter((v: Record<string, unknown>) => v.is_viral === true)
+      .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+        ((b.performance_vs_avg as number) ?? 0) - ((a.performance_vs_avg as number) ?? 0))
+      .slice(0, 3)
+      .map((v: Record<string, unknown>) => ({
+        title: (v.title as string) || 'Untitled',
+        view_count: (v.view_count as number) ?? null,
+        performance_vs_avg: (v.performance_vs_avg as number) ?? null,
+        published_at: (v.published_at as string) ?? null,
+      }))
+
+    const userAvgVideoLengthSeconds =
+      userVideos && userVideos.length > 0
+        ? Math.round(userVideos.reduce((sum, v) => sum + (v.duration_seconds ?? 0), 0) / userVideos.length)
+        : null
+
+    const currentSubs = userSnapshot?.subscriber_count ?? null
+    const oldSubs = oldSnapshot?.subscriber_count ?? null
+    const subscriberGrowth = (() => {
+      if (!currentSubs || !oldSubs || oldSubs === 0) return null
+      const netChange = currentSubs - oldSubs
+      const growthRate = (netChange / oldSubs) * 100
+      const trend: 'growing' | 'flat' | 'declining' =
+        growthRate > 2 ? 'growing' : growthRate < -2 ? 'declining' : 'flat'
+      return { current: currentSubs, thirtyDaysAgo: oldSubs, netChange, growthRatePct: Math.round(growthRate * 10) / 10, trend }
+    })()
+
+    const insights = await generateCompetitorInsights(
+      {
+        channel_name: user?.name || 'Your Channel',
+        subscriber_count: userSnapshot?.subscriber_count || 0,
+        avg_views_per_video: userSnapshot?.avg_views_per_video || 0,
+        avg_ctr: userSnapshot?.avg_ctr || 0,
+        avg_view_duration_seconds: userSnapshot?.avg_view_duration_seconds || 0,
+        avg_video_length_seconds: userAvgVideoLengthSeconds,
+        upload_frequency_per_month: recentUserUploads ?? 0,
+        sub_niche: user?.sub_niche || 'General',
+        estimated_monthly_revenue: userSnapshot?.estimated_monthly_revenue ?? null,
+        rpm: userSnapshot?.rpm ?? null,
+        best_videos: (bestVideos ?? []).map(v => ({ title: v.title ?? '', view_count: v.view_count ?? null, duration_seconds: v.duration_seconds ?? null })),
+        worst_videos: (worstVideos ?? []).map(v => ({ title: v.title ?? '', view_count: v.view_count ?? null, duration_seconds: v.duration_seconds ?? null })),
+        gap_scores: gapScore ? {
+          overall: gapScore.overall_score,
+          views_gap: gapScore.views_gap_score,
+          ctr_gap: gapScore.ctr_gap_score,
+          watch_time_gap: gapScore.watch_time_gap_score,
+          upload_frequency_gap: gapScore.upload_frequency_gap_score,
+          estimated_revenue_gap_usd: gapScore.estimated_revenue_gap,
+          primary_bottleneck: gapScore.primary_bottleneck,
+        } : null,
+        subscriber_growth: subscriberGrowth,
+      },
+      {
+        channel_name: competitor.channel_name || 'Competitor',
+        subscriber_count: competitor.subscriber_count || 0,
+        avg_views: competitor.avg_views_per_video ?? avgViews,
+        avg_video_length_seconds: competitor.avg_video_length_seconds ?? avgDuration,
+        upload_frequency_per_month: competitor.upload_frequency_30d ?? competitorUploadsPerMonth,
+        sub_niche: competitor.sub_niche || 'General',
+        top_videos: topVideos,
+        publishing_days: publishingDays,
+        viral_videos: viralVideos,
+      },
+    )
+
+    if (insights && insights.length > 0) {
+      await saveCompetitorInsights(competitorId, insights)
+    }
+
+    return insights || []
+  } catch (err) {
+    console.error('[competitor-insights] generateAndCacheInsightsForCompetitor failed:', err)
+    return []
+  }
+}
 
 export interface InsightUserMetrics {
   channel_name: string
@@ -193,10 +471,41 @@ Generate exactly 6-8 insights. No more, no less.
     if (!textBlock || textBlock.type !== 'text') return []
 
     const raw = textBlock.text
-    // Extract the JSON array even if Claude wraps it in markdown or adds preamble
-    const arrayMatch = raw.match(/\[[\s\S]*\]/)
-    if (!arrayMatch) return []
-    const insights = JSON.parse(arrayMatch[0])
+
+    // Find the start of the JSON array (array of objects: '[' then optional whitespace then '{')
+    // This skips any bracketed text in Claude's preamble like "[Channel Name]" or "[Note]"
+    // which would break the old broad regex.
+    const arrayStartIndex = raw.search(/\[\s*\{/)
+    if (arrayStartIndex === -1) {
+      console.error('[competitor-insights] No JSON array found in Claude response:', raw.slice(0, 300))
+      return []
+    }
+
+    // Use bracket-depth matching so embedded ']' characters inside JSON strings don't truncate the result
+    let depth = 0
+    let inString = false
+    let escaped = false
+    let arrayEnd = -1
+
+    for (let i = arrayStartIndex; i < raw.length; i++) {
+      const ch = raw[i]
+      if (escaped) { escaped = false; continue }
+      if (ch === '\\' && inString) { escaped = true; continue }
+      if (ch === '"') { inString = !inString; continue }
+      if (inString) continue
+      if (ch === '[' || ch === '{') depth++
+      if (ch === ']' || ch === '}') {
+        depth--
+        if (depth === 0 && ch === ']') { arrayEnd = i; break }
+      }
+    }
+
+    if (arrayEnd === -1) {
+      console.error('[competitor-insights] Could not find closing bracket in Claude response:', raw.slice(0, 300))
+      return []
+    }
+
+    const insights = JSON.parse(raw.slice(arrayStartIndex, arrayEnd + 1))
     return Array.isArray(insights) ? insights : []
   } catch (error) {
     console.error('[competitor-insights] Generation failed:', error)

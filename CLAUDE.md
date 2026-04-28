@@ -732,6 +732,80 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 2 — Day 20 (2026-04-29)
+
+**Ideas page rebuilt with 4-signal generation pipeline**
+
+*types/index.ts — Idea interface*
+* Added `Idea` interface with all new DB columns: `id`, `user_id`, `title`, `opportunity_score`, `thumbnail_description`, `content_brief`, `suggested_duration_min/max`, `duration_reasoning`, `why_now`, `topic_source`, `generated_at`, `planned_at`, `made_at`. The old `GeneratedVideoIdea` type is kept for backward compat but is no longer used in the ideas pipeline.
+
+*lib/access.ts — getIdeaLimit corrected*
+* Pro plan changed from 6 to 10 ideas per generation batch. Free plan now returns 0 (not 3) since free users can't generate at all.
+
+*lib/competitor-insights.ts — generateAndCacheInsightsForCompetitor added*
+* Exported shared function that takes `(competitorId, userId)`, loads all necessary data (competitor row, user snapshots, videos, gap scores, subscriber growth), calls `generateCompetitorInsights`, saves to DB via `saveCompetitorInsights`, and returns `Insight[]` (or `[]` on failure). Never throws. This is the single code path for insight generation.
+* `createServiceClient` and `saveCompetitorInsights` imports added. `GapScoreRow` type moved into this file.
+
+*app/api/competitors/insights/route.ts — thin wrapper*
+* Route now does: auth, cache check, ownership verify, quick 422 pre-check (data completeness), then delegates to `generateAndCacheInsightsForCompetitor`. All data-loading logic removed from the route — it lives in the shared function. Existing InsightsTab behaviour unchanged.
+
+*lib/db.ts — getRecentIdeasBatch added*
+* Fetches the most recent batch of idea rows (all rows within ±1 minute of the most recent `generated_at` for that user). Returns `Idea[]` sorted by `opportunity_score desc`. Filters to `opportunity_score IS NOT NULL` to skip old JSONB-style rows. Returns `[]` when no new-schema rows exist.
+* `Idea` type added to the imports.
+
+*app/api/ideas/generate/route.ts — NEW*
+* Full generation pipeline:
+  1. Auth + plan resolution (inline, mirrors lib/access.ts getUserPlan logic)
+  2. Plan limit check: Starter → 429 if generated this calendar month; Pro → 429 if generated within last 7 days; Free → 403 upgrade_required
+  3. Queries all active competitors; finds those with null or stale (>7d) insights
+  4. Generates missing insights sequentially via `generateAndCacheInsightsForCompetitor` — failure per-competitor logged, never blocks
+  5. Re-fetches competitors with fresh insights; loads top-5 user videos, all competitor videos (last 90d), latest snapshot, user avg duration — all in `Promise.all`
+  6. Computes per-competitor winning videos: videos beating that competitor's own avg by >30% (last 90d), sorted desc, top 5; falls back to top 3 when no video crosses threshold
+  7. Builds dynamic Claude prompt (system + user) using all 4 signals
+  8. Calls `claude-sonnet-4-6`, max_tokens 3500, temperature 0.7
+  9. Extracts JSON with bracket-depth matcher (same algorithm as competitor-insights.ts)
+  10. Inserts individual idea rows (one per idea) with all new columns; returns rows from INSERT...SELECT
+  11. Prunes ideas older than 4 weeks
+  12. Returns `{ ideas, generatedAt, regenerateAvailableAt }`
+
+*app/api/ideas/[id]/plan/route.ts — NEW*
+* POST with auth + ownership check. Sets `planned_at = NOW()` on the ideas row. Returns `{ success: true }`.
+
+*app/api/ideas/[id]/made/route.ts — NEW*
+* POST with auth + ownership check. Sets `made_at = NOW()` on the ideas row. Returns `{ success: true }`.
+
+*components/ideas/IdeasClient.tsx — NEW*
+* Client component. Props: `initialIdeas`, `isFresh`, `plan`, `regenerateAvailableAt`, `ideaLimit`.
+* On mount: if `!isFresh && initialIdeas.length === 0` → triggers generation automatically.
+* Loading state: centered card with title, subheading, and 3 labelled stage indicators that auto-advance via `setTimeout` (8s → stage 1, 18s → stage 2) to simulate progress. If regenerating with stale ideas, greyed-out previous titles shown below loader.
+* Ideas grid: 2-col responsive, sorted by `opportunity_score` desc. Each card shows: score badge (green ≥80, amber ≥50, gray otherwise), duration pill, planned/made badge, title, why-now italic, 4 sections (thumbnail brief, content brief, duration logic, why we suggested this), action buttons.
+* Action buttons: "Mark as planned" calls `/api/ideas/[id]/plan` and updates local state. "Mark as made" calls `/api/ideas/[id]/made` and moves card to Done section.
+* Done section: collapsed by default, toggled by user. Shows same cards greyed out with opacity 0.55.
+* Header: title + subheading; right side shows "Regenerate ideas" button (green, enabled) or muted "Next refresh on {date}" text when locked; Starter plan shows indicator bar with count and upgrade link.
+* Empty state: centered card with "Generate ideas" primary button.
+
+*app/(dashboard)/ideas/page.tsx — REWRITTEN*
+* Server component. Auth check → redirect on no session. Parallel fetch: user subscription data, `getRecentIdeasBatch`, `getIdeaLimit`. Resolves plan inline. Computes `isFresh` (batch generated within 7 days) and `regenerateAvailableAt` (first of next month for Starter, generatedAt+7d for Pro). Passes all to `IdeasClient`. No Claude call server-side.
+
+*Database migration (run in Supabase SQL editor before testing):*
+```sql
+ALTER TABLE ideas ALTER COLUMN ideas DROP NOT NULL;
+ALTER TABLE ideas
+  ADD COLUMN IF NOT EXISTS title TEXT,
+  ADD COLUMN IF NOT EXISTS opportunity_score INTEGER,
+  ADD COLUMN IF NOT EXISTS thumbnail_description TEXT,
+  ADD COLUMN IF NOT EXISTS content_brief TEXT,
+  ADD COLUMN IF NOT EXISTS suggested_duration_min INTEGER,
+  ADD COLUMN IF NOT EXISTS suggested_duration_max INTEGER,
+  ADD COLUMN IF NOT EXISTS duration_reasoning TEXT,
+  ADD COLUMN IF NOT EXISTS why_now TEXT,
+  ADD COLUMN IF NOT EXISTS topic_source TEXT,
+  ADD COLUMN IF NOT EXISTS planned_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS made_at TIMESTAMPTZ;
+```
+
+---
+
 ### Week 2 — Day 19 (2026-04-28)
 
 **5 competitor system fixes — activity filter, sub-niche, insights, re-detection**
@@ -1500,6 +1574,11 @@ ALTER TABLE users
 * Sub-niche detected immediately after competitor videos are saved (Day 19): `assignCompetitor` runs `detectSubNiche` inline after video insert (if ≥3 videos). Refresh-data cron Block 2 also detects sub-niche for any competitor with null sub_niche after video sync. Failure is silently caught and never blocks assignment or cron.
 * Immediate refresh after auto-detection (Day 19): After `Promise.allSettled`, if any competitor was assigned, fires fire-and-forget GET to `/api/cron/refresh-data`. Videos, metrics, snapshots, and sub-niches populate immediately rather than waiting for 3am cron.
 * Single YouTube search covers all three tiers (Day 18): `searchAllChannelCandidates` uses `maxResults=50` with no sub count filtering and returns all 50 results for classification. This costs 101 quota units instead of 303 (one call per tier). The trade-off is that YouTube's relevance ranking controls which channels appear — for niche searches like "personal finance investing money tips", 50 results span a wide subscriber range and reliably cover all three tiers.
+* Ideas generation pipeline uses 4 signals (Day 20): cached competitor AI insights + user's top 5 videos by views + each competitor's winning videos (those beating that competitor's own avg by >30%, last 90 days) + user's avg duration. The 30% threshold is per-competitor not global — a 100K-avg channel and a 1M-avg channel each have their own threshold for "winning". Falls back to that competitor's top 3 videos when no video crosses the threshold so the prompt always has signal from every channel.
+* Ideas page lazy-loads insights for missing competitors before idea generation (Day 20): on /ideas load, if any active competitor has null or stale (>7d) insights, the /api/ideas/generate endpoint regenerates them sequentially before calling Claude for ideas. Loading UI shows three labelled stages (auto-advancing with setTimeout). Users never have to manually visit each competitor's Insights tab to unlock ideas.
+* Ideas regeneration plan-gated (Day 20): Starter — 3 ideas, regenerate once per calendar month. Pro — 10 ideas, regenerate once per 7 days. Free → 403 upgrade_required. Limits enforced in /api/ideas/generate, read from lib/access.ts (getIdeaLimit). 429 returned with nextAvailable timestamp on limit hit. Client page.tsx pre-computes regenerateAvailableAt server-side and passes it to IdeasClient so the button is immediately in the correct state on page load.
+* Insight generation logic deduplicated (Day 20): generateAndCacheInsightsForCompetitor in lib/competitor-insights.ts is the single source of truth. Both /api/competitors/insights and /api/ideas/generate call it. Bracket-depth JSON parser used in both places — no regex fallback. Old inline data-loading in the route removed entirely.
+* Ideas stored as individual DB rows from Day 20 (Day 20): Previously, lib/idea-generator.ts stored ideas as a JSONB blob in a single `ideas` column per generation. The new pipeline inserts one row per idea with title, opportunity_score, thumbnail_description, content_brief, suggested_duration_min/max, duration_reasoning, why_now, topic_source, planned_at, made_at as individual columns. The `ideas JSONB NOT NULL` constraint was dropped. Old `getRecentIdeas` preserved for backward compat; new `getRecentIdeasBatch` returns the current batch.
 
 \---
 
@@ -1517,7 +1596,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-28 — Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
+*Last updated: 2026-04-29 — Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
+Previous Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
 Previous Day 18: Competitor auto-detection wired into /api/sync. detectAndAssignCompetitors added to lib/niche-engine.ts — searches YouTube once (101 quota units) for the user's niche, classifies all 50 results into Tier 1/2/Dominator buckets, picks best per tier, runs assignCompetitor in parallel via Promise.allSettled. assignCompetitor mirrors track/route.ts pipeline: DB insert → getCompetitorFullProfile → video rows → updateCompetitorMetrics → saveCompetitorSnapshot. Sync step 6 checks existingAutoCount===0 and calls detectAndAssignCompetitors wrapped in try/catch — never blocks the sync response.
 Previous Day 17 (part 2): Decoupled competitor sync from user channel sync in refresh-data cron. Single try/catch per user split into two independent blocks: Block 1 (user OAuth channel sync) failure no longer skips Block 2 (competitor DATA API sync). Each competitor wrapped in its own try/catch. Invalid channel IDs (not UC-prefixed or not 24 chars) skipped with log. Snapshot guarded on non-null subscriber_count. Insights cache wiped per-user after Block 2. Result: Sarah/Marcus/Humphrey get daily snapshots even when user token is expired.
 Previous Day 17 (part 1): Competitor insights expanded with 5 new data points: (1) best/worst 3 videos by view_count — lets Claude identify winning format patterns vs failing formats; (2) user revenue + RPM from latest snapshot — lets Claude quantify the dollar impact of closing specific gaps; (3) full gap scores (overall, per-metric, primary_bottleneck, estimated_revenue_gap) — Claude now prioritizes insights by calculated opportunity score rather than guessing; (4) competitor viral videos separated from top videos — Claude identifies the title/format pattern behind breakout moments and checks if the user has ever used it; (5) 30-day subscriber growth trend (net change, growth %, growing/flat/declining) — Claude frames recommendations differently based on whether the channel is growing (double down) or flat/declining (fix content-audience fit). Prompt rewritten to 6-8 insights with stricter rules: every sentence must contain a specific number, both channel names required, concrete next action at end of each description. JSON extraction made robust with regex array match. max_tokens set to 1800. All 9/9 validation checks passed on test run: Humphrey Yang insights named both channels, referenced specific video titles and views, gap scores, growth trend, viral pattern, and revenue impact.

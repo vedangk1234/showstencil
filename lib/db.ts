@@ -12,7 +12,7 @@
 import { createServiceClient } from '@/lib/supabase'
 import type { ChannelOverview, VideoPerformanceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
-import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, CompetitorVideo, Insight } from '@/types'
+import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, CompetitorVideo, Insight, Idea } from '@/types'
 
 // ---------------------------------------------------------------------------
 // saveChannelSnapshot
@@ -1152,6 +1152,69 @@ export async function getRecentCompetitorVideos(
   }
 
   return (data ?? []) as CompetitorVideo[]
+}
+
+// ---------------------------------------------------------------------------
+// getRecentIdeasBatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the most recent batch of video ideas for a user.
+ * A "batch" is all ideas sharing the most recent generated_at within a 1-minute window —
+ * they were all generated in the same API call.
+ *
+ * @returns Idea[] sorted by opportunity_score desc, empty array when no ideas exist
+ */
+export async function getRecentIdeasBatch(userId: string): Promise<Idea[]> {
+  const supabase = createServiceClient()
+
+  // Find the most recent generated_at
+  const { data: latest } = await supabase
+    .from('ideas')
+    .select('generated_at')
+    .eq('user_id', userId)
+    .not('opportunity_score', 'is', null) // only new-schema rows
+    .order('generated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!latest) return []
+
+  const latestTime = new Date(latest.generated_at)
+  const windowStart = new Date(latestTime.getTime() - 60 * 1000)
+  const windowEnd = new Date(latestTime.getTime() + 60 * 1000)
+
+  const { data, error } = await supabase
+    .from('ideas')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('generated_at', windowStart.toISOString())
+    .lte('generated_at', windowEnd.toISOString())
+    .order('opportunity_score', { ascending: false })
+
+  if (error) {
+    if (error.code !== '42P01') {
+      console.error('[db] getRecentIdeasBatch error:', error.message)
+    }
+    return []
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    user_id: row.user_id,
+    title: row.title ?? '',
+    opportunity_score: row.opportunity_score ?? 0,
+    thumbnail_description: row.thumbnail_description ?? '',
+    content_brief: row.content_brief ?? '',
+    suggested_duration_min: row.suggested_duration_min ?? 0,
+    suggested_duration_max: row.suggested_duration_max ?? 0,
+    duration_reasoning: row.duration_reasoning ?? '',
+    why_now: row.why_now ?? '',
+    topic_source: row.topic_source ?? null,
+    generated_at: row.generated_at ?? '',
+    planned_at: row.planned_at ?? null,
+    made_at: row.made_at ?? null,
+  })) as Idea[]
 }
 
 // ---------------------------------------------------------------------------
