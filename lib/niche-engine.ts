@@ -471,6 +471,48 @@ async function searchAllChannelCandidates(
 }
 
 // ---------------------------------------------------------------------------
+// Activity threshold check (internal)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true only if the channel has published ≥3 videos in the last 30 days
+ * AND ≥6 videos in the last 60 days. Inactive channels are never assigned.
+ *
+ * @quota ~200 units (getRecentVideos makes 2 × search.list calls)
+ */
+async function meetsActivityThreshold(channelId: string): Promise<boolean> {
+  try {
+    const videos = await getRecentVideos(channelId, 20);
+    if (!videos || videos.length === 0) return false;
+
+    const now = Date.now();
+    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const sixtyDaysAgo = now - 60 * 24 * 60 * 60 * 1000;
+
+    const last30 = videos.filter(
+      (v) => new Date(v.publishedAt).getTime() >= thirtyDaysAgo,
+    ).length;
+
+    const last60 = videos.filter(
+      (v) => new Date(v.publishedAt).getTime() >= sixtyDaysAgo,
+    ).length;
+
+    const passes = last30 >= 3 && last60 >= 6;
+
+    if (!passes) {
+      console.log(
+        `[niche-engine] ${channelId} failed activity check: ` +
+          `${last30} videos in 30d (need 3), ${last60} videos in 60d (need 6)`,
+      );
+    }
+
+    return passes;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Function 5 — assignCompetitor (internal)
 // ---------------------------------------------------------------------------
 
@@ -706,31 +748,43 @@ export async function detectAndAssignCompetitors(
   );
 
   const target1 = userSubscriberCount * 2;
-  const bestTier1 =
-    [...tier1Pool].sort(
-      (a, b) => Math.abs(a.subscriberCount - target1) - Math.abs(b.subscriberCount - target1),
-    )[0] ?? null;
+  const sortedTier1 = [...tier1Pool].sort(
+    (a, b) => Math.abs(a.subscriberCount - target1) - Math.abs(b.subscriberCount - target1),
+  );
+  let bestTier1: CompetitorCandidate | null = null;
+  for (const candidate of sortedTier1) {
+    const active = await meetsActivityThreshold(candidate.channelId);
+    if (active) { bestTier1 = candidate; break; }
+  }
 
   const target2 = userSubscriberCount * 5;
-  const bestTier2 =
-    [...tier2Pool].sort(
-      (a, b) => Math.abs(a.subscriberCount - target2) - Math.abs(b.subscriberCount - target2),
-    )[0] ?? null;
+  const sortedTier2 = [...tier2Pool].sort(
+    (a, b) => Math.abs(a.subscriberCount - target2) - Math.abs(b.subscriberCount - target2),
+  );
+  let bestTier2: CompetitorCandidate | null = null;
+  for (const candidate of sortedTier2) {
+    const active = await meetsActivityThreshold(candidate.channelId);
+    if (active) { bestTier2 = candidate; break; }
+  }
 
-  const bestDom =
-    [...dominatorPool].sort((a, b) => b.subscriberCount - a.subscriberCount)[0] ?? null;
+  const sortedDom = [...dominatorPool].sort((a, b) => b.subscriberCount - a.subscriberCount);
+  let bestDom: CompetitorCandidate | null = null;
+  for (const candidate of sortedDom) {
+    const active = await meetsActivityThreshold(candidate.channelId);
+    if (active) { bestDom = candidate; break; }
+  }
 
   if (!bestTier1)
     console.warn(
-      `[niche-engine] detectAndAssignCompetitors: no Tier 1 candidate (need ${Math.round(userSubscriberCount * 0.5)}–${Math.round(userSubscriberCount * 3)} subs)`,
+      `[niche-engine] detectAndAssignCompetitors: no active Tier 1 candidate (need ${Math.round(userSubscriberCount * 0.5)}–${Math.round(userSubscriberCount * 3)} subs, ≥3 videos/30d)`,
     );
   if (!bestTier2)
     console.warn(
-      `[niche-engine] detectAndAssignCompetitors: no Tier 2 candidate (need ${Math.round(userSubscriberCount * 3)}–${Math.round(userSubscriberCount * 10)} subs)`,
+      `[niche-engine] detectAndAssignCompetitors: no active Tier 2 candidate (need ${Math.round(userSubscriberCount * 3)}–${Math.round(userSubscriberCount * 10)} subs, ≥3 videos/30d)`,
     );
   if (!bestDom)
     console.warn(
-      `[niche-engine] detectAndAssignCompetitors: no Dominator candidate (need >${Math.round(userSubscriberCount * 10)} subs)`,
+      `[niche-engine] detectAndAssignCompetitors: no active Dominator candidate (need >${Math.round(userSubscriberCount * 10)} subs, ≥3 videos/30d)`,
     );
 
   const toAssign: { candidate: CompetitorCandidate; tier: 1 | 2 | 3 }[] = [];
