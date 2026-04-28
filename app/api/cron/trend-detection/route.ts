@@ -46,6 +46,15 @@ export async function GET(request: Request) {
   let viralVideosFound = 0
 
   for (const competitor of competitorList) {
+    if (
+      !competitor.youtube_channel_id ||
+      !competitor.youtube_channel_id.startsWith('UC') ||
+      competitor.youtube_channel_id.length !== 24
+    ) {
+      console.log(`[cron/trend-detection] Skipping fake channel: ${competitor.channel_name}`)
+      continue
+    }
+
     try {
       // ── Fetch last 5 videos from YouTube ──────────────────────────────────
       const summaries = await getRecentVideos(competitor.youtube_channel_id, 5)
