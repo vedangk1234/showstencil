@@ -708,12 +708,20 @@ export async function detectAndAssignCompetitors(
 
   const { data: existingRows } = await supabase
     .from('competitors')
-    .select('youtube_channel_id')
+    .select('youtube_channel_id, tier, is_auto_detected, is_active')
     .eq('user_id', userId);
 
   const existingChannelIds = new Set(
     (existingRows ?? []).map((r) => r.youtube_channel_id as string),
   );
+
+  // Which tiers are already covered by active auto-detected competitors
+  const filledTiers = new Set(
+    (existingRows ?? [])
+      .filter((r) => r.is_auto_detected && r.is_active && r.tier != null)
+      .map((r) => r.tier as number),
+  );
+  console.log(`[niche-engine] detectAndAssignCompetitors: filled tiers = [${[...filledTiers].join(',')}]`);
 
   console.log(
     `[niche-engine] detectAndAssignCompetitors: user ${userId}, niche "${nicheId}", userSubs ${userSubscriberCount}`,
@@ -788,9 +796,9 @@ export async function detectAndAssignCompetitors(
     );
 
   const toAssign: { candidate: CompetitorCandidate; tier: 1 | 2 | 3 }[] = [];
-  if (bestTier1) toAssign.push({ candidate: bestTier1, tier: 1 });
-  if (bestTier2) toAssign.push({ candidate: bestTier2, tier: 2 });
-  if (bestDom) toAssign.push({ candidate: bestDom, tier: 3 });
+  if (bestTier1 && !filledTiers.has(1)) toAssign.push({ candidate: bestTier1, tier: 1 });
+  if (bestTier2 && !filledTiers.has(2)) toAssign.push({ candidate: bestTier2, tier: 2 });
+  if (bestDom && !filledTiers.has(3)) toAssign.push({ candidate: bestDom, tier: 3 });
 
   if (toAssign.length === 0) {
     console.warn(
