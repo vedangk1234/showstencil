@@ -14,6 +14,9 @@ config({ path: '.env.local', override: true })
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
+import { getCompetitorFullProfile } from '@/lib/youtube-data';
+import { calculateCompetitorMetrics } from '@/lib/competitor-metrics';
+import { updateCompetitorMetrics, saveCompetitorSnapshot } from '@/lib/db';
 import type { NicheResult, CompetitorCandidate } from '@/types';
 
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
@@ -390,6 +393,354 @@ export async function saveDetectedNiche(userId: string, nicheId: string): Promis
 
   console.log(`[niche-engine] saveDetectedNiche: saved niche "${nicheId}" for user ${userId}`);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Function 4 — searchAllChannelCandidates (internal)
+// ---------------------------------------------------------------------------
+
+/**
+ * Searches YouTube for channels matching the query without sub count filtering.
+ * Returns all results so detectAndAssignCompetitors can classify them into tiers.
+ *
+ * @quota 101 units (100 search.list + 1 channels.list)
+ */
+async function searchAllChannelCandidates(
+  query: string,
+  excludeChannelId: string,
+): Promise<CompetitorCandidate[]> {
+  const searchUrl = new URL(`${BASE_URL}/search`);
+  searchUrl.searchParams.set('key', apiKey());
+  searchUrl.searchParams.set('part', 'snippet');
+  searchUrl.searchParams.set('type', 'channel');
+  searchUrl.searchParams.set('q', query);
+  searchUrl.searchParams.set('maxResults', '50');
+  searchUrl.searchParams.set('relevanceLanguage', 'en');
+
+  let channelIds: string[] = [];
+
+  try {
+    const searchRes = await fetch(searchUrl.toString());
+    if (!searchRes.ok) {
+      console.error(`[niche-engine] searchAllChannelCandidates: search.list HTTP ${searchRes.status}`);
+      return [];
+    }
+    const searchData = await searchRes.json();
+    channelIds = ((searchData.items ?? []) as { id: { channelId: string } }[])
+      .map((item) => item.id.channelId)
+      .filter((id) => id && id !== excludeChannelId);
+  } catch (err) {
+    console.error('[niche-engine] searchAllChannelCandidates: search.list error:', err);
+    return [];
+  }
+
+  if (channelIds.length === 0) return [];
+
+  const channelsUrl = new URL(`${BASE_URL}/channels`);
+  channelsUrl.searchParams.set('key', apiKey());
+  channelsUrl.searchParams.set('part', 'snippet,statistics');
+  channelsUrl.searchParams.set('id', channelIds.join(','));
+
+  try {
+    const channelsRes = await fetch(channelsUrl.toString());
+    if (!channelsRes.ok) {
+      console.error(`[niche-engine] searchAllChannelCandidates: channels.list HTTP ${channelsRes.status}`);
+      return [];
+    }
+    const channelsData = await channelsRes.json();
+    const candidates: CompetitorCandidate[] = [];
+
+    for (const item of channelsData.items ?? []) {
+      if (item.id === excludeChannelId) continue;
+      const subCount = parseInt(item.statistics?.subscriberCount ?? '0', 10);
+      candidates.push({
+        channelId: item.id,
+        channelName: item.snippet?.title ?? '',
+        subscriberCount: subCount,
+        thumbnailUrl: item.snippet?.thumbnails?.default?.url ?? '',
+      });
+    }
+
+    console.log(`[niche-engine] searchAllChannelCandidates: found ${candidates.length} candidates`);
+    return candidates;
+  } catch (err) {
+    console.error('[niche-engine] searchAllChannelCandidates: channels.list error:', err);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Function 5 — assignCompetitor (internal)
+// ---------------------------------------------------------------------------
+
+/**
+ * Inserts one competitor row, fetches their full YouTube profile, inserts their
+ * videos, and saves metrics + snapshot. Mirrors the pipeline in track/route.ts.
+ *
+ * @quota ~203 units (getCompetitorFullProfile)
+ */
+async function assignCompetitor(
+  userId: string,
+  candidate: CompetitorCandidate,
+  tier: 1 | 2 | 3,
+): Promise<void> {
+  const supabase = createServiceClient();
+
+  const { data: newCompetitor, error } = await supabase
+    .from('competitors')
+    .insert({
+      user_id: userId,
+      youtube_channel_id: candidate.channelId,
+      channel_name: candidate.channelName,
+      channel_thumbnail: candidate.thumbnailUrl,
+      subscriber_count: candidate.subscriberCount,
+      total_views: null,
+      tier,
+      is_auto_detected: true,
+      is_active: true,
+      is_dominator: tier === 3,
+      is_searched: false,
+      last_synced_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    throw new Error(`DB insert failed for "${candidate.channelName}": ${error.message}`);
+  }
+
+  const competitorId = newCompetitor.id;
+  console.log(
+    `[niche-engine] assignCompetitor: inserted Tier ${tier} "${candidate.channelName}" (${candidate.subscriberCount} subs) id=${competitorId}`,
+  );
+
+  let fullProfile: Awaited<ReturnType<typeof getCompetitorFullProfile>> | null = null;
+  try {
+    fullProfile = await getCompetitorFullProfile(candidate.channelId);
+  } catch (err) {
+    console.error(
+      `[niche-engine] assignCompetitor: getCompetitorFullProfile failed for "${candidate.channelName}":`,
+      err,
+    );
+  }
+
+  if (!fullProfile) {
+    console.warn(
+      `[niche-engine] assignCompetitor: no profile for "${candidate.channelName}" — row inserted, data will sync overnight`,
+    );
+    return;
+  }
+
+  const velocityMap = new Map(fullProfile.velocityData.videos.map((v) => [v.videoId, v]));
+  const channelAvgViews = fullProfile.velocityData.channelAvgViews;
+
+  const videoRows = fullProfile.recentVideos.map((video) => {
+    const vel = velocityMap.get(video.videoId);
+    const performanceVsAvg =
+      channelAvgViews > 0
+        ? Math.round((video.viewCount / channelAvgViews) * 100) / 100
+        : 1;
+    return {
+      competitor_id: competitorId,
+      youtube_video_id: video.videoId,
+      title: video.title,
+      published_at: video.publishedAt,
+      view_count: video.viewCount,
+      like_count: video.likeCount,
+      comment_count: video.commentCount,
+      duration_seconds: video.duration,
+      thumbnail_url: video.thumbnailHighRes || video.thumbnailDefault || null,
+      velocity_score: vel?.velocityScore ?? null,
+      performance_vs_avg: performanceVsAvg,
+      is_viral: vel?.isViral ?? false,
+    };
+  });
+
+  if (videoRows.length > 0) {
+    await supabase.from('competitor_videos').delete().eq('competitor_id', competitorId);
+    const { error: videoError } = await supabase.from('competitor_videos').insert(videoRows);
+    if (videoError) {
+      console.error(
+        `[niche-engine] assignCompetitor: video insert failed for "${candidate.channelName}":`,
+        videoError.message,
+      );
+    } else {
+      console.log(
+        `[niche-engine] assignCompetitor: inserted ${videoRows.length} videos for "${candidate.channelName}"`,
+      );
+    }
+  }
+
+  const metrics = calculateCompetitorMetrics(videoRows, fullProfile.channel.videoCount);
+
+  await updateCompetitorMetrics(competitorId, {
+    video_count: metrics.video_count,
+    avg_views_per_video: metrics.avg_views_per_video,
+    avg_video_length_seconds: metrics.avg_video_length_seconds,
+    upload_frequency_30d: metrics.upload_frequency_30d,
+    subscriber_count: fullProfile.channel.subscriberCount,
+    total_views: fullProfile.channel.totalViews,
+    last_synced_at: new Date().toISOString(),
+  });
+
+  await saveCompetitorSnapshot(competitorId, {
+    subscriber_count: fullProfile.channel.subscriberCount,
+    total_views: fullProfile.channel.totalViews,
+    video_count: metrics.video_count,
+    avg_views_per_video: metrics.avg_views_per_video,
+    avg_video_length_seconds: metrics.avg_video_length_seconds,
+    upload_frequency_30d: metrics.upload_frequency_30d,
+    velocity_score_avg: metrics.velocity_score_avg,
+  });
+
+  console.log(
+    `[niche-engine] assignCompetitor: Tier ${tier} "${candidate.channelName}" fully populated — ${videoRows.length} videos, metrics saved`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Function 6 — detectAndAssignCompetitors (exported)
+// ---------------------------------------------------------------------------
+
+/**
+ * One-time orchestrator: finds exactly 1 Tier 1, 1 Tier 2, and 1 Dominator
+ * competitor for a user, then inserts them with full video data.
+ *
+ * Called from /api/sync when the user has 0 active auto-detected competitors.
+ * Never throws — partial results are saved and logged.
+ *
+ * Tier definitions (ratio = competitorSubs / userSubs):
+ *   Tier 1: 0.5x – 3x   (peer comparison)
+ *   Tier 2: 3x – 10x    (aspirational)
+ *   Tier 3 / Dominator: >10x (niche ceiling)
+ *
+ * @quota ~101 (initial search) + up to 3 × 203 (full profile each) ≈ 710 units total
+ */
+export async function detectAndAssignCompetitors(
+  userId: string,
+  nicheId: string | null,
+  userSubscriberCount: number,
+): Promise<void> {
+  if (!nicheId || !isValidNicheId(nicheId)) {
+    console.warn(
+      `[niche-engine] detectAndAssignCompetitors: invalid nicheId "${nicheId}" for user ${userId} — skipping`,
+    );
+    return;
+  }
+
+  const supabase = createServiceClient();
+  const query = NICHE_SEARCH_QUERIES[nicheId];
+
+  const { data: userData } = await supabase
+    .from('users')
+    .select('youtube_channel_id')
+    .eq('id', userId)
+    .single();
+
+  const userChannelId = userData?.youtube_channel_id ?? '';
+
+  const { data: existingRows } = await supabase
+    .from('competitors')
+    .select('youtube_channel_id')
+    .eq('user_id', userId);
+
+  const existingChannelIds = new Set(
+    (existingRows ?? []).map((r) => r.youtube_channel_id as string),
+  );
+
+  console.log(
+    `[niche-engine] detectAndAssignCompetitors: user ${userId}, niche "${nicheId}", userSubs ${userSubscriberCount}`,
+  );
+
+  const allCandidates = await searchAllChannelCandidates(query, userChannelId);
+
+  if (allCandidates.length === 0) {
+    console.warn(
+      `[niche-engine] detectAndAssignCompetitors: no candidates found for query "${query}"`,
+    );
+    return;
+  }
+
+  const eligible = allCandidates.filter(
+    (c) =>
+      c.channelId !== userChannelId &&
+      !existingChannelIds.has(c.channelId) &&
+      c.subscriberCount >= 1000,
+  );
+
+  const tier1Pool = eligible.filter((c) => {
+    const ratio = c.subscriberCount / userSubscriberCount;
+    return ratio >= 0.5 && ratio <= 3;
+  });
+  const tier2Pool = eligible.filter((c) => {
+    const ratio = c.subscriberCount / userSubscriberCount;
+    return ratio > 3 && ratio <= 10;
+  });
+  const dominatorPool = eligible.filter(
+    (c) => c.subscriberCount / userSubscriberCount > 10,
+  );
+
+  const target1 = userSubscriberCount * 2;
+  const bestTier1 =
+    [...tier1Pool].sort(
+      (a, b) => Math.abs(a.subscriberCount - target1) - Math.abs(b.subscriberCount - target1),
+    )[0] ?? null;
+
+  const target2 = userSubscriberCount * 5;
+  const bestTier2 =
+    [...tier2Pool].sort(
+      (a, b) => Math.abs(a.subscriberCount - target2) - Math.abs(b.subscriberCount - target2),
+    )[0] ?? null;
+
+  const bestDom =
+    [...dominatorPool].sort((a, b) => b.subscriberCount - a.subscriberCount)[0] ?? null;
+
+  if (!bestTier1)
+    console.warn(
+      `[niche-engine] detectAndAssignCompetitors: no Tier 1 candidate (need ${Math.round(userSubscriberCount * 0.5)}–${Math.round(userSubscriberCount * 3)} subs)`,
+    );
+  if (!bestTier2)
+    console.warn(
+      `[niche-engine] detectAndAssignCompetitors: no Tier 2 candidate (need ${Math.round(userSubscriberCount * 3)}–${Math.round(userSubscriberCount * 10)} subs)`,
+    );
+  if (!bestDom)
+    console.warn(
+      `[niche-engine] detectAndAssignCompetitors: no Dominator candidate (need >${Math.round(userSubscriberCount * 10)} subs)`,
+    );
+
+  const toAssign: { candidate: CompetitorCandidate; tier: 1 | 2 | 3 }[] = [];
+  if (bestTier1) toAssign.push({ candidate: bestTier1, tier: 1 });
+  if (bestTier2) toAssign.push({ candidate: bestTier2, tier: 2 });
+  if (bestDom) toAssign.push({ candidate: bestDom, tier: 3 });
+
+  if (toAssign.length === 0) {
+    console.warn(
+      `[niche-engine] detectAndAssignCompetitors: no candidates in any tier for user ${userId}`,
+    );
+    return;
+  }
+
+  console.log(
+    `[niche-engine] detectAndAssignCompetitors: assigning ${toAssign.length} competitors — ${toAssign.map((x) => `Tier${x.tier}: ${x.candidate.channelName} (${x.candidate.subscriberCount} subs)`).join(', ')}`,
+  );
+
+  const results = await Promise.allSettled(
+    toAssign.map(({ candidate, tier }) => assignCompetitor(userId, candidate, tier)),
+  );
+
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      console.error(
+        `[niche-engine] detectAndAssignCompetitors: Tier ${toAssign[i].tier} assignment failed:`,
+        result.reason,
+      );
+    }
+  });
+
+  const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+  console.log(
+    `[niche-engine] detectAndAssignCompetitors: done — ${succeeded}/${toAssign.length} competitors assigned for user ${userId}`,
+  );
 }
 
 // TEST — remove before prod

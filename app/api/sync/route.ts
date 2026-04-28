@@ -17,6 +17,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { getUser, saveChannelSnapshot, saveVideoData } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
+import { detectAndAssignCompetitors } from '@/lib/niche-engine'
 import {
   getChannelOverview,
   getVideoPerformance,
@@ -180,6 +181,39 @@ export async function POST(request: Request) {
         },
       }).catch((err) => console.error('[sync] Sub-niche detection trigger failed:', err))
     }
+  }
+
+  // ── 6. Auto-detect competitors if none assigned yet ─────────────────────────
+  // Runs once per user lifetime (condition: 0 active auto-detected competitors).
+  // Never blocks or crashes the sync response — wrapped in its own try/catch.
+  try {
+    const supabase = createServiceClient()
+    const { count: existingAutoCount } = await supabase
+      .from('competitors')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_auto_detected', true)
+      .eq('is_active', true)
+
+    if (existingAutoCount === 0) {
+      console.log(`[sync] No auto-detected competitors — running detection for user ${userId}`)
+
+      const { data: latestSnapshot } = await supabase
+        .from('channel_snapshots')
+        .select('subscriber_count')
+        .eq('user_id', userId)
+        .not('subscriber_count', 'is', null)
+        .order('snapshot_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      const userSubscriberCount = latestSnapshot?.subscriber_count ?? 45000
+
+      await detectAndAssignCompetitors(userId, user.niche_id ?? null, userSubscriberCount)
+      console.log(`[sync] Competitor auto-detection completed for user ${userId}`)
+    }
+  } catch (err) {
+    console.error(`[sync] Competitor auto-detection failed for user ${userId}:`, err)
   }
 
   const elapsed = Date.now() - start
