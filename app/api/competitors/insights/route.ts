@@ -4,6 +4,16 @@ import { createServiceClient } from '@/lib/supabase'
 import { generateCompetitorInsights } from '@/lib/competitor-insights'
 import { getCachedInsights, saveCompetitorInsights } from '@/lib/db'
 
+type GapScoreRow = {
+  overall_score: number | null
+  views_gap_score: number | null
+  ctr_gap_score: number | null
+  watch_time_gap_score: number | null
+  upload_frequency_gap_score: number | null
+  estimated_revenue_gap: number | null
+  primary_bottleneck: string | null
+}
+
 export async function POST(request: Request) {
   try {
     const session = await auth()
@@ -25,13 +35,14 @@ export async function POST(request: Request) {
     }
 
     const supabase = createServiceClient()
+    const userId = session.user.id
 
     // Load competitor (must belong to this user)
     const { data: competitor } = await supabase
       .from('competitors')
       .select('*')
       .eq('id', competitor_id)
-      .eq('user_id', session.user.id)
+      .eq('user_id', userId)
       .single()
 
     if (!competitor) {
@@ -55,32 +66,101 @@ export async function POST(request: Request) {
       )
     }
 
-    // Load user snapshot + user info
-    const [{ data: userSnapshot }, { data: user }] = await Promise.all([
+    const nowMs = Date.now()
+    const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000)
+    const thirtyDaysAgoIso = thirtyDaysAgo.toISOString()
+    const thirtyDaysAgoDate = thirtyDaysAgo.toISOString().split('T')[0]
+    const sevenDaysAgo = new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+    // Load all data in parallel
+    const [
+      { data: userSnapshot },
+      { data: user },
+      { data: competitorVideos },
+      { data: bestVideos },
+      { data: worstVideos },
+      { data: gapScoreRaw },
+      { data: oldSnapshot },
+      { count: recentUserUploads },
+      { data: userVideos },
+    ] = await Promise.all([
       supabase
         .from('channel_snapshots')
         .select('*')
-        .eq('user_id', session.user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(1)
         .single(),
       supabase
         .from('users')
         .select('name, sub_niche')
-        .eq('id', session.user.id)
+        .eq('id', userId)
         .single(),
+      supabase
+        .from('competitor_videos')
+        .select('*')
+        .eq('competitor_id', competitor_id)
+        .order('published_at', { ascending: false })
+        .limit(20),
+      // Best performing videos — top 3 by view count
+      supabase
+        .from('videos')
+        .select('title, view_count, duration_seconds, published_at')
+        .eq('user_id', userId)
+        .not('view_count', 'is', null)
+        .order('view_count', { ascending: false })
+        .limit(3),
+      // Worst performing videos — bottom 3, only videos older than 7 days
+      supabase
+        .from('videos')
+        .select('title, view_count, duration_seconds, published_at')
+        .eq('user_id', userId)
+        .not('view_count', 'is', null)
+        .lt('published_at', sevenDaysAgo)
+        .order('view_count', { ascending: true })
+        .limit(3),
+      // Most recent gap score
+      supabase
+        .from('gap_scores')
+        .select(
+          'overall_score, views_gap_score, ctr_gap_score, ' +
+          'watch_time_gap_score, upload_frequency_gap_score, ' +
+          'estimated_revenue_gap, primary_bottleneck',
+        )
+        .eq('user_id', userId)
+        .order('calculated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      // Oldest valid snapshot from last 30 days for growth calculation
+      supabase
+        .from('channel_snapshots')
+        .select('subscriber_count, snapshot_date')
+        .eq('user_id', userId)
+        .not('subscriber_count', 'is', null)
+        .gte('snapshot_date', thirtyDaysAgoDate)
+        .order('snapshot_date', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      // User upload count (last 30 days)
+      supabase
+        .from('videos')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .gte('published_at', thirtyDaysAgoIso),
+      // User video durations
+      supabase
+        .from('videos')
+        .select('duration_seconds')
+        .eq('user_id', userId)
+        .not('duration_seconds', 'is', null)
+        .gt('duration_seconds', 0),
     ])
 
-    // Load competitor videos for metrics
-    const { data: competitorVideos } = await supabase
-      .from('competitor_videos')
-      .select('*')
-      .eq('competitor_id', competitor_id)
-      .order('published_at', { ascending: false })
-      .limit(20)
+    const gapScore = gapScoreRaw as GapScoreRow | null
 
     const videos = competitorVideos || []
 
+    // Competitor derived metrics
     const avgViews =
       videos.length > 0
         ? videos.reduce((sum: number, v: Record<string, unknown>) => sum + ((v.view_count as number) || 0), 0) /
@@ -95,21 +175,19 @@ export async function POST(request: Request) {
           ) / videos.length
         : 0
 
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
     const competitorUploadsPerMonth = videos.filter(
       (v: Record<string, unknown>) => new Date(v.published_at as string) > thirtyDaysAgo,
     ).length
-    const nowMs = Date.now()
-    const thirtyDaysAgoIsoForDays = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString()
-    const sixtyDaysAgoIsoForDays = new Date(nowMs - 60 * 24 * 60 * 60 * 1000).toISOString()
+
+    // Publishing days (30d → 60d → all fallback)
+    const sixtyDaysAgoIso = new Date(nowMs - 60 * 24 * 60 * 60 * 1000).toISOString()
 
     let videosForDays: Record<string, unknown>[] = videos.filter(
-      (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= thirtyDaysAgoIsoForDays,
+      (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= thirtyDaysAgoIso,
     )
     if (videosForDays.length < 3) {
       videosForDays = videos.filter(
-        (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= sixtyDaysAgoIsoForDays,
+        (v: Record<string, unknown>) => typeof v.published_at === 'string' && v.published_at >= sixtyDaysAgoIso,
       )
     }
     if (videosForDays.length < 3) {
@@ -130,6 +208,7 @@ export async function POST(request: Request) {
         ? [sortedDayCounts[0][0]]
         : []
 
+    // Top 5 competitor videos by views
     const topVideos = [...videos]
       .sort(
         (a: Record<string, unknown>, b: Record<string, unknown>) =>
@@ -141,27 +220,50 @@ export async function POST(request: Request) {
         views: (v.view_count as number) || 0,
       }))
 
-    const thirtyDaysAgoIso = thirtyDaysAgo.toISOString()
-    const { count: recentUserUploads } = await supabase
-      .from('videos')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', session.user.id)
-      .gte('published_at', thirtyDaysAgoIso)
-    const userUploadsPerMonth = recentUserUploads ?? 0
+    // Viral videos separated out
+    const viralVideos = videos
+      .filter((v: Record<string, unknown>) => v.is_viral === true)
+      .sort(
+        (a: Record<string, unknown>, b: Record<string, unknown>) =>
+          ((b.performance_vs_avg as number) ?? 0) - ((a.performance_vs_avg as number) ?? 0),
+      )
+      .slice(0, 3)
+      .map((v: Record<string, unknown>) => ({
+        title: (v.title as string) || 'Untitled',
+        view_count: (v.view_count as number) ?? null,
+        performance_vs_avg: (v.performance_vs_avg as number) ?? null,
+        published_at: (v.published_at as string) ?? null,
+      }))
 
-    const { data: userVideos } = await supabase
-      .from('videos')
-      .select('duration_seconds')
-      .eq('user_id', session.user.id)
-      .not('duration_seconds', 'is', null)
-      .gt('duration_seconds', 0)
-
+    // User avg video length
     const userAvgVideoLengthSeconds =
       userVideos && userVideos.length > 0
         ? Math.round(
             userVideos.reduce((sum, v) => sum + (v.duration_seconds ?? 0), 0) / userVideos.length,
           )
         : null
+
+    const userUploadsPerMonth = recentUserUploads ?? 0
+
+    // Subscriber growth trend
+    const currentSubs = userSnapshot?.subscriber_count ?? null
+    const oldSubs = oldSnapshot?.subscriber_count ?? null
+
+    const subscriberGrowth = (() => {
+      if (!currentSubs || !oldSubs || oldSubs === 0) return null
+      const netChange = currentSubs - oldSubs
+      const growthRate = (netChange / oldSubs) * 100
+      const trend: 'growing' | 'flat' | 'declining' =
+        growthRate > 2 ? 'growing' :
+        growthRate < -2 ? 'declining' : 'flat'
+      return {
+        current: currentSubs,
+        thirtyDaysAgo: oldSubs,
+        netChange,
+        growthRatePct: Math.round(growthRate * 10) / 10,
+        trend,
+      }
+    })()
 
     const insights = await generateCompetitorInsights(
       {
@@ -173,6 +275,28 @@ export async function POST(request: Request) {
         avg_video_length_seconds: userAvgVideoLengthSeconds,
         upload_frequency_per_month: userUploadsPerMonth,
         sub_niche: user?.sub_niche || 'General',
+        estimated_monthly_revenue: userSnapshot?.estimated_monthly_revenue ?? null,
+        rpm: userSnapshot?.rpm ?? null,
+        best_videos: (bestVideos ?? []).map(v => ({
+          title: v.title ?? '',
+          view_count: v.view_count ?? null,
+          duration_seconds: v.duration_seconds ?? null,
+        })),
+        worst_videos: (worstVideos ?? []).map(v => ({
+          title: v.title ?? '',
+          view_count: v.view_count ?? null,
+          duration_seconds: v.duration_seconds ?? null,
+        })),
+        gap_scores: gapScore ? {
+          overall: gapScore.overall_score,
+          views_gap: gapScore.views_gap_score,
+          ctr_gap: gapScore.ctr_gap_score,
+          watch_time_gap: gapScore.watch_time_gap_score,
+          upload_frequency_gap: gapScore.upload_frequency_gap_score,
+          estimated_revenue_gap_usd: gapScore.estimated_revenue_gap,
+          primary_bottleneck: gapScore.primary_bottleneck,
+        } : null,
+        subscriber_growth: subscriberGrowth,
       },
       {
         channel_name: competitor.channel_name || 'Competitor',
@@ -183,6 +307,7 @@ export async function POST(request: Request) {
         sub_niche: competitor.sub_niche || 'General',
         top_videos: topVideos,
         publishing_days: publishingDays,
+        viral_videos: viralVideos,
       },
     )
 
