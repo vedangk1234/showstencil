@@ -49,11 +49,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Competitor not found' }, { status: 404 })
     }
 
+    // If video_count column is null on the row, fall back to counting competitor_videos directly
+    let effectiveVideoCount = competitor.video_count
+    if (effectiveVideoCount == null) {
+      const { count } = await supabase
+        .from('competitor_videos')
+        .select('*', { count: 'exact', head: true })
+        .eq('competitor_id', competitor_id)
+      effectiveVideoCount = count ?? 0
+    }
+
+    console.log('[insights] Data completeness check:', {
+      avg_views_per_video: competitor.avg_views_per_video,
+      subscriber_count: competitor.subscriber_count,
+      video_count: competitor.video_count,
+      effective_video_count: effectiveVideoCount,
+    })
+
     // Require enough data to generate meaningful insights
     const hasEnoughData =
       competitor.avg_views_per_video != null &&
       competitor.subscriber_count != null &&
-      competitor.video_count != null
+      effectiveVideoCount > 0
 
     if (!hasEnoughData) {
       return NextResponse.json(
