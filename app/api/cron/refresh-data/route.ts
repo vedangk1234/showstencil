@@ -3,12 +3,14 @@
  * GET /api/cron/refresh-data
  *
  * Runs every day at 3:00 AM UTC (schedule: "0 3 * * *").
- * For each active user:
- *   1. Syncs their own channel data via POST /api/sync
- *   2. Fetches fresh competitor videos from YouTube
- *   3. Computes metrics from those videos and writes them to the competitors row
- *   4. Writes a daily competitor_snapshots row for charting
- * After all users: wipes the insights cache so next view generates fresh insights.
+ * For each active user runs TWO independent blocks:
+ *
+ * BLOCK 1 — User's own channel sync (POST /api/sync, requires OAuth)
+ *   Failure here does NOT affect Block 2.
+ *
+ * BLOCK 2 — Competitor data sync (YouTube DATA API, public, no OAuth)
+ *   Always runs regardless of Block 1 outcome.
+ *   Each competitor has its own try/catch — one failure never blocks others.
  *
  * Security: requires Authorization: Bearer <CRON_SECRET> header.
  */
@@ -198,8 +200,9 @@ export async function GET(request: Request) {
   let totalSnapshotsWritten = 0
 
   for (const user of userList) {
+    // ── BLOCK 1: User's own channel sync ──────────────────────────────────────
+    // Requires user OAuth token. Failure here is logged but NEVER stops Block 2.
     try {
-      // 1. Sync user's own channel data
       const res = await fetch(`${appUrl}/api/sync`, {
         method: 'POST',
         headers: {
@@ -210,84 +213,118 @@ export async function GET(request: Request) {
 
       if (!res.ok) {
         const body = await res.text()
-        throw new Error(`HTTP ${res.status}: ${body}`)
+        console.error(
+          `[cron/refresh-data] User channel sync failed for ${user.id}: HTTP ${res.status} — ${body}`
+        )
+        failed++
+        // DO NOT throw — fall through to Block 2
+      } else {
+        console.log(`[cron/refresh-data] User ${user.id}: channel sync succeeded`)
+        succeeded++
       }
+    } catch (err) {
+      console.error(`[cron/refresh-data] User channel sync error for ${user.id}:`, err)
+      failed++
+      // DO NOT continue — fall through to Block 2
+    }
 
-      // 2. Sync competitor videos, metrics, and snapshots
-      const { data: userCompetitors } = await supabase
+    // ── BLOCK 2: Competitor data sync ─────────────────────────────────────────
+    // Uses YouTube DATA API (public, no OAuth). Always runs regardless of Block 1.
+    // Each competitor has its own try/catch — one failure never blocks others.
+    try {
+      const { data: userCompetitors, error: compErr } = await supabase
         .from('competitors')
         .select('id, youtube_channel_id, channel_name, video_count')
         .eq('user_id', user.id)
         .eq('is_active', true)
 
+      if (compErr) throw compErr
+
       let competitorCount = 0
+
       for (const comp of userCompetitors ?? []) {
-        if (!comp.youtube_channel_id) continue
+        try {
+          // Skip channels with invalid YouTube IDs — real IDs start with 'UC' and are 24 chars
+          if (
+            !comp.youtube_channel_id ||
+            !comp.youtube_channel_id.startsWith('UC') ||
+            comp.youtube_channel_id.length !== 24
+          ) {
+            console.log(
+              `[cron/refresh-data] Skipping channel with invalid ID: ${comp.channel_name} (${comp.youtube_channel_id})`
+            )
+            continue
+          }
 
-        const syncResult = await syncCompetitorVideos(supabase, comp.id, comp.youtube_channel_id)
+          const syncResult = await syncCompetitorVideos(supabase, comp.id, comp.youtube_channel_id)
 
-        if (!syncResult.success) {
-          console.warn(`[cron/refresh-data]   ${comp.channel_name}: sync failed — skipping snapshot`)
-          continue
-        }
+          if (!syncResult.success) {
+            console.warn(`[cron/refresh-data]   ${comp.channel_name}: sync failed — skipping snapshot`)
+            continue
+          }
 
-        // 3. Compute metrics from videos published in last 30 days
-        const recentVideos = await getRecentCompetitorVideos(comp.id, 30)
-        const metrics = calculateCompetitorMetrics(recentVideos, comp.video_count ?? null)
+          // Compute metrics from videos published in last 30 days
+          const recentVideos = await getRecentCompetitorVideos(comp.id, 30)
+          const metrics = calculateCompetitorMetrics(recentVideos, comp.video_count ?? null)
 
-        // 4. Update metric columns on the competitors row
-        await updateCompetitorMetrics(comp.id, {
-          ...(syncResult.subscriberCount != null ? { subscriber_count: syncResult.subscriberCount } : {}),
-          ...(syncResult.totalViews != null ? { total_views: syncResult.totalViews } : {}),
-          video_count: metrics.video_count,
-          avg_views_per_video: metrics.avg_views_per_video,
-          avg_video_length_seconds: metrics.avg_video_length_seconds,
-          upload_frequency_30d: metrics.upload_frequency_30d,
-          last_synced_at: new Date().toISOString(),
-        })
-
-        // 5. Write today's competitor_snapshots row (skip if no useful data)
-        if (syncResult.subscriberCount != null || metrics.avg_views_per_video > 0) {
-          await saveCompetitorSnapshot(comp.id, {
+          // Update metric columns on the competitors row
+          await updateCompetitorMetrics(comp.id, {
             ...(syncResult.subscriberCount != null ? { subscriber_count: syncResult.subscriberCount } : {}),
             ...(syncResult.totalViews != null ? { total_views: syncResult.totalViews } : {}),
             video_count: metrics.video_count,
             avg_views_per_video: metrics.avg_views_per_video,
             avg_video_length_seconds: metrics.avg_video_length_seconds,
             upload_frequency_30d: metrics.upload_frequency_30d,
-            velocity_score_avg: metrics.velocity_score_avg,
+            last_synced_at: new Date().toISOString(),
           })
-          totalSnapshotsWritten++
-        }
 
-        console.log(`[cron/refresh-data]   ${comp.channel_name}: ${syncResult.count} videos, snapshot written`)
-        competitorCount++
+          // Write today's competitor_snapshots row — only if we have a real subscriber count
+          if (syncResult.subscriberCount != null) {
+            await saveCompetitorSnapshot(comp.id, {
+              subscriber_count: syncResult.subscriberCount,
+              ...(syncResult.totalViews != null ? { total_views: syncResult.totalViews } : {}),
+              video_count: metrics.video_count,
+              avg_views_per_video: metrics.avg_views_per_video,
+              avg_video_length_seconds: metrics.avg_video_length_seconds,
+              upload_frequency_30d: metrics.upload_frequency_30d,
+              velocity_score_avg: metrics.velocity_score_avg,
+            })
+            totalSnapshotsWritten++
+            console.log(`[cron/refresh-data]   ${comp.channel_name}: ${syncResult.count} videos, snapshot written`)
+          } else {
+            console.warn(`[cron/refresh-data]   ${comp.channel_name}: no subscriber_count — snapshot skipped`)
+          }
+
+          competitorCount++
+        } catch (compErr) {
+          console.error(
+            `[cron/refresh-data] Failed to sync competitor ${comp.channel_name} (${comp.id}):`,
+            compErr
+          )
+          // Continue to next competitor — one failure never blocks others
+        }
       }
 
-      succeeded++
-      console.log(`[cron/refresh-data] User ${user.id}: refreshed ${competitorCount} competitors`)
-    } catch (err) {
-      failed++
-      console.error(`[cron/refresh-data] Failed for user ${user.id}:`, err)
+      console.log(
+        `[cron/refresh-data] User ${user.id}: synced ${competitorCount} competitors`
+      )
+
+      // Wipe per-user insights cache after competitor data is refreshed
+      await supabase
+        .from('competitors')
+        .update({ insights: null, insights_generated_at: null })
+        .eq('user_id', user.id)
+    } catch (blockErr) {
+      console.error(
+        `[cron/refresh-data] Competitor sync block failed for user ${user.id}:`,
+        blockErr
+      )
     }
 
     // Throttle between users to avoid rate limits
     if (userList.indexOf(user) < userList.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 1000))
     }
-  }
-
-  // ── Wipe insights cache for all competitors ────────────────────────────────
-  // Data has changed — next user view of InsightsTab will regenerate against fresh data.
-  const { error: wipeError } = await supabase
-    .from('competitors')
-    .update({ insights: null, insights_generated_at: null })
-    .not('id', 'is', null)
-
-  if (wipeError) {
-    console.error('[cron/refresh-data] Failed to wipe insights cache:', wipeError.message)
-  } else {
-    console.log('[cron/refresh-data] Wiped insights cache for all competitors')
   }
 
   const elapsed = Date.now() - startMs
