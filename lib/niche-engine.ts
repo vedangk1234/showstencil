@@ -58,20 +58,20 @@ const NICHE_DISPLAY_NAMES: Record<ValidNicheId, string> = {
   vlog:          'Vlog',
 };
 
-// Search queries calibrated to find relevant channels, not just the niche keyword.
+// Search queries calibrated to find US-based relevant channels.
 const NICHE_SEARCH_QUERIES: Record<ValidNicheId, string> = {
-  finance:       'personal finance investing money tips',
-  tech:          'technology gadgets review channel',
-  gaming:        'gaming gameplay commentary',
-  cooking:       'cooking recipes food channel',
-  fitness:       'fitness workout exercise channel',
-  beauty:        'beauty makeup tutorial channel',
-  travel:        'travel vlog destinations',
-  education:     'educational explainer tutorial channel',
-  business:      'business entrepreneurship startup channel',
-  entertainment: 'entertainment comedy channel',
-  diy:           'diy how to home improvement',
-  vlog:          'daily vlog lifestyle channel',
+  finance:       'personal finance investing money USA',
+  tech:          'technology software programming USA',
+  gaming:        'gaming youtube USA',
+  cooking:       'cooking recipes food USA',
+  fitness:       'fitness workout health USA',
+  beauty:        'beauty makeup skincare USA',
+  travel:        'travel vlog USA',
+  education:     'education learning USA',
+  business:      'business entrepreneur USA',
+  entertainment: 'entertainment youtube USA',
+  diy:           'DIY home improvement USA',
+  vlog:          'vlog daily life USA',
 };
 
 // ---------------------------------------------------------------------------
@@ -400,9 +400,28 @@ export async function saveDetectedNiche(userId: string, nicheId: string): Promis
 // Function 4 — searchAllChannelCandidates (internal)
 // ---------------------------------------------------------------------------
 
+// Substrings that indicate a non-US channel when found in title or description.
+const NON_US_INDICATORS = [
+  'australia', 'australian', 'uk ', 'united kingdom', 'british',
+  'canada', 'canadian', 'india', 'indian', 'nz ', 'new zealand',
+  'sgd', 'aud ', 'gbp ', 'inr ', 'cad ',
+];
+
+function isLikelyUSChannel(item: {
+  snippet?: { title?: string; description?: string };
+}): boolean {
+  const text = [
+    item.snippet?.title ?? '',
+    item.snippet?.description ?? '',
+  ].join(' ').toLowerCase();
+  return !NON_US_INDICATORS.some((indicator) => text.includes(indicator));
+}
+
 /**
  * Searches YouTube for channels matching the query without sub count filtering.
  * Returns all results so detectAndAssignCompetitors can classify them into tiers.
+ * US region and language filters are applied; falls back to unfiltered if no US
+ * channels survive the geography check.
  *
  * @quota 101 units (100 search.list + 1 channels.list)
  */
@@ -416,6 +435,7 @@ async function searchAllChannelCandidates(
   searchUrl.searchParams.set('type', 'channel');
   searchUrl.searchParams.set('q', query);
   searchUrl.searchParams.set('maxResults', '50');
+  searchUrl.searchParams.set('regionCode', 'US');
   searchUrl.searchParams.set('relevanceLanguage', 'en');
 
   let channelIds: string[] = [];
@@ -449,20 +469,38 @@ async function searchAllChannelCandidates(
       return [];
     }
     const channelsData = await channelsRes.json();
-    const candidates: CompetitorCandidate[] = [];
 
-    for (const item of channelsData.items ?? []) {
-      if (item.id === excludeChannelId) continue;
-      const subCount = parseInt(item.statistics?.subscriberCount ?? '0', 10);
-      candidates.push({
-        channelId: item.id,
-        channelName: item.snippet?.title ?? '',
-        subscriberCount: subCount,
-        thumbnailUrl: item.snippet?.thumbnails?.default?.url ?? '',
-      });
+    type RawChannelItem = {
+      id: string;
+      snippet?: { title?: string; description?: string; thumbnails?: { default?: { url?: string } } };
+      statistics?: { subscriberCount?: string };
+    };
+    const allItems: RawChannelItem[] = (channelsData.items ?? []).filter(
+      (item: RawChannelItem) => item.id !== excludeChannelId,
+    );
+
+    const usItems = allItems.filter(isLikelyUSChannel);
+
+    // Fall back to all items if geography filter removed everything
+    const selectedItems = usItems.length > 0 ? usItems : allItems;
+    if (usItems.length === 0 && allItems.length > 0) {
+      console.warn(
+        `[niche-engine] searchAllChannelCandidates: US filter removed all ${allItems.length} candidates — falling back to unfiltered`,
+      );
+    } else {
+      console.log(
+        `[niche-engine] searchAllChannelCandidates: ${usItems.length}/${allItems.length} candidates passed US filter`,
+      );
     }
 
-    console.log(`[niche-engine] searchAllChannelCandidates: found ${candidates.length} candidates`);
+    const candidates: CompetitorCandidate[] = selectedItems.map((item) => ({
+      channelId: item.id,
+      channelName: item.snippet?.title ?? '',
+      subscriberCount: parseInt(item.statistics?.subscriberCount ?? '0', 10),
+      thumbnailUrl: item.snippet?.thumbnails?.default?.url ?? '',
+    }));
+
+    console.log(`[niche-engine] searchAllChannelCandidates: returning ${candidates.length} candidates`);
     return candidates;
   } catch (err) {
     console.error('[niche-engine] searchAllChannelCandidates: channels.list error:', err);
