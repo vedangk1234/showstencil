@@ -35,11 +35,11 @@ export default async function IdeasPage() {
   const userId = session.user.id
   const supabase = createServiceClient()
 
-  // Load plan info and recent ideas in parallel
+  // Load plan info, niche, and recent ideas in parallel
   const [userRow, ideas, ideaLimit] = await Promise.all([
     supabase
       .from('users')
-      .select('subscription_status, subscription_plan, trial_ends_at')
+      .select('subscription_status, subscription_plan, trial_ends_at, niche_id')
       .eq('id', userId)
       .single()
       .then((r) => r.data),
@@ -48,6 +48,7 @@ export default async function IdeasPage() {
   ])
 
   const plan = resolvePlan(userRow)
+  const nicheId = userRow?.niche_id ?? 'finance'
 
   // Is this batch "fresh" (generated within the last 7 days)?
   const latestGeneratedAt = ideas.length > 0 ? new Date(ideas[0].generated_at) : null
@@ -57,6 +58,9 @@ export default async function IdeasPage() {
   // Pass raw generated_at to client — lock state is computed there
   const mostRecentGeneratedAt = latestGeneratedAt?.toISOString() ?? null
 
+  // Seed for deterministic image shuffle — stable across refreshes, changes on regeneration
+  const imageSeed = mostRecentGeneratedAt ? new Date(mostRecentGeneratedAt).getTime() : 1
+
   return (
     <IdeasClient
       initialIdeas={ideas}
@@ -64,6 +68,8 @@ export default async function IdeasPage() {
       plan={plan}
       mostRecentGeneratedAt={mostRecentGeneratedAt}
       ideaLimit={ideaLimit}
+      nicheId={nicheId}
+      imageSeed={imageSeed}
     />
   )
 }
