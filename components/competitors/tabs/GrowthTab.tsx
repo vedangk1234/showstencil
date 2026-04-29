@@ -101,7 +101,7 @@ export function GrowthTab({ userSnapshots, competitor, competitorSnapshots }: Gr
           padding: '20px',
         }}
       >
-        <div style={{ height: 300 }}>
+        <div style={{ height: 300, width: '100%' }}>
           {mounted && (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData}>

@@ -30,6 +30,7 @@ export function InsightsTab({ competitor }: InsightsTabProps) {
   const [retryable, setRetryable] = useState(false)
   const [cached, setCached] = useState(false)
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
+  const [autoRetried, setAutoRetried] = useState(false)
 
   async function fetchInsights(forceRegenerate = false) {
     setLoading(true)
@@ -42,10 +43,11 @@ export function InsightsTab({ competitor }: InsightsTabProps) {
         body: JSON.stringify({ competitor_id: competitor.id, force_regenerate: forceRegenerate }),
       })
 
-      if (res.status === 422) {
+      if (res.status === 422 || res.status === 500) {
         const data = await res.json()
+        const isRetryable = data.retryable ?? res.status === 422
         setError(data.error || 'Not enough data yet.')
-        setRetryable(true)
+        setRetryable(isRetryable)
         return
       }
 
@@ -74,6 +76,17 @@ export function InsightsTab({ competitor }: InsightsTabProps) {
     fetchInsights()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [competitor.id])
+
+  // Auto-retry once after 5s when retryable (e.g. data still being fetched after track, or Claude generation failed)
+  useEffect(() => {
+    if (!retryable || autoRetried) return
+    const timer = setTimeout(() => {
+      setAutoRetried(true)
+      fetchInsights()
+    }, 5000)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryable, autoRetried])
 
   if (loading) {
     return (

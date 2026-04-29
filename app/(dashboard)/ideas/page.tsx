@@ -54,28 +54,15 @@ export default async function IdeasPage() {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
   const isFresh = latestGeneratedAt !== null && latestGeneratedAt > sevenDaysAgo
 
-  // Compute regenerateAvailableAt
-  let regenerateAvailableAt: string | null = null
-  if (isFresh && latestGeneratedAt) {
-    if (plan === 'starter') {
-      const now = new Date()
-      const nextYear = now.getUTCMonth() === 11 ? now.getUTCFullYear() + 1 : now.getUTCFullYear()
-      const nextMonth = (now.getUTCMonth() + 1) % 12
-      regenerateAvailableAt = new Date(Date.UTC(nextYear, nextMonth, 1)).toISOString()
-    } else if (plan === 'pro') {
-      const sevenDaysFromGenerated = new Date(latestGeneratedAt.getTime() + 7 * 24 * 60 * 60 * 1000)
-      if (sevenDaysFromGenerated > new Date()) {
-        regenerateAvailableAt = sevenDaysFromGenerated.toISOString()
-      }
-    }
-  }
+  // Pass raw generated_at to client — lock state is computed there
+  const mostRecentGeneratedAt = latestGeneratedAt?.toISOString() ?? null
 
   return (
     <IdeasClient
       initialIdeas={ideas}
       isFresh={isFresh}
       plan={plan}
-      regenerateAvailableAt={regenerateAvailableAt}
+      mostRecentGeneratedAt={mostRecentGeneratedAt}
       ideaLimit={ideaLimit}
     />
   )

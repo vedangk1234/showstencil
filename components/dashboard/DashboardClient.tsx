@@ -677,7 +677,7 @@ function Col({
   children: React.ReactNode
 }) {
   return (
-    <div className="p-[20px_22px] border-r border-stencil-line">
+    <div className="p-[20px_22px] border-r border-stencil-line min-w-0">
       <div className="flex items-center justify-between mb-4">
         <Eyebrow strong>
           {title}
