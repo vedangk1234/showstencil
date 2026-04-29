@@ -141,7 +141,7 @@ export default function SubscriberGrowthChart({ userSnapshots, competitorData, u
                 name={competitor.channel_name ?? competitor.youtube_channel_id}
                 stroke={entityColor(competitor)}
                 strokeWidth={1.5}
-                dot={false}
+                dot={{ r: 3, fill: entityColor(competitor), strokeWidth: 0 }}
                 isAnimationActive={false}
                 connectNulls
               />

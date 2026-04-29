@@ -22,6 +22,7 @@ import type {
   Digest,
   Trend,
   CompetitorSnapshot,
+  Idea,
 } from '@/types'
 
 interface Props {
@@ -33,6 +34,7 @@ interface Props {
   latestDigest: Digest | null
   latestTrend: Trend | null
   competitorSnapshots: { competitorId: string; snapshots: CompetitorSnapshot[] }[]
+  topIdea: Idea | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -119,7 +121,7 @@ function PulseDot() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardClient({
-  user, snapshots, gapScore, competitors, recentDigests, latestDigest, competitorSnapshots,
+  user, snapshots, gapScore, competitors, recentDigests, competitorSnapshots, topIdea,
 }: Props) {
   const { isSyncing } = useSyncStatus()
   const router = useRouter()
@@ -542,34 +544,34 @@ export default function DashboardClient({
           )}
         </Col>
 
-        <Col title="Top idea this week" sub="from latest digest">
-          {(latestDigest?.video_ideas ?? []).length > 0 ? (
+        <Col title="Top idea this week" sub="highest opportunity score">
+          {topIdea ? (
             <>
-              {(latestDigest?.video_ideas ?? []).slice(0, 1).map((idea, i) => (
-                <div key={i} className="grid grid-cols-[24px_1fr_50px] gap-3 items-start py-[11px] border-b border-dashed border-stencil-line">
-                  <div className="font-serif italic text-[22px] text-stencil-ink3 leading-none">
-                    {String(i + 1).padStart(2, '0')}
+              <div className="grid grid-cols-[24px_1fr_50px] gap-3 items-start py-[11px] border-b border-dashed border-stencil-line">
+                <div className="font-serif italic text-[22px] text-stencil-ink3 leading-none">
+                  01
+                </div>
+                <div>
+                  <div className="text-[13px] leading-[1.35] tracking-[-0.005em]">
+                    &ldquo;{topIdea.title}&rdquo;
                   </div>
-                  <div>
-                    <div className="text-[13px] leading-[1.35] tracking-[-0.005em]">
-                      &ldquo;{idea.title}&rdquo;
+                  {topIdea.why_now && (
+                    <div className="font-mono text-[10.5px] text-stencil-ink3 mt-[3px] italic">
+                      {topIdea.why_now.slice(0, 80)}
                     </div>
-                    <div className="font-mono text-[10.5px] text-stencil-ink3 mt-[3px] flex gap-2">
-                      {idea.suggestedLength && (
-                        <span className="px-[5px] py-[1px] border border-stencil-line">
-                          {idea.suggestedLength}
-                        </span>
-                      )}
-                      {idea.thumbnailApproach && (
-                        <span>{idea.thumbnailApproach.slice(0, 24)}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="font-mono text-[11.5px] text-stencil-accent text-right font-medium">
-                    {idea.opportunityScore}
+                  )}
+                  <div className="font-mono text-[10.5px] text-stencil-ink4 mt-[4px] flex gap-2">
+                    {topIdea.suggested_duration_min != null && topIdea.suggested_duration_max != null && (
+                      <span className="px-[5px] py-[1px] border border-stencil-line">
+                        {topIdea.suggested_duration_min}–{topIdea.suggested_duration_max} min
+                      </span>
+                    )}
                   </div>
                 </div>
-              ))}
+                <div className="font-mono text-[11.5px] text-stencil-accent text-right font-medium">
+                  {topIdea.opportunity_score}
+                </div>
+              </div>
               <Link
                 href="/ideas"
                 className="font-mono text-[11px] text-stencil-ink3 hover:text-stencil-ink mt-3 pt-3 border-t border-dashed border-stencil-line block no-underline"
@@ -578,7 +580,10 @@ export default function DashboardClient({
               </Link>
             </>
           ) : (
-            <Empty>No ideas yet. Generate a digest to populate this.</Empty>
+            <div className="flex flex-col items-center gap-3 py-5">
+              <span className="font-mono text-[11.5px] text-stencil-ink3">No ideas generated yet.</span>
+              <Btn href="/ideas">Go to Ideas</Btn>
+            </div>
           )}
         </Col>
       </div>

@@ -1,38 +1,26 @@
-import { createServiceClient } from '../lib/supabase';
+import { createServiceClient } from '../lib/supabase'
+import { syncUserChannel } from '../lib/sync-logic'
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
-const cronSecret = process.env.CRON_SECRET ?? '';
-
-const supabase = createServiceClient();
+const supabase = createServiceClient()
 
 async function run() {
   const { data: user } = await supabase
     .from('users')
     .select('id')
     .eq('email', 'vedangk2912@gmail.com')
-    .single();
+    .single()
 
-  if (!user) { console.error('User not found'); process.exit(1); }
+  if (!user) { console.error('User not found'); process.exit(1) }
 
-  console.log('Calling /api/sync for user:', user.id);
-  console.log('App URL:', appUrl);
+  console.log('Starting sync for user:', user.id)
+  const result = await syncUserChannel(user.id)
 
-  const res = await fetch(`${appUrl}/api/sync`, {
-    method: 'POST',
-    headers: {
-      'x-cron-user-id': user.id,
-      'x-cron-secret': cronSecret,
-    },
-  });
+  console.log('Result:', JSON.stringify(result, null, 2))
 
-  console.log('Response status:', res.status);
-  const body = await res.text();
-  console.log('Response body:', body);
-
-  process.exit(0);
+  process.exit(result.success ? 0 : 1)
 }
 
 run().catch((err) => {
-  console.error('Script failed:', (err as Error).message);
-  process.exit(1);
-});
+  console.error('Script failed:', (err as Error).message)
+  process.exit(1)
+})

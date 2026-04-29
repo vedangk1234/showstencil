@@ -194,41 +194,10 @@ export async function GET(request: Request) {
   const userList = users ?? []
   console.log(`[cron/refresh-data] Found ${userList.length} active users`)
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  let succeeded = 0
-  let failed = 0
   let totalSnapshotsWritten = 0
 
   for (const user of userList) {
-    // ── BLOCK 1: User's own channel sync ──────────────────────────────────────
-    // Requires user OAuth token. Failure here is logged but NEVER stops Block 2.
-    try {
-      const res = await fetch(`${appUrl}/api/sync`, {
-        method: 'POST',
-        headers: {
-          'x-cron-user-id': user.id,
-          'x-cron-secret': process.env.CRON_SECRET ?? '',
-        },
-      })
-
-      if (!res.ok) {
-        const body = await res.text()
-        console.error(
-          `[cron/refresh-data] User channel sync failed for ${user.id}: HTTP ${res.status} — ${body}`
-        )
-        failed++
-        // DO NOT throw — fall through to Block 2
-      } else {
-        console.log(`[cron/refresh-data] User ${user.id}: channel sync succeeded`)
-        succeeded++
-      }
-    } catch (err) {
-      console.error(`[cron/refresh-data] User channel sync error for ${user.id}:`, err)
-      failed++
-      // DO NOT continue — fall through to Block 2
-    }
-
-    // ── BLOCK 2: Competitor data sync ─────────────────────────────────────────
+    // ── Competitor data sync ──────────────────────────────────────────────────
     // Uses YouTube DATA API (public, no OAuth). Always runs regardless of Block 1.
     // Each competitor has its own try/catch — one failure never blocks others.
     try {
@@ -323,12 +292,10 @@ export async function GET(request: Request) {
   }
 
   const elapsed = Date.now() - startMs
-  console.log(`[cron/refresh-data] Completed in ${elapsed}ms — succeeded: ${succeeded}, failed: ${failed}, snapshots: ${totalSnapshotsWritten}`)
+  console.log(`[cron/refresh-data] Completed in ${elapsed}ms — snapshots: ${totalSnapshotsWritten}`)
 
   return NextResponse.json({
     processed: userList.length,
-    succeeded,
-    failed,
     snapshots_written: totalSnapshotsWritten,
     elapsed_ms: elapsed,
   })

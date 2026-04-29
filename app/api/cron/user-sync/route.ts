@@ -1,0 +1,87 @@
+/**
+ * app/api/cron/user-sync/route.ts
+ * GET /api/cron/user-sync
+ *
+ * Runs every day at 3:00 AM UTC (schedule: "0 3 * * *").
+ * Refreshes each active user's own YouTube Analytics data by calling
+ * syncUserChannel() from lib/sync-logic.ts directly — no self-HTTP call.
+ *
+ * Security: requires Authorization: Bearer <CRON_SECRET> header.
+ *
+ * Performance budget: ~3-5s per user (5 parallel YouTube Analytics calls).
+ * At ~2 users we approach the 10s Vercel Hobby function timeout.
+ * Beyond 2 users, upgrade to Vercel Pro (60s timeout) or batch users across
+ * multiple cron invocations.
+ */
+
+import { NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase'
+import { syncUserChannel } from '@/lib/sync-logic'
+
+export async function GET(request: Request) {
+  const startMs = Date.now()
+
+  // ── Auth check ─────────────────────────────────────────────────────────────
+  const authHeader = request.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const supabase = createServiceClient()
+  console.log('[cron/user-sync] Starting daily user analytics sync')
+
+  // ── Load eligible users ────────────────────────────────────────────────────
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('id, youtube_access_token, youtube_refresh_token, token_expires_at')
+    .eq('onboarding_completed', true)
+    .in('subscription_status', ['on_trial', 'active', 'past_due'])
+    .not('youtube_access_token', 'is', null)
+
+  if (error) {
+    console.error('[cron/user-sync] Failed to load users:', error.message)
+    return NextResponse.json({ error: 'Failed to load users' }, { status: 500 })
+  }
+
+  const userList = users ?? []
+  console.log(`[cron/user-sync] Found ${userList.length} users to sync`)
+
+  // ── Sync all users in parallel ─────────────────────────────────────────────
+  const results = await Promise.allSettled(
+    userList.map(async (user) => {
+      try {
+        const result = await syncUserChannel(user.id)
+        if (result.success) {
+          console.log(
+            `[cron/user-sync] User ${user.id}: snapshot=${result.channelSnapshot}, videos=${result.videosSynced}`,
+          )
+        } else {
+          console.error(`[cron/user-sync] User ${user.id}: failed — ${result.error}`)
+        }
+        return result
+      } catch (err) {
+        console.error(`[cron/user-sync] User ${user.id}: unexpected error —`, err)
+        throw err
+      }
+    }),
+  )
+
+  const succeeded = results.filter(
+    (r) => r.status === 'fulfilled' && r.value.success,
+  ).length
+  const failed = results.filter(
+    (r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success),
+  ).length
+
+  const elapsed = Date.now() - startMs
+  console.log(
+    `[cron/user-sync] Completed in ${elapsed}ms — succeeded: ${succeeded}, failed: ${failed}`,
+  )
+
+  return NextResponse.json({
+    processed: userList.length,
+    succeeded,
+    failed,
+    elapsed_ms: elapsed,
+  })
+}

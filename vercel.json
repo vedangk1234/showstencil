@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/dominator-refresh",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/user-sync",
+      "schedule": "0 3 * * *"
     }
   ]
 }
