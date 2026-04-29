@@ -2,27 +2,27 @@
   "crons": [
     {
       "path": "/api/cron/weekly-digest",
-      "schedule": "0 9 * * 1"
+      "schedule": "29 18 * * *"
     },
     {
       "path": "/api/cron/refresh-data",
-      "schedule": "0 3 * * *"
+      "schedule": "29 18 * * *"
     },
     {
       "path": "/api/cron/trend-detection",
-      "schedule": "0 6 * * *"
+      "schedule": "29 18 * * *"
     },
     {
       "path": "/api/cron/cache-cleanup",
-      "schedule": "0 2 * * *"
+      "schedule": "29 18 * * *"
     },
     {
       "path": "/api/cron/sub-niche-detection",
-      "schedule": "0 5 * * *"
+      "schedule": "29 18 * * *"
     },
     {
       "path": "/api/cron/dominator-refresh",
-      "schedule": "0 4 * * *"
+      "schedule": "29 18 * * *"
     }
   ]
 }
