@@ -18,7 +18,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { saveCompetitorSnapshot, updateCompetitorMetrics, getRecentCompetitorVideos } from '@/lib/db'
-import { detectSubNiche } from '@/lib/sub-niche-detector'
 
 function parseDuration(duration: string): number {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
@@ -153,7 +152,7 @@ async function syncCompetitorVideos(
 
     const { error } = await supabase
       .from('competitor_videos')
-      .upsert(videos, { onConflict: 'youtube_video_id' })
+      .upsert(videos, { onConflict: 'competitor_id,youtube_video_id' })
 
     if (error) {
       console.error(`[syncCompetitorVideos] Upsert error for ${competitorId}:`, error.message)
@@ -241,10 +240,8 @@ export async function GET(request: Request) {
 
       if (compErr) throw compErr
 
-      let competitorCount = 0
-
-      for (const comp of userCompetitors ?? []) {
-        try {
+      const competitorResults = await Promise.allSettled(
+        (userCompetitors ?? []).map(async (comp) => {
           // Skip channels with invalid YouTube IDs — real IDs start with 'UC' and are 24 chars
           if (
             !comp.youtube_channel_id ||
@@ -254,14 +251,14 @@ export async function GET(request: Request) {
             console.log(
               `[cron/refresh-data] Skipping channel with invalid ID: ${comp.channel_name} (${comp.youtube_channel_id})`
             )
-            continue
+            return
           }
 
           const syncResult = await syncCompetitorVideos(supabase, comp.id, comp.youtube_channel_id)
 
           if (!syncResult.success) {
             console.warn(`[cron/refresh-data]   ${comp.channel_name}: sync failed — skipping snapshot`)
-            continue
+            return
           }
 
           // Compute metrics from videos published in last 30 days
@@ -295,38 +292,10 @@ export async function GET(request: Request) {
           } else {
             console.warn(`[cron/refresh-data]   ${comp.channel_name}: no subscriber_count — snapshot skipped`)
           }
+        })
+      )
 
-          // Run sub-niche detection if not yet set and we have enough videos
-          if (!comp.sub_niche && recentVideos.length >= 3) {
-            try {
-              const videoTitles = recentVideos.map((v) => ({ title: v.title ?? '', description: null }))
-              const subNicheResult = await detectSubNiche(videoTitles)
-              if (subNicheResult && subNicheResult.sub_niche !== 'General') {
-                await supabase
-                  .from('competitors')
-                  .update({
-                    sub_niche: subNicheResult.sub_niche,
-                    sub_niche_keywords: subNicheResult.keywords,
-                  })
-                  .eq('id', comp.id)
-                console.log(
-                  `[cron/refresh-data]   ${comp.channel_name}: sub-niche detected — ${subNicheResult.sub_niche}`,
-                )
-              }
-            } catch {
-              // Never block cron because of sub-niche failure
-            }
-          }
-
-          competitorCount++
-        } catch (compErr) {
-          console.error(
-            `[cron/refresh-data] Failed to sync competitor ${comp.channel_name} (${comp.id}):`,
-            compErr
-          )
-          // Continue to next competitor — one failure never blocks others
-        }
-      }
+      const competitorCount = competitorResults.filter((r) => r.status === 'fulfilled').length
 
       console.log(
         `[cron/refresh-data] User ${user.id}: synced ${competitorCount} competitors`
