@@ -31,7 +31,6 @@
   ],
   "functions": {
     "app/api/ideas/[id]/generate-thumbnail/route.ts": {
-      "fluid": true,
       "maxDuration": 60
     }
   }
