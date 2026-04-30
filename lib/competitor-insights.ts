@@ -463,7 +463,7 @@ Generate exactly 6-8 insights. No more, no less.
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1800,
+      max_tokens: 3500,
       messages: [{ role: 'user', content: prompt }],
     })
 
@@ -501,6 +501,40 @@ Generate exactly 6-8 insights. No more, no less.
     }
 
     if (arrayEnd === -1) {
+      // Truncation detected — walk backwards to salvage complete insights before the cut-off.
+      // For each '}' position, try appending ']' and parsing. JSON.parse rejects slices that
+      // end inside a string literal or incomplete object, so it naturally finds real boundaries.
+      const REQUIRED_FIELDS = ['type', 'title', 'description', 'priority']
+      let salvaged: Insight[] = []
+
+      for (let i = raw.length - 1; i > arrayStartIndex; i--) {
+        if (raw[i] !== '}') continue
+        try {
+          const candidate = raw.slice(arrayStartIndex, i + 1) + ']'
+          const parsed = JSON.parse(candidate)
+          if (!Array.isArray(parsed)) continue
+          const complete = parsed.filter(
+            (obj: unknown): obj is Insight =>
+              obj !== null &&
+              typeof obj === 'object' &&
+              REQUIRED_FIELDS.every((f) => f in (obj as Record<string, unknown>)),
+          )
+          if (complete.length >= 3) {
+            salvaged = complete
+            break
+          }
+        } catch {
+          // Not valid JSON at this position — keep walking back
+        }
+      }
+
+      if (salvaged.length >= 3) {
+        console.warn(
+          `[competitor-insights] Truncation detected — salvaged ${salvaged.length} complete insights from truncated response`,
+        )
+        return salvaged
+      }
+
       console.error('[competitor-insights] Could not find closing bracket in Claude response:', raw.slice(0, 300))
       return []
     }
