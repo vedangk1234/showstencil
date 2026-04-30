@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import type { Idea } from '@/types'
 import { ExpandableCard } from '@/components/ui/expandable-card'
 import { getShuffledNicheImages } from '@/lib/niche-images'
+import { ThumbnailGenerationModal } from '@/components/ideas/ThumbnailGenerationModal'
 
 // ─── Parse helpers (pure, defined outside component) ─────────────────────────
 
@@ -135,6 +136,52 @@ function LoadingState({ staleIdeas }: { staleIdeas: Idea[] }) {
   )
 }
 
+// ─── Regenerate confirmation modal ────────────────────────────────────────────
+
+function RegenerateConfirmModal({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <>
+      <div
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 300 }}
+        onClick={onCancel}
+      />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        zIndex: 400, background: '#111111', borderRadius: 20, padding: 32,
+        maxWidth: 440, width: '90vw', border: '1px solid #222',
+      }}>
+        <p className="text-xs uppercase tracking-widest text-zinc-500 mb-2">Heads up</p>
+        <h2 className="text-xl font-semibold text-white mb-3">
+          Generating new ideas will delete your saved thumbnails
+        </h2>
+        <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
+          Download any thumbnails you want to keep before continuing. This action cannot be undone.
+        </p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onConfirm}
+            className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors"
+          >
+            Continue
+          </button>
+          <button
+            onClick={onCancel}
+            className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ─── Main client component ─────────────────────────────────────────────────────
 
 interface IdeasClientProps {
@@ -145,6 +192,11 @@ interface IdeasClientProps {
   ideaLimit: number
   nicheId: string
   imageSeed: number
+  canGenerate: boolean
+  quotaUsed: number
+  quotaLimit: number
+  quotaResetAt: Date | null
+  googleProfilePhotoUrl: string | null
 }
 
 export function IdeasClient({
@@ -155,12 +207,18 @@ export function IdeasClient({
   ideaLimit,
   nicheId,
   imageSeed,
+  canGenerate,
+  quotaUsed,
+  quotaLimit,
+  googleProfilePhotoUrl,
 }: IdeasClientProps) {
   const [ideas, setIdeas] = useState<Idea[]>(initialIdeas)
   const [isGenerating, setIsGenerating] = useState(!isFresh && initialIdeas.length === 0)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [doneExpanded, setDoneExpanded] = useState(false)
+  const [thumbnailModalIdeaId, setThumbnailModalIdeaId] = useState<string | null>(null)
+  const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false)
 
   // Trigger generation on mount when no fresh ideas
   useEffect(() => {
@@ -193,8 +251,23 @@ export function IdeasClient({
   }, [])
 
   async function handleRegenerate() {
+    const hasThumbnails = ideas.some((i) => i.thumbnail_image_url)
+    if (hasThumbnails) {
+      setShowRegenerateConfirm(true)
+      return
+    }
     setIsRegenerating(true)
     setIsGenerating(true)
+    await generate()
+  }
+
+  async function handleRegenerateConfirmed() {
+    setShowRegenerateConfirm(false)
+    // Clear thumbnails from local state immediately for responsiveness
+    setIdeas((prev) => prev.map((i) => ({ ...i, thumbnail_image_url: null, thumbnail_generated_at: null, thumbnail_source_type: null })))
+    setIsRegenerating(true)
+    setIsGenerating(true)
+    // Server-side thumbnail cleanup happens inside /api/ideas/generate (deleteAllUserThumbnails)
     await generate()
   }
 
@@ -206,6 +279,21 @@ export function IdeasClient({
   async function handleMade(id: string) {
     await fetch(`/api/ideas/${id}/made`, { method: 'POST' })
     setIdeas((prev) => prev.map((idea) => idea.id === id ? { ...idea, made_at: new Date().toISOString() } : idea))
+  }
+
+  function openThumbnailModal(idea: Idea) {
+    setThumbnailModalIdeaId(idea.id)
+  }
+
+  function handleThumbnailSuccess(ideaId: string, thumbnailUrl: string) {
+    setIdeas((prev) =>
+      prev.map((i) =>
+        i.id === ideaId
+          ? { ...i, thumbnail_image_url: thumbnailUrl, thumbnail_generated_at: new Date().toISOString() }
+          : i,
+      ),
+    )
+    setThumbnailModalIdeaId(null)
   }
 
   // ── Lock state ───────────────────────────────────────────────────────────
@@ -237,8 +325,55 @@ export function IdeasClient({
   const activeIdeas = ideas.filter((i) => !i.made_at)
   const doneIdeas = ideas.filter((i) => i.made_at)
 
-  // Pre-compute image URLs for all ideas (stable while seed is stable)
   const imageUrls = getShuffledNicheImages(nicheId, ideas.length, imageSeed)
+
+  // Find the modal idea object
+  const modalIdea = thumbnailModalIdeaId ? ideas.find((i) => i.id === thumbnailModalIdeaId) : null
+
+  // ── Thumbnail section renderer ──────────────────────────────────────────
+  function renderThumbnailSection(idea: Idea) {
+    return (
+      <div>
+        <p className="text-xs uppercase tracking-widest text-zinc-500 mb-3">Thumbnail</p>
+        {idea.thumbnail_image_url ? (
+          <div className="space-y-3">
+            <img
+              src={idea.thumbnail_image_url}
+              alt="Generated thumbnail"
+              className="w-full aspect-video rounded-xl object-cover"
+            />
+            <div className="flex gap-3">
+              <a
+                href={idea.thumbnail_image_url}
+                download={`thumbnail-${idea.id}.png`}
+                className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
+              >
+                Download
+              </a>
+              <button
+                onClick={(e) => { e.stopPropagation(); openThumbnailModal(idea) }}
+                className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
+              >
+                Regenerate
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); openThumbnailModal(idea) }}
+            disabled={!canGenerate}
+            className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {plan === 'free'
+              ? 'Upgrade to generate'
+              : !canGenerate
+              ? `Quota reached (${quotaUsed}/${quotaLimit} this month)`
+              : 'Generate thumbnail'}
+          </button>
+        )}
+      </div>
+    )
+  }
 
   // ── Empty state ──────────────────────────────────────────────────────────
   if (!isGenerating && ideas.length === 0) {
@@ -288,7 +423,7 @@ export function IdeasClient({
         canRegenerate={canRegenerate}
         nextAvailableDate={nextAvailableDate}
         plan={plan}
-        onRegenerate={handleRegenerate}
+        onRegenerate={() => void handleRegenerate()}
         isRegenerating={isRegenerating}
         ideaLimit={ideaLimit}
         ideasCount={activeIdeas.length}
@@ -306,7 +441,7 @@ export function IdeasClient({
         <>
           {activeIdeas.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {activeIdeas.map((idea, index) => {
+              {activeIdeas.map((idea) => {
                 const globalIndex = ideas.indexOf(idea)
                 const src = imageUrls[globalIndex] ?? imageUrls[0]
                 const description = `Opportunity ${idea.opportunity_score}/100  ·  ${idea.suggested_duration_min}–${idea.suggested_duration_max} min`
@@ -333,6 +468,9 @@ export function IdeasClient({
                         ))}
                       </ul>
                     </div>
+
+                    {/* Generated thumbnail */}
+                    {renderThumbnailSection(idea)}
 
                     {/* Content brief */}
                     <div>
@@ -490,6 +628,27 @@ export function IdeasClient({
             </div>
           )}
         </>
+      )}
+
+      {/* Thumbnail generation modal — layered above ExpandableCard (z-[200]) */}
+      {modalIdea && (
+        <ThumbnailGenerationModal
+          isOpen={thumbnailModalIdeaId !== null}
+          onClose={() => setThumbnailModalIdeaId(null)}
+          ideaId={modalIdea.id}
+          ideaTitle={modalIdea.title ?? ''}
+          thumbnailBrief={modalIdea.thumbnail_description ?? ''}
+          googleProfilePhotoUrl={googleProfilePhotoUrl}
+          onSuccess={handleThumbnailSuccess}
+        />
+      )}
+
+      {/* Regenerate confirmation modal */}
+      {showRegenerateConfirm && (
+        <RegenerateConfirmModal
+          onConfirm={() => void handleRegenerateConfirmed()}
+          onCancel={() => setShowRegenerateConfirm(false)}
+        />
       )}
     </div>
   )

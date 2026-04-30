@@ -12,7 +12,8 @@
 import { createServiceClient } from '@/lib/supabase'
 import type { ChannelOverview, VideoPerformanceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
-import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, CompetitorVideo, Insight, Idea } from '@/types'
+import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, CompetitorVideo, Insight, Idea, ThumbnailJob } from '@/types'
+import { deleteThumbnailFromStorage } from '@/lib/thumbnail-storage'
 
 // ---------------------------------------------------------------------------
 // saveChannelSnapshot
@@ -1214,6 +1215,9 @@ export async function getRecentIdeasBatch(userId: string): Promise<Idea[]> {
     generated_at: row.generated_at ?? '',
     planned_at: row.planned_at ?? null,
     made_at: row.made_at ?? null,
+    thumbnail_image_url: row.thumbnail_image_url ?? null,
+    thumbnail_generated_at: row.thumbnail_generated_at ?? null,
+    thumbnail_source_type: row.thumbnail_source_type ?? null,
   })) as Idea[]
 }
 
@@ -1320,4 +1324,110 @@ export async function getCachedInsights(
   if (ageMs > maxAgeMs) return null
 
   return data.insights as Insight[]
+}
+
+// ---------------------------------------------------------------------------
+// getThumbnailJob
+// ---------------------------------------------------------------------------
+
+export async function getThumbnailJob(
+  jobId: string,
+  userId: string,
+): Promise<ThumbnailJob | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('thumbnail_jobs')
+    .select('*')
+    .eq('id', jobId)
+    .eq('user_id', userId)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getThumbnailJob error:', error.message)
+    }
+    return null
+  }
+
+  return data as ThumbnailJob
+}
+
+// ---------------------------------------------------------------------------
+// createThumbnailJob
+// ---------------------------------------------------------------------------
+
+export async function createThumbnailJob(params: {
+  userId: string
+  ideaId: string
+}): Promise<string | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('thumbnail_jobs')
+    .insert({ user_id: params.userId, idea_id: params.ideaId, status: 'pending' })
+    .select('id')
+    .single()
+
+  if (error) {
+    console.error('[db] createThumbnailJob error:', error.message)
+    return null
+  }
+
+  return (data as { id: string }).id
+}
+
+// ---------------------------------------------------------------------------
+// updateThumbnailJob
+// ---------------------------------------------------------------------------
+
+export async function updateThumbnailJob(
+  jobId: string,
+  update: {
+    status: 'completed' | 'failed'
+    thumbnail_url?: string
+    error_message?: string
+  },
+): Promise<void> {
+  const supabase = createServiceClient()
+
+  const { error } = await supabase
+    .from('thumbnail_jobs')
+    .update({ ...update, completed_at: new Date().toISOString() })
+    .eq('id', jobId)
+
+  if (error) {
+    console.error('[db] updateThumbnailJob error:', error.message)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// deleteAllUserThumbnails
+// ---------------------------------------------------------------------------
+
+export async function deleteAllUserThumbnails(userId: string): Promise<void> {
+  const supabase = createServiceClient()
+
+  const { data: ideasWithThumbnails, error } = await supabase
+    .from('ideas')
+    .select('id, thumbnail_image_url')
+    .eq('user_id', userId)
+    .not('thumbnail_image_url', 'is', null)
+
+  if (error) {
+    console.error('[db] deleteAllUserThumbnails fetch error:', error.message)
+    return
+  }
+
+  for (const idea of ideasWithThumbnails ?? []) {
+    if (idea.thumbnail_image_url) {
+      await deleteThumbnailFromStorage(idea.thumbnail_image_url as string)
+    }
+  }
+
+  await supabase
+    .from('ideas')
+    .update({ thumbnail_image_url: null, thumbnail_generated_at: null, thumbnail_source_type: null })
+    .eq('user_id', userId)
+    .not('thumbnail_image_url', 'is', null)
 }

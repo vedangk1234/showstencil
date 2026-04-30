@@ -138,6 +138,59 @@ export async function getArchiveWeeks(userId: string): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// canGenerateThumbnail
+// ---------------------------------------------------------------------------
+
+export interface ThumbnailQuota {
+  allowed: boolean
+  reason?: 'upgrade_required' | 'quota_exceeded'
+  quotaUsed: number
+  quotaLimit: number
+  quotaResetAt: Date | null
+}
+
+export async function canGenerateThumbnail(userId: string): Promise<ThumbnailQuota> {
+  const supabase = createServiceClient()
+  const plan = await getUserPlan(userId)
+
+  const quotaLimits: Record<string, number> = { free: 0, starter: 12, pro: 40 }
+  const quotaLimit = quotaLimits[plan] ?? 0
+
+  if (plan === 'free') {
+    return { allowed: false, reason: 'upgrade_required', quotaUsed: 0, quotaLimit: 0, quotaResetAt: null }
+  }
+
+  // Fetch user's quota state
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('thumbnails_generated_this_month, thumbnails_quota_reset_at')
+    .eq('id', userId)
+    .single()
+
+  let quotaUsed: number = userRow?.thumbnails_generated_this_month ?? 0
+  let resetAt: Date | null = userRow?.thumbnails_quota_reset_at
+    ? new Date(userRow.thumbnails_quota_reset_at)
+    : null
+
+  // Auto-reset quota if period has expired
+  if (!resetAt || resetAt < new Date()) {
+    const newResetAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    await supabase
+      .from('users')
+      .update({ thumbnails_generated_this_month: 0, thumbnails_quota_reset_at: newResetAt.toISOString() })
+      .eq('id', userId)
+    quotaUsed = 0
+    resetAt = newResetAt
+  }
+
+  if (quotaUsed >= quotaLimit) {
+    return { allowed: false, reason: 'quota_exceeded', quotaUsed, quotaLimit, quotaResetAt: resetAt }
+  }
+
+  return { allowed: true, quotaUsed, quotaLimit, quotaResetAt: resetAt }
+}
+
+// ---------------------------------------------------------------------------
 // Upgrade messages
 // ---------------------------------------------------------------------------
 

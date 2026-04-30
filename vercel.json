@@ -28,5 +28,11 @@
       "path": "/api/cron/user-sync",
       "schedule": "0 3 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "app/api/ideas/[id]/generate-thumbnail/route.ts": {
+      "fluid": true,
+      "maxDuration": 60
+    }
+  }
 }

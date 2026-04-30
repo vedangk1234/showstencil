@@ -25,6 +25,8 @@ export interface User {
   trial_ends_at: string | null;
   current_period_end: string | null;
   onboarding_completed: boolean;
+  thumbnails_generated_this_month: number;
+  thumbnails_quota_reset_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -332,6 +334,21 @@ export interface Idea {
   generated_at: string;
   planned_at: string | null;
   made_at: string | null;
+  thumbnail_image_url: string | null;
+  thumbnail_generated_at: string | null;
+  thumbnail_source_type: 'camera' | 'upload' | 'google_profile' | 'no_photo' | null;
+}
+
+// Thumbnail generation job (tracks async Gemini image generation)
+export interface ThumbnailJob {
+  id: string;
+  user_id: string;
+  idea_id: string;
+  status: 'pending' | 'completed' | 'failed';
+  thumbnail_url: string | null;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
 }
 
 // Idea generator — a single generated video idea

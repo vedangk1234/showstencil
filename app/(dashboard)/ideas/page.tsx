@@ -2,7 +2,7 @@ import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase'
 import { getRecentIdeasBatch } from '@/lib/db'
-import { getIdeaLimit } from '@/lib/access'
+import { getIdeaLimit, canGenerateThumbnail } from '@/lib/access'
 import { IdeasClient } from '@/components/ideas/IdeasClient'
 import type { PlanType } from '@/types'
 
@@ -35,8 +35,8 @@ export default async function IdeasPage() {
   const userId = session.user.id
   const supabase = createServiceClient()
 
-  // Load plan info, niche, and recent ideas in parallel
-  const [userRow, ideas, ideaLimit] = await Promise.all([
+  // Load plan info, niche, recent ideas, and thumbnail quota in parallel
+  const [userRow, ideas, ideaLimit, thumbnailQuota] = await Promise.all([
     supabase
       .from('users')
       .select('subscription_status, subscription_plan, trial_ends_at, niche_id')
@@ -45,10 +45,14 @@ export default async function IdeasPage() {
       .then((r) => r.data),
     getRecentIdeasBatch(userId),
     getIdeaLimit(userId),
+    canGenerateThumbnail(userId),
   ])
 
   const plan = resolvePlan(userRow)
   const nicheId = userRow?.niche_id ?? 'finance'
+
+  // Google profile photo from session (set by NextAuth from Google OAuth)
+  const googleProfilePhotoUrl = (session.user.image as string | null | undefined) ?? null
 
   // Is this batch "fresh" (generated within the last 7 days)?
   const latestGeneratedAt = ideas.length > 0 ? new Date(ideas[0].generated_at) : null
@@ -70,6 +74,11 @@ export default async function IdeasPage() {
       ideaLimit={ideaLimit}
       nicheId={nicheId}
       imageSeed={imageSeed}
+      canGenerate={thumbnailQuota.allowed}
+      quotaUsed={thumbnailQuota.quotaUsed}
+      quotaLimit={thumbnailQuota.quotaLimit}
+      quotaResetAt={thumbnailQuota.quotaResetAt}
+      googleProfilePhotoUrl={googleProfilePhotoUrl}
     />
   )
 }

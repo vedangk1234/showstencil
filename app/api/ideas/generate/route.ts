@@ -3,6 +3,7 @@ import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
+import { deleteAllUserThumbnails } from '@/lib/db'
 import type { Idea } from '@/types'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -133,6 +134,9 @@ export async function POST(_req: Request) {
         }
       }
     }
+
+    // ── 2b. Delete existing thumbnails before generating new ideas ────────────
+    await deleteAllUserThumbnails(userId)
 
     // ── 3. Check competitor insights readiness ─────────────────────────────
     const { data: competitors } = await supabase
@@ -430,6 +434,9 @@ Respond in this exact JSON structure with no text before or after:
       generated_at: row.generated_at,
       planned_at: row.planned_at ?? null,
       made_at: row.made_at ?? null,
+      thumbnail_image_url: null,
+      thumbnail_generated_at: null,
+      thumbnail_source_type: null,
     })) as Idea[]
 
     return NextResponse.json({ ideas, generatedAt, regenerateAvailableAt })
