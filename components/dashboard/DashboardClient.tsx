@@ -10,6 +10,7 @@ import {
   XAxis,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from 'recharts'
 import BlackholeLoader from '@/components/BlackholeLoader'
 import { useSyncStatus } from '@/components/sync-context'
@@ -35,6 +36,7 @@ interface Props {
   latestTrend: Trend | null
   competitorSnapshots: { competitorId: string; snapshots: CompetitorSnapshot[] }[]
   topIdea: Idea | null
+  nicheAvgViewsPerVideo: number | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -121,7 +123,7 @@ function PulseDot() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardClient({
-  user, snapshots, gapScore, competitors, recentDigests, competitorSnapshots, topIdea,
+  user, snapshots, gapScore, competitors, recentDigests, competitorSnapshots, topIdea, nicheAvgViewsPerVideo,
 }: Props) {
   const { isSyncing } = useSyncStatus()
   const router = useRouter()
@@ -208,7 +210,6 @@ export default function DashboardClient({
   const revDelta   = (latest?.estimated_monthly_revenue ?? 0) - (earlier?.estimated_monthly_revenue ?? 0)
 
   // ── You vs Niche chart data ────────────────────────────────────────────────
-  // Niche line = avg avg_views_per_video across Tier 1 competitors per date
   const activeCompetitors = competitors?.filter(c => c.is_active) ?? []
   const tier1Ids = new Set(
     activeCompetitors
@@ -216,27 +217,10 @@ export default function DashboardClient({
       .map(c => c.id),
   )
 
-  const nicheByDate = new Map<string, { sum: number; count: number }>()
-  for (const { competitorId, snapshots: compSnaps } of competitorSnapshots) {
-    if (!tier1Ids.has(competitorId)) continue
-    for (const s of compSnaps) {
-      if (s.avg_views_per_video == null) continue
-      const entry = nicheByDate.get(s.snapshot_date) ?? { sum: 0, count: 0 }
-      entry.sum += s.avg_views_per_video
-      entry.count += 1
-      nicheByDate.set(s.snapshot_date, entry)
-    }
-  }
-
   const chartData = snapshots.slice(-30).map((s) => ({
     date: new Date(s.snapshot_date).getTime(),
     you: s.avg_views_per_video ?? 0,
-    niche: nicheByDate.has(s.snapshot_date)
-      ? (nicheByDate.get(s.snapshot_date)!.sum / nicheByDate.get(s.snapshot_date)!.count)
-      : null,
   }))
-
-  const hasNicheData = [...nicheByDate.values()].length > 0
 
   // ── Subscriber growth chart data ──────────────────────────────────────────
   const competitorDataForChart = activeCompetitors
@@ -494,17 +478,13 @@ export default function DashboardClient({
                       dot={false}
                       isAnimationActive={false}
                     />
-                    {hasNicheData && (
-                      <Line
-                        type="monotone"
-                        dataKey="niche"
-                        name="Tier 1 niche avg"
+                    {nicheAvgViewsPerVideo != null && (
+                      <ReferenceLine
+                        y={nicheAvgViewsPerVideo}
                         stroke="#3b82f6"
-                        strokeWidth={2}
-                        strokeDasharray="5 3"
-                        dot={false}
-                        isAnimationActive={false}
-                        connectNulls
+                        strokeDasharray="4 4"
+                        strokeWidth={1.5}
+                        ifOverflow="extendDomain"
                       />
                     )}
                     <Tooltip
@@ -528,13 +508,15 @@ export default function DashboardClient({
                   <span className="inline-block size-2 bg-stencil-accent mr-[6px] align-[-1px]" />
                   you
                 </span>
-                {hasNicheData ? (
+                {nicheAvgViewsPerVideo != null ? (
                   <span>
                     <span className="inline-block w-4 border-t border-dashed border-stencil-blue mr-[6px] align-middle" />
-                    Tier 1 niche average
+                    Tier 1 niche avg · 30d window
                   </span>
-                ) : (
+                ) : tier1Ids.size === 0 ? (
                   <span className="text-stencil-ink4">No Tier 1 competitors to compare against</span>
+                ) : (
+                  <span className="text-stencil-ink4">Tier 1 competitors haven&apos;t uploaded in the last 30 days</span>
                 )}
                 <span className="ml-auto">{snapshots.length} snapshots tracked</span>
               </div>

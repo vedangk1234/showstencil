@@ -1218,6 +1218,71 @@ export async function getRecentIdeasBatch(userId: string): Promise<Idea[]> {
 }
 
 // ---------------------------------------------------------------------------
+// getNicheAvgViewsPerVideo
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes the niche average views per video over the last 30 days by averaging
+ * each Tier 1 competitor's own avg views (from their videos published in that window).
+ *
+ * Uses competitor_videos.published_at (not synced_at) so recently-added competitors
+ * whose historical videos were back-filled are included correctly.
+ *
+ * @returns rounded integer, or null when no Tier 1 competitors exist or none have
+ *          uploaded in the last 30 days
+ */
+export async function getNicheAvgViewsPerVideo(userId: string): Promise<number | null> {
+  const supabase = createServiceClient()
+
+  const { data: competitors, error: compError } = await supabase
+    .from('competitors')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('tier', 1)
+    .eq('is_dominator', false)
+    .eq('is_active', true)
+
+  if (compError) {
+    console.error('[db] getNicheAvgViewsPerVideo competitors error:', compError.message)
+    return null
+  }
+
+  if (!competitors || competitors.length === 0) return null
+
+  const since = new Date()
+  since.setDate(since.getDate() - 30)
+  const sinceDate = since.toISOString()
+
+  const perCompetitorAvgs: number[] = []
+
+  for (const comp of competitors) {
+    const { data: videos, error: videoError } = await supabase
+      .from('competitor_videos')
+      .select('view_count')
+      .eq('competitor_id', comp.id)
+      .gte('published_at', sinceDate)
+      .not('view_count', 'is', null)
+
+    if (videoError) {
+      console.error(`[db] getNicheAvgViewsPerVideo videos error for ${comp.id}:`, videoError.message)
+      continue
+    }
+
+    const rows = videos ?? []
+    if (rows.length === 0) continue
+
+    const avg = rows.reduce((sum, v) => sum + (v.view_count ?? 0), 0) / rows.length
+    if (avg > 0) perCompetitorAvgs.push(avg)
+  }
+
+  if (perCompetitorAvgs.length === 0) return null
+
+  return Math.round(
+    perCompetitorAvgs.reduce((sum, v) => sum + v, 0) / perCompetitorAvgs.length,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // getCachedInsights
 // ---------------------------------------------------------------------------
 

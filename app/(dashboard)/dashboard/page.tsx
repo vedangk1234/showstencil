@@ -9,6 +9,7 @@ import {
   getLatestTrend,
   getAllCompetitorSnapshotsForUser,
   getRecentIdeasBatch,
+  getNicheAvgViewsPerVideo,
 } from '@/lib/db'
 import DashboardClient from '@/components/dashboard/DashboardClient'
 
@@ -18,7 +19,7 @@ export default async function DashboardPage() {
 
   const userId = session.user.id
 
-  const [user, snapshots, gapScore, competitors, recentDigests, latestTrend, competitorSnapshots, recentIdeas] =
+  const [user, snapshots, gapScore, competitors, recentDigests, latestTrend, competitorSnapshots, recentIdeas, nicheAvgViewsPerVideo] =
     await Promise.all([
       getUser(userId),
       getChannelSnapshots(userId, 30),
@@ -28,6 +29,7 @@ export default async function DashboardPage() {
       getLatestTrend(userId),
       getAllCompetitorSnapshotsForUser(userId, 30),
       getRecentIdeasBatch(userId),
+      getNicheAvgViewsPerVideo(userId),
     ])
 
   const topIdea = recentIdeas.find((i) => !i.made_at) ?? null
@@ -43,6 +45,7 @@ export default async function DashboardPage() {
       latestTrend={latestTrend}
       competitorSnapshots={competitorSnapshots}
       topIdea={topIdea}
+      nicheAvgViewsPerVideo={nicheAvgViewsPerVideo}
     />
   )
 }
