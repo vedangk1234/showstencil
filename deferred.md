@@ -56,6 +56,13 @@ GOOGLE
 [ ] Reply to YouTube API quota increase email confirming contact email is vedangk2912@gmail.com
 [ ] Once quota approved — update YouTube API daily limit from 10K to 100K units
 
+GEMINI BILLING — Before Go Live
+[ ] Go to Google Cloud Console and add payment method to nixlytics project
+[ ] Enable billing for Gemini API
+[ ] Set a monthly spend cap of $5 as safety net
+[ ] Test thumbnail generation end to end after billing is enabled
+[ ] Verify generated thumbnail appears in ideas card and download works
+
 VERCEL
 [ ] Upgrade to Vercel Pro ($20/month) when revenue justifies it
 [ ] Update trend detection cron from daily to every 6 hours after Pro upgrade

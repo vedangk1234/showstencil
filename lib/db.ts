@@ -1207,6 +1207,8 @@ export async function getRecentIdeasBatch(userId: string): Promise<Idea[]> {
     opportunity_score: row.opportunity_score ?? 0,
     thumbnail_description: row.thumbnail_description ?? '',
     content_brief: row.content_brief ?? '',
+    hook_2: row.hook_2 ?? null,
+    hook_3: row.hook_3 ?? null,
     suggested_duration_min: row.suggested_duration_min ?? 0,
     suggested_duration_max: row.suggested_duration_max ?? 0,
     duration_reasoning: row.duration_reasoning ?? '',

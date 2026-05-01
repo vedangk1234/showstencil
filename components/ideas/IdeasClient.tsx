@@ -445,7 +445,6 @@ export function IdeasClient({
                 const globalIndex = ideas.indexOf(idea)
                 const src = imageUrls[globalIndex] ?? imageUrls[0]
                 const description = `Opportunity ${idea.opportunity_score}/100  ·  ${idea.suggested_duration_min}–${idea.suggested_duration_max} min`
-                const contentLabels = ['Hook', 'Angle', 'Structure', 'Takeaway']
 
                 return (
                   <ExpandableCard
@@ -477,10 +476,42 @@ export function IdeasClient({
                       <p className="text-xs uppercase tracking-widest text-zinc-500 mb-3">
                         Content brief
                       </p>
+
+                      {/* Hook — 3 variants */}
+                      <div className="mb-4">
+                        <p className="text-white font-medium text-sm mb-2">Hook:</p>
+                        <div className="flex flex-col gap-3">
+                          {(
+                            [
+                              { label: 'Safe',              color: 'text-zinc-500',  text: parseContentBullets(idea.content_brief)[0] },
+                              { label: 'Bolder',            color: 'text-amber-500', text: idea.hook_2 },
+                              { label: 'Most controversial', color: 'text-rose-500',  text: idea.hook_3 },
+                            ] as const
+                          ).map((hook, i) => (
+                            <div key={i} className="flex gap-2 text-sm items-start">
+                              <span className="font-mono text-zinc-600 shrink-0 w-4">{i + 1}.</span>
+                              {hook.text ? (
+                                <>
+                                  <span className={`text-xs uppercase tracking-widest ${hook.color} shrink-0 w-32`}>
+                                    {hook.label}
+                                  </span>
+                                  <span className="text-zinc-300">{hook.text}</span>
+                                </>
+                              ) : (
+                                <span className="text-zinc-700">—</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Angle / Structure / Takeaway */}
                       <ul className="flex flex-col gap-3">
-                        {parseContentBullets(idea.content_brief).map((point, i) => (
+                        {parseContentBullets(idea.content_brief).slice(1).map((point, i) => (
                           <li key={i} className="flex gap-2 text-sm">
-                            <span className="text-white font-medium shrink-0">{contentLabels[i] ?? ''}:</span>
+                            <span className="text-white font-medium shrink-0">
+                              {(['Angle', 'Structure', 'Takeaway'] as const)[i] ?? ''}:
+                            </span>
                             <span className="text-zinc-300">{point}</span>
                           </li>
                         ))}
@@ -558,7 +589,6 @@ export function IdeasClient({
                     const globalIndex = ideas.indexOf(idea)
                     const src = imageUrls[globalIndex] ?? imageUrls[0]
                     const description = `Opportunity ${idea.opportunity_score}/100  ·  ${idea.suggested_duration_min}–${idea.suggested_duration_max} min`
-                    const contentLabels = ['Hook', 'Angle', 'Structure', 'Takeaway']
 
                     return (
                       <ExpandableCard
@@ -588,10 +618,42 @@ export function IdeasClient({
                           <p className="text-xs uppercase tracking-widest text-zinc-500 mb-3">
                             Content brief
                           </p>
+
+                          {/* Hook — 3 variants */}
+                          <div className="mb-4">
+                            <p className="text-white font-medium text-sm mb-2">Hook:</p>
+                            <div className="flex flex-col gap-3">
+                              {(
+                                [
+                                  { label: 'Safe',              color: 'text-zinc-500',  text: parseContentBullets(idea.content_brief)[0] },
+                                  { label: 'Bolder',            color: 'text-amber-500', text: idea.hook_2 },
+                                  { label: 'Most controversial', color: 'text-rose-500',  text: idea.hook_3 },
+                                ] as const
+                              ).map((hook, i) => (
+                                <div key={i} className="flex gap-2 text-sm items-start">
+                                  <span className="font-mono text-zinc-600 shrink-0 w-4">{i + 1}.</span>
+                                  {hook.text ? (
+                                    <>
+                                      <span className={`text-xs uppercase tracking-widest ${hook.color} shrink-0 w-32`}>
+                                        {hook.label}
+                                      </span>
+                                      <span className="text-zinc-300">{hook.text}</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-zinc-700">—</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Angle / Structure / Takeaway */}
                           <ul className="flex flex-col gap-3">
-                            {parseContentBullets(idea.content_brief).map((point, i) => (
+                            {parseContentBullets(idea.content_brief).slice(1).map((point, i) => (
                               <li key={i} className="flex gap-2 text-sm">
-                                <span className="text-white font-medium shrink-0">{contentLabels[i] ?? ''}:</span>
+                                <span className="text-white font-medium shrink-0">
+                                  {(['Angle', 'Structure', 'Takeaway'] as const)[i] ?? ''}:
+                                </span>
                                 <span className="text-zinc-300">{point}</span>
                               </li>
                             ))}

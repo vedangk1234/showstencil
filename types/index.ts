@@ -326,6 +326,8 @@ export interface Idea {
   opportunity_score: number;
   thumbnail_description: string;
   content_brief: string;
+  hook_2: string | null;
+  hook_3: string | null;
   suggested_duration_min: number;
   suggested_duration_max: number;
   duration_reasoning: string;

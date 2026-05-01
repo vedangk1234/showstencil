@@ -61,7 +61,7 @@ OUTPUT: Generate one final YouTube thumbnail image matching the brief above.`
     const ai = new GoogleGenAI({ apiKey })
 
     const generatePromise = ai.models.generateContent({
-      model: 'gemini-2.5-flash-preview-05-20',
+      model: 'gemini-2.5-flash-image',
       contents: [{ role: 'user', parts: parts as never }],
       config: {
         responseModalities: [Modality.IMAGE],

@@ -312,7 +312,26 @@ Hard rules you must follow:
 - If you suggest a longer-than-average duration, you must cite the specific competitor video and view count that proves longer videos win on this topic
 - Thumbnail descriptions must be executable by a designer who has never seen a reference — describe the subject, expression, background, text overlay (with exact wording), and colour palette
 - Output strictly in the JSON format specified — no preamble, no markdown, no commentary outside the JSON
-- Every idea must fit within the creator's sub-niche of "${subNiche}". If a competitor's winning video is outside this sub-niche, use it only as a structural signal (title format, duration, thumbnail style) — never as a topic to replicate. The topic itself must come from within "${subNiche}" or be a natural adjacent topic that "${channelName}"'s existing audience would expect from them based on their top performing videos.`
+- Every idea must fit within the creator's sub-niche of "${subNiche}". If a competitor's winning video is outside this sub-niche, use it only as a structural signal (title format, duration, thumbnail style) — never as a topic to replicate. The topic itself must come from within "${subNiche}" or be a natural adjacent topic that "${channelName}"'s existing audience would expect from them based on their top performing videos.
+
+GENERATE THREE HOOKS PER IDEA, RANKED BY BOLDNESS:
+
+Hook 1 (goes in content_brief sentence 1): SAFE
+  - The conventional opener for this topic
+  - Informational tone, no controversy
+  - This is the version a cautious creator would use
+
+hook_2: BOLDER
+  - Takes a stronger stance, makes a more direct claim
+  - References the topic with more confidence (~1.5x the assertiveness of Hook 1)
+
+hook_3: MOST CONTROVERSIAL
+  - The boldest possible opener that still aligns with the topic
+  - Willing to call out competitors, industry conventions, or popular beliefs by name
+  - Highest CTR potential but riskiest for brand-safe creators
+  - Must NOT be defamatory or include personal attacks — controversy is in the take, not the person
+
+All three hooks MUST lead seamlessly into the same Angle, Structure, and Takeaway. They are alternative openers for the SAME video, not three different videos. hook_2 and hook_3 contain ONLY the hook text — no angle, no structure, no takeaway. Each hook must be a complete, self-contained opening sentence or paragraph that could be used as-is.`
 
     const userPrompt = `CREATOR PROFILE
 Channel name: ${channelName}
@@ -344,7 +363,9 @@ Respond in this exact JSON structure with no text before or after:
     "title": "the video title — must be original, not a copy of any competitor title above",
     "opportunity_score": 85,
     "thumbnail_description": "specific visual description: who is in it, expression, background, text overlay with exact wording, colour palette",
-    "content_brief": "3-4 sentences describing what the video covers, what unique angle differentiates it from competitor coverage, what the opening 30-second hook should be, and what the single takeaway is for the viewer",
+    "content_brief": "Exactly 4 sentences separated by '. ': Sentence 1 = SAFE Hook (the conventional opening a cautious creator would use). Sentence 2 = Angle (what makes this different from competitor coverage). Sentence 3 = Structure (what the video covers step by step). Sentence 4 = Takeaway (the single thing the viewer walks away knowing).",
+    "hook_2": "BOLDER version of the hook — a single self-contained opening sentence or paragraph. More direct, stronger stance, ~1.5x the assertiveness of the safe hook. Hook text only — no angle, structure, or takeaway.",
+    "hook_3": "MOST CONTROVERSIAL version of the hook — a single self-contained opening sentence or paragraph. Calls out industry conventions, popular beliefs, or competitors by name if relevant. Highest CTR potential. Hook text only — no angle, structure, or takeaway.",
     "suggested_duration_min": 12,
     "suggested_duration_max": 16,
     "duration_reasoning": "one sentence citing specific data: e.g. 'Graham Stephan's investing video ran 14 minutes and pulled 2.1x his channel average — longer-form on this topic outperforms in finance.'",
@@ -357,7 +378,7 @@ Respond in this exact JSON structure with no text before or after:
     console.log('[ideas/generate] Calling Claude for', ideaCount, 'ideas')
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 3500,
+      max_tokens: 5000, // bumped from 3500 — hook_2 + hook_3 per idea adds ~150-200 output tokens each
       temperature: 0.7,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
@@ -379,6 +400,12 @@ Respond in this exact JSON structure with no text before or after:
       .slice(0, ideaCount)
       .map((item: unknown) => {
         const idea = item as Record<string, unknown>
+
+        const hook2 = idea.hook_2 && String(idea.hook_2).trim() ? String(idea.hook_2).trim() : null
+        const hook3 = idea.hook_3 && String(idea.hook_3).trim() ? String(idea.hook_3).trim() : null
+        if (!hook2) console.warn('[ideas/generate] hook_2 missing or empty for idea:', String(idea.title ?? ''))
+        if (!hook3) console.warn('[ideas/generate] hook_3 missing or empty for idea:', String(idea.title ?? ''))
+
         return {
           user_id: userId,
           generated_at: generatedAt,
@@ -386,6 +413,8 @@ Respond in this exact JSON structure with no text before or after:
           opportunity_score: Number(idea.opportunity_score ?? 0),
           thumbnail_description: String(idea.thumbnail_description ?? ''),
           content_brief: String(idea.content_brief ?? ''),
+          hook_2: hook2,
+          hook_3: hook3,
           suggested_duration_min: Number(idea.suggested_duration_min ?? 0),
           suggested_duration_max: Number(idea.suggested_duration_max ?? 0),
           duration_reasoning: String(idea.duration_reasoning ?? ''),
@@ -426,6 +455,8 @@ Respond in this exact JSON structure with no text before or after:
       opportunity_score: row.opportunity_score,
       thumbnail_description: row.thumbnail_description,
       content_brief: row.content_brief,
+      hook_2: row.hook_2 ?? null,
+      hook_3: row.hook_3 ?? null,
       suggested_duration_min: row.suggested_duration_min,
       suggested_duration_max: row.suggested_duration_max,
       duration_reasoning: row.duration_reasoning,
