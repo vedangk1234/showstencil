@@ -704,7 +704,7 @@ const planLimits = {
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, notification toggles, account actions |
 | `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Dedicated notifications sub-page — only .gitkeep exists |
-| `app/page.tsx` | 🚧 | Placeholder only; full landing page — Week 3 |
+| `app/page.tsx` | ✅ | Full landing page — Nagai hero, time-of-day sky system, feature grid, CTA, footer |
 | `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
 | `app/privacy/page.tsx` | 🔲 | Legal — Week 3 |
 | `app/terms/page.tsx` | 🔲 | Legal — Week 3 |
@@ -765,6 +765,29 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 3 — Day 23 (2026-05-03)
+
+**Landing page — full Next.js conversion from HTML original**
+
+*app/landing.css — NEW*
+* Extracted verbatim from the `<style>` block of the HTML design file. All CSS variables (`:root` Stencil tokens + Hiroshi Nagai palette), nav, hero, sky system, clouds, stars, windows, ribbon, how-it-works, feature grid, CTA, footer, and responsive breakpoints preserved exactly. Image path changed from `url('assets/nagai-base.png')` to `url('/nagai-base.png')` to serve from Next.js public folder.
+
+*public/nagai-base.png — NEW*
+* Hero background image copied from the design zip into the public folder so Next.js serves it as a static asset at `/nagai-base.png`.
+
+*app/page.tsx — REWRITTEN*
+* Full landing page as a Next.js Client Component (`'use client'`). Imports `./landing.css` — no Tailwind on this page.
+* `useSession` + `useRouter` redirect: if user is already signed in, pushes to `/dashboard` immediately.
+* All animation JavaScript from the HTML `<script>` tag moved into `useEffect` with full cleanup (`clearInterval`, `clearTimeout`, observer disconnects). TypeScript-typed throughout — no `any`.
+* Dev scrubber removed entirely (was between `// ── DEV SCRUBBER` and `// ── END DEV SCRUBBER` comments).
+* CTA buttons and nav links wired to real auth routes: "Connect your YouTube channel" → `/api/auth/signin?callbackUrl=/dashboard`; "Sign in" → `/api/auth/signin`; "Pricing" → `/pricing`; "How it works" → `#how` anchor.
+* All HTML converted to valid JSX: `class` → `className`, `stroke-width` → `strokeWidth` etc. CSS variable style props cast as `React.CSSProperties`. Apostrophes escaped as `&apos;`.
+
+*app/layout.tsx — updated*
+* Added `SessionProvider` from `next-auth/react` wrapping `{children}` in the body. Required for `useSession` in the landing page (and any other client component) to work. Instrument Serif font link was already present.
+
+---
 
 ### Week 3 — Day 22 (2026-05-03)
 
@@ -1754,7 +1777,7 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-03 — Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
+*Last updated: 2026-05-03 — Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
 Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
 Previous Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
 Previous Day 18: Competitor auto-detection wired into /api/sync. detectAndAssignCompetitors added to lib/niche-engine.ts — searches YouTube once (101 quota units) for the user's niche, classifies all 50 results into Tier 1/2/Dominator buckets, picks best per tier, runs assignCompetitor in parallel via Promise.allSettled. assignCompetitor mirrors track/route.ts pipeline: DB insert → getCompetitorFullProfile → video rows → updateCompetitorMetrics → saveCompetitorSnapshot. Sync step 6 checks existingAutoCount===0 and calls detectAndAssignCompetitors wrapped in try/catch — never blocks the sync response.
