@@ -1,7 +1,7 @@
 import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import Image from 'next/image'
-import { getUser, updateUserOnboardingStatus } from '@/lib/db'
+import { getUser } from '@/lib/db'
 import { SyncProvider } from '@/components/sync-context'
 import SidebarNav from '@/components/dashboard/SidebarNav'
 import SignOutButton from '@/components/dashboard/SignOutButton'
@@ -15,11 +15,10 @@ export default async function DashboardLayout({
   if (!session) redirect('/login')
 
   const user = await getUser(session.user.id)
-  const needsSync = !user?.onboarding_completed
 
-  if (needsSync) {
-    await updateUserOnboardingStatus(session.user.id, true)
-  }
+  if (!user) redirect('/login')
+
+  if (!user.onboarding_completed) redirect('/onboarding')
 
   return (
     <div className="flex h-screen bg-stencil-bg font-sans text-stencil-ink antialiased">
@@ -79,7 +78,7 @@ export default async function DashboardLayout({
 
       {/* Main */}
       <main className="flex-1 overflow-auto bg-stencil-bg">
-        <SyncProvider needsSync={needsSync}>{children}</SyncProvider>
+        <SyncProvider needsSync={false}>{children}</SyncProvider>
       </main>
     </div>
   )
