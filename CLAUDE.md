@@ -376,6 +376,28 @@ CREATE TABLE IF NOT EXISTS competitor\_snapshots (
 -- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS insights\_generated\_at TIMESTAMPTZ;
 -- ALTER TABLE competitors ADD COLUMN IF NOT EXISTS replacement\_locked\_until TIMESTAMPTZ;
 
+-- thumbnail_jobs — tracks async Gemini image generation jobs
+CREATE TABLE IF NOT EXISTS thumbnail_jobs (
+  id UUID PRIMARY KEY DEFAULT gen\_random\_uuid(),
+  user\_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  idea\_id UUID NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'completed' | 'failed'
+  thumbnail\_url TEXT,
+  error\_message TEXT,
+  created\_at TIMESTAMPTZ DEFAULT NOW(),
+  completed\_at TIMESTAMPTZ
+);
+
+-- New columns on ideas table (thumbnail + hook variants — run once):
+-- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS thumbnail\_image\_url TEXT;
+-- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS thumbnail\_generated\_at TIMESTAMPTZ;
+-- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS thumbnail\_source\_type TEXT; -- 'camera'|'upload'|'google\_profile'|'no\_photo'
+-- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS hook\_2 TEXT;
+-- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS hook\_3 TEXT;
+-- New columns on users table (thumbnail quota tracking):
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS thumbnails\_generated\_this\_month INTEGER DEFAULT 0;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS thumbnails\_quota\_reset\_at TIMESTAMPTZ;
+
 -- Required migrations (run once in Supabase SQL editor):
 -- File: supabase/migrations/002_competitors_phase1.sql
 -- ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_niche TEXT;
@@ -434,6 +456,9 @@ RESEND\_FROM\_EMAIL=digest@showstencil.com
 
 # Vercel cron secret (prevent external calls to cron endpoints)
 CRON\_SECRET=                        # generate with: openssl rand -base64 32
+
+# Gemini (thumbnail generation via Google GenAI)
+GEMINI\_API\_KEY=
 
 # App
 NEXT\_PUBLIC\_APP\_URL=http://localhost:3000
@@ -634,6 +659,9 @@ const planLimits = {
 | `lib/competitor-matcher.ts` | ✅ | calculateTier, CompetitorMatch — tier from sub ratio, sub-niche enrichment |
 | `lib/channel-search.ts` | ✅ | normalizeChannelInput (URL/handle/channelId), getChannelData, cache read/write — 7-day TTL |
 | `lib/competitor-insights.ts` | ✅ | generateCompetitorInsights (Claude) — 6-8 typed insights; expanded with best/worst videos, revenue+RPM, gap scores, viral videos, subscriber growth trend; max_tokens 1800 |
+| `lib/gemini-image.ts` | ✅ | generateThumbnail — calls Gemini gemini-2.5-flash-image with creator photo (or stick figure fallback) + thumbnail brief + title; returns base64 PNG; handles real-photo vs illustrated-character mode |
+| `lib/thumbnail-storage.ts` | ✅ | uploadThumbnail (stores to Supabase Storage, returns public URL), deleteThumbnailFromStorage, loadStickFigureBase64 (reads public/stick-figure.png) |
+| `lib/access.ts` (thumbnail additions) | ✅ | canGenerateThumbnail — checks plan + monthly quota (free: 0, starter: 12, pro: 40); auto-resets quota monthly; returns ThumbnailQuota with quotaUsed/quotaLimit/quotaResetAt |
 
 ### API routes
 
@@ -657,6 +685,10 @@ const planLimits = {
 | `app/api/competitors/track/route.ts` | ✅ | POST add searched channel as competitor — enforces plan slot limit, calculates tier + sub-niche match |
 | `app/api/competitors/insights/route.ts` | ✅ | POST generate Claude insights for a specific competitor — loads user/competitor metrics, returns typed insights array |
 | `app/api/users/detect-sub-niche/route.ts` | ✅ | POST trigger sub-niche detection — session auth or cron bypass, reads user videos from DB, calls Claude |
+| `app/api/ideas/generate/route.ts` | ✅ | POST full idea generation pipeline — plan gate, insights pre-warm, 4-signal Claude prompt, bracket-depth JSON parse, individual row insert, prune; max_tokens 5000 |
+| `app/api/ideas/[id]/plan/route.ts` | ✅ | POST mark idea as planned — sets planned_at |
+| `app/api/ideas/[id]/made/route.ts` | ✅ | POST mark idea as made — sets made_at |
+| `app/api/ideas/[id]/generate-thumbnail/route.ts` | ✅ | POST generate thumbnail — plan + quota gate, fetches creator photo (camera/upload/Google profile/no-photo), calls Gemini via lib/gemini-image.ts, uploads to Supabase Storage, updates ideas row; uses next/server after() for async DB writes |
 
 ### App pages
 
@@ -669,7 +701,7 @@ const planLimits = {
 | `app/(dashboard)/competitors/page.tsx` | ✅ | Rebuilt: filter tabs (All/Tier1/Tier2/Dominator), CompetitorsTable, UpgradeBanner, PlanLimitIndicator |
 | `app/(dashboard)/competitors/[id]/page.tsx` | ✅ | Per-competitor deep analysis: loads competitor + videos + user snapshots, renders CompetitorAnalysis (5 tabs) |
 | `app/(dashboard)/digest/page.tsx` | ✅ | Weekly digest view: list of past digests with preview, gap score, status |
-| `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with why/angle/format/length |
+| `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, notification toggles, account actions |
 | `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Dedicated notifications sub-page — only .gitkeep exists |
 | `app/page.tsx` | 🚧 | Placeholder only; full landing page — Week 3 |
@@ -697,6 +729,8 @@ const planLimits = {
 | `components/competitors/tabs/GrowthTab.tsx` | ✅ | Growth velocity chart comparing user vs competitor snapshots |
 | `components/competitors/tabs/VideosTab.tsx` | ✅ | Recent competitor videos list with velocity score and viral flag |
 | `components/competitors/tabs/InsightsTab.tsx` | ✅ | Fetches Claude insights via /api/competitors/insights, renders typed insight cards |
+| `components/ideas/IdeasClient.tsx` | ✅ | Full ideas client — loading stages, 3-hook content brief (Safe/Bolder/Most controversial), thumbnail generation button/download/regenerate, mark-as-planned/made, done section, regenerate confirmation modal |
+| `components/ideas/ThumbnailGenerationModal.tsx` | ✅ | Multi-step modal — choose_source → camera/upload/google_profile/no_photo → generating → completed/failed; resizes images client-side before upload; framer-motion transitions |
 | `components/ui/` | 🔲 | Reusable UI primitives — not yet extracted |
 | `components/charts/` | 🔲 | Recharts wrappers — not yet extracted |
 | `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
@@ -706,7 +740,7 @@ const planLimits = {
 
 | File | Status | Notes |
 |---|---|---|
-| `types/index.ts` | ✅ | All interfaces + additions: User (sub_niche fields, LS payment fields), Competitor (is_dominator, is_searched, sub_niche fields), PlanType, SubscriptionStatus updated to Lemon Squeezy strings |
+| `types/index.ts` | ✅ | All interfaces + additions: User (sub_niche fields, LS payment fields, thumbnail quota fields), Competitor (is_dominator, is_searched, sub_niche fields), Idea (thumbnail_image_url, thumbnail_generated_at, thumbnail_source_type, hook_2, hook_3), ThumbnailJob, PlanType, SubscriptionStatus updated to Lemon Squeezy strings |
 | `types/next-auth.d.ts` | ✅ | NextAuth session type extensions |
 
 ### Scripts / Dev tooling
@@ -731,6 +765,124 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 3 — Day 22 (2026-05-03)
+
+**Three-hook ideas feature + Gemini model rename**
+
+*lib/gemini-image.ts — model renamed*
+* Model string changed from `'gemini-2.5-flash-preview-05-20'` to `'gemini-2.5-flash-image'` — the stable production model ID replacing the preview.
+
+*types/index.ts — Idea interface extended*
+* Added `hook_2: string | null` and `hook_3: string | null` immediately after `content_brief`. Old ideas (before this deploy) will have both as null — rendered as `—` in the UI.
+
+*app/api/ideas/generate/route.ts — three-hook prompt + schema*
+* System prompt extended with explicit three-hook generation rules: Hook 1 (Safe) goes in `content_brief` sentence 1, `hook_2` = Bolder variant, `hook_3` = Most Controversial variant. All three hooks are alternative openers for the same video — same Angle/Structure/Takeaway. `hook_2`/`hook_3` contain hook text only.
+* `content_brief` JSON field description rewritten: now explicitly specifies exactly 4 sentences — Safe Hook → Angle → Structure → Takeaway — ensuring `parseContentBullets('. ')` always splits into 4 items that map to the UI labels.
+* `hook_2` and `hook_3` added to JSON schema as required string fields.
+* `ideaRows` mapping extracts both fields; logs a warning per idea if either is missing/empty and falls back to null — never fails the generation.
+* Return mapping passes `hook_2`/`hook_3` through from saved DB rows.
+* `max_tokens` bumped 3500 → 5000 to accommodate ~150-200 additional output tokens per idea for the two extra hooks.
+
+*lib/db.ts — getRecentIdeasBatch updated*
+* Row mapping now includes `hook_2: row.hook_2 ?? null` and `hook_3: row.hook_3 ?? null`.
+
+*components/ideas/IdeasClient.tsx — 3-variant hook section*
+* Hook bullet (index 0 of `parseContentBullets`) replaced with a 3-variant sub-section in **both** active-ideas render and done-ideas render.
+* Layout: "Hook:" label, then 3 rows — numbered 1/2/3, boldness label coloured (Safe: zinc-500, Bolder: amber-500, Most controversial: rose-500), hook text in zinc-300.
+* If `hook_2` or `hook_3` is null (old ideas), renders `—` with no label. No crash.
+* Remaining bullets (Angle, Structure, Takeaway) rendered via `parseContentBullets(content_brief).slice(1)` exactly as before.
+* Unused `contentLabels` variable removed from both render blocks.
+
+*Database migration required (run in Supabase SQL editor before testing):*
+```sql
+ALTER TABLE ideas
+  ADD COLUMN IF NOT EXISTS hook_2 TEXT,
+  ADD COLUMN IF NOT EXISTS hook_3 TEXT;
+```
+
+---
+
+### Week 3 — Day 21 (2026-05-01)
+
+**Thumbnail generation feature**
+
+*lib/gemini-image.ts — NEW*
+* `generateThumbnail(params)` — calls Gemini `gemini-2.5-flash-image` (previously `gemini-2.5-flash-preview-05-20`) with the creator's photo or a stick figure placeholder + thumbnail brief + video title. Returns `{ imageBase64 }` or `{ error }`.
+* Two modes: (1) real-photo mode — passes creator's actual face photo as image 1, stick figure as image 2 (ignored), instructs Gemini to place the creator prominently with strong emotion; (2) no-photo mode — passes stick figure only, instructs Gemini to transform it into an illustrated character (not a literal stick figure) matching the brief's visual style.
+* Prompt enforces 16:9 aspect ratio (1280×720), mobile-first design, max 4-6 word text overlays, high contrast, single focal point.
+* Uses `@google/genai` SDK with `Modality.IMAGE` output. Timeout: 30 seconds.
+
+*lib/thumbnail-storage.ts — NEW*
+* `uploadThumbnail(userId, ideaId, base64)` — decodes base64 PNG, uploads to Supabase Storage bucket `thumbnails` at path `{userId}/{ideaId}.png`, returns public URL. Overwrites existing file silently.
+* `deleteThumbnailFromStorage(userId, ideaId)` — removes file from storage. Called on regeneration and when ideas are pruned.
+* `loadStickFigureBase64()` — reads `public/stick-figure.png` from disk, returns base64 string for passing to Gemini.
+
+*lib/access.ts — canGenerateThumbnail added*
+* `ThumbnailQuota` interface: `{ allowed, reason, quotaUsed, quotaLimit, quotaResetAt }`.
+* Monthly quota limits: free → 0 (upgrade_required), starter → 12, pro → 40.
+* Auto-resets `thumbnails_generated_this_month` to 0 when `thumbnails_quota_reset_at` has passed (rolling 30-day window). Writes reset to DB on check.
+
+*lib/db.ts — 4 new functions*
+* `createThumbnailJob(params)` — inserts a `thumbnail_jobs` row with status `'pending'`.
+* `updateThumbnailJob(jobId, updates)` — partial update (status, thumbnail_url, error_message, completed_at).
+* `getThumbnailJob(jobId)` — fetch single job row.
+* `deleteAllUserThumbnails(userId)` — fetches all idea rows with `thumbnail_image_url` for a user, calls `deleteThumbnailFromStorage` for each, then nulls out the thumbnail columns on the ideas rows. Called at start of `/api/ideas/generate` so regeneration always starts clean.
+
+*app/api/ideas/[id]/generate-thumbnail/route.ts — NEW*
+* `POST /api/ideas/[id]/generate-thumbnail` — auth-gated, idea ownership verified.
+* Returns existing thumbnail immediately if one exists (no quota burn on re-open).
+* Calls `canGenerateThumbnail` — returns 403/402 if plan gated or quota exceeded.
+* Accepts `{ photoSource, photoBase64 }` from body. `photoSource` is `'camera' | 'upload' | 'google_profile' | 'no_photo'`. For Google profile: fetches creator's Google OAuth avatar URL from the session, downloads and base64-encodes it server-side.
+* Calls `generateThumbnail(params)` from `lib/gemini-image.ts`. On success: uploads to Supabase Storage via `uploadThumbnail`, writes `thumbnail_image_url + thumbnail_generated_at + thumbnail_source_type` to the ideas row, increments `users.thumbnails_generated_this_month`. Uses `after()` from `next/server` for the async DB writes so the response returns immediately after upload.
+* On Gemini error: returns `{ error }` with HTTP 500. Quota is NOT incremented on failure.
+
+*components/ideas/ThumbnailGenerationModal.tsx — NEW*
+* Multi-step modal with framer-motion transitions between steps.
+* Steps: `choose_source` → one of `camera | upload | google_profile | no_photo` → `generating` → `completed | failed`.
+* `choose_source`: 4 option cards — "Use my camera", "Upload a photo", "Use my Google profile photo", "No photo / illustrated". Disabled with explanation if Google profile photo is a default avatar.
+* `camera`: opens `getUserMedia`, renders live `<video>` preview, capture button saves frame to canvas → JPEG base64.
+* `upload`: file input, accepts image/*, resizes client-side to max 800px wide via `<canvas>` before sending.
+* `google_profile`: shows avatar preview, confirm button.
+* `no_photo`: instant — jumps to `generating`.
+* `generating`: spinner + rotating status messages ("Generating your thumbnail…", "Adding visual polish…", "Almost ready…").
+* `completed`: shows generated thumbnail image, download button, close button; fires `onSuccess(ideaId, thumbnailUrl)` callback.
+* `failed`: error message, retry button.
+* Image resizing: `resizeImageToBase64(file)` — renders to canvas, exports as JPEG at 0.85 quality.
+
+*IdeasClient.tsx — thumbnail integration*
+* `renderThumbnailSection(idea)`: if `thumbnail_image_url` exists, shows image + Download + Regenerate buttons. If not, shows "Generate thumbnail" button (disabled with quota message if exceeded) or "Upgrade to generate" for free plan.
+* "Regenerate" button opens the modal again; existing thumbnail overwritten on success.
+* `handleThumbnailSuccess(ideaId, url)` updates local `ideas` state so the card refreshes immediately without a page reload.
+* Regenerate confirmation modal warns users that regenerating ideas will delete saved thumbnails — uses `deleteAllUserThumbnails` server-side at start of `/api/ideas/generate`.
+
+*Database migrations required (run once in Supabase SQL editor):*
+```sql
+-- thumbnail_jobs table
+CREATE TABLE IF NOT EXISTS thumbnail_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  idea_id UUID NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  thumbnail_url TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+-- thumbnail columns on ideas
+ALTER TABLE ideas
+  ADD COLUMN IF NOT EXISTS thumbnail_image_url TEXT,
+  ADD COLUMN IF NOT EXISTS thumbnail_generated_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS thumbnail_source_type TEXT;
+
+-- quota columns on users
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS thumbnails_generated_this_month INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS thumbnails_quota_reset_at TIMESTAMPTZ;
+```
+
+---
 
 ### Week 2 — Day 20 (2026-04-29)
 
@@ -1579,6 +1731,12 @@ ALTER TABLE users
 * Ideas regeneration plan-gated (Day 20): Starter — 3 ideas, regenerate once per calendar month. Pro — 10 ideas, regenerate once per 7 days. Free → 403 upgrade_required. Limits enforced in /api/ideas/generate, read from lib/access.ts (getIdeaLimit). 429 returned with nextAvailable timestamp on limit hit. Client page.tsx pre-computes regenerateAvailableAt server-side and passes it to IdeasClient so the button is immediately in the correct state on page load.
 * Insight generation logic deduplicated (Day 20): generateAndCacheInsightsForCompetitor in lib/competitor-insights.ts is the single source of truth. Both /api/competitors/insights and /api/ideas/generate call it. Bracket-depth JSON parser used in both places — no regex fallback. Old inline data-loading in the route removed entirely.
 * Ideas stored as individual DB rows from Day 20 (Day 20): Previously, lib/idea-generator.ts stored ideas as a JSONB blob in a single `ideas` column per generation. The new pipeline inserts one row per idea with title, opportunity_score, thumbnail_description, content_brief, suggested_duration_min/max, duration_reasoning, why_now, topic_source, planned_at, made_at as individual columns. The `ideas JSONB NOT NULL` constraint was dropped. Old `getRecentIdeas` preserved for backward compat; new `getRecentIdeasBatch` returns the current batch.
+* Thumbnail generation uses Gemini not DALL-E (Day 21): Google Gemini gemini-2.5-flash-image is used for thumbnail generation rather than OpenAI DALL-E or Stable Diffusion. Reason: Gemini natively accepts multiple image inputs in a single call — the creator's face photo + stick figure reference can both be passed alongside the text prompt, enabling face-consistent thumbnails without a separate face-embedding step.
+* Thumbnail quota is per-user per-month not per-idea (Day 21): Monthly rolling quota (starter: 12, pro: 40) prevents runaway Gemini API costs. Quota is NOT incremented on generation failure — only successful uploads count. Auto-resets on first check after 30-day window expires. Quota state lives on the users table (thumbnails_generated_this_month + thumbnails_quota_reset_at) so it survives deployments.
+* Regenerating ideas deletes all saved thumbnails (Day 21): deleteAllUserThumbnails is called at the start of /api/ideas/generate before any Claude calls. This prevents orphaned thumbnails pointing to idea rows that no longer exist after the new generation. The IdeasClient shows a confirmation modal warning users to download thumbnails before regenerating.
+* Thumbnail modal uses client-side image resize before sending (Day 21): Camera captures and file uploads are resized to max 800px wide via canvas before being sent to the server as base64. This keeps request payloads under ~200KB regardless of the device's camera resolution. JPEG at 0.85 quality is sufficient for Gemini's image understanding — it doesn't need pixel-perfect source images.
+* Three hooks per idea ranked by boldness (Day 22): Each idea now has three hook variants — Safe (in content_brief sentence 1), Bolder (hook_2), Most Controversial (hook_3). All three lead to the same Angle/Structure/Takeaway — they are alternative openers for the same video, not three different ideas. The user picks the one matching their channel's comfort level. hook_2 and hook_3 are stored as separate nullable TEXT columns so old idea rows degrade gracefully (shown as —). The content_brief format is unchanged (4 sentences, '. ' delimited) — parseContentBullets requires no modification.
+* max_tokens bumped to 5000 for ideas generation (Day 22): Previously 3500. The two additional hook strings per idea (~150-200 tokens each × up to 10 ideas = ~2000 extra tokens) required headroom. 5000 gives comfortable space without over-provisioning.
 
 \---
 
@@ -1596,7 +1754,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-04-29 — Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
+*Last updated: 2026-05-03 — Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
+Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
 Previous Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
 Previous Day 18: Competitor auto-detection wired into /api/sync. detectAndAssignCompetitors added to lib/niche-engine.ts — searches YouTube once (101 quota units) for the user's niche, classifies all 50 results into Tier 1/2/Dominator buckets, picks best per tier, runs assignCompetitor in parallel via Promise.allSettled. assignCompetitor mirrors track/route.ts pipeline: DB insert → getCompetitorFullProfile → video rows → updateCompetitorMetrics → saveCompetitorSnapshot. Sync step 6 checks existingAutoCount===0 and calls detectAndAssignCompetitors wrapped in try/catch — never blocks the sync response.
 Previous Day 17 (part 2): Decoupled competitor sync from user channel sync in refresh-data cron. Single try/catch per user split into two independent blocks: Block 1 (user OAuth channel sync) failure no longer skips Block 2 (competitor DATA API sync). Each competitor wrapped in its own try/catch. Invalid channel IDs (not UC-prefixed or not 24 chars) skipped with log. Snapshot guarded on non-null subscriber_count. Insights cache wiped per-user after Block 2. Result: Sarah/Marcus/Humphrey get daily snapshots even when user token is expired.
