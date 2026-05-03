@@ -711,7 +711,7 @@ const planLimits = {
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, notification toggles, account actions |
 | `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Dedicated notifications sub-page — only .gitkeep exists |
-| `app/onboarding/page.tsx` | ✅ | 5-step onboarding wizard — URL state (?step=1..5), background sync on Step 1, skip anywhere Step 2+ |
+| `app/onboarding/page.tsx` | ✅ | 5-step onboarding wizard — URL state (?step=1..5), background sync on Step 1, skip anywhere Step 2+, browser back/forward syncs step state |
 | `app/page.tsx` | ✅ | Full landing page — Nagai hero, time-of-day sky system, feature grid, CTA, footer |
 | `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
 | `app/privacy/page.tsx` | 🔲 | Legal — Week 3 |
@@ -779,6 +779,42 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 3 — Day 25 (2026-05-04)
+
+**Onboarding polish — ideas in Step 5, mobile responsive, browser navigation fix**
+
+*components/onboarding/StepFirstAnalysis.tsx — MODIFIED*
+* `fetchResults` rewritten to auto-trigger idea generation when no ideas exist. Previously it called `Promise.allSettled([gap-score, ideas/latest])` and showed the fallback if ideas were empty. Now it: (1) fetches gap score, (2) fetches existing ideas, (3) if no ideas: calls `POST /api/ideas/generate` which auto-generates competitor insights + Claude ideas as a single pipeline, (4) fetches ideas again after successful generation. Falls back to fallback message gracefully if generation fails (free plan → 403, no competitors yet → empty insights).
+* `_stage` parameter renamed in `LOADING_STAGES.forEach` to suppress TypeScript unused-variable hint.
+* Gap score display: `text-7xl` → `text-5xl sm:text-7xl` — prevents 72px text overflowing on 390px mobile.
+* "Take me to my dashboard →" button: added `w-full sm:w-auto` — full-width on mobile, auto on sm+.
+* Idea title `break-words` added — prevents long titles overflowing card boundary on narrow screens.
+
+*components/onboarding/StepWelcome.tsx — MODIFIED*
+* "Let's go →" button: added `w-full sm:w-auto` for mobile full-width tap target.
+
+*components/onboarding/StepConfirmChannel.tsx — MODIFIED*
+* Buttons container: `flex gap-3` → `flex flex-col sm:flex-row gap-3 w-full sm:w-auto` — stacks vertically on mobile.
+* Both buttons: `py-2.5` → `py-3` (44px minimum tap target per iOS HIG), added `w-full sm:w-auto`.
+
+*components/onboarding/StepConfirmNiche.tsx — MODIFIED*
+* "That's right →" button: added `w-full sm:w-auto`.
+
+*components/onboarding/StepMeetCompetitors.tsx — MODIFIED*
+* "Show me my analysis →" button: added `w-full sm:w-auto`.
+* Timeout fallback "Continue →" button: added `w-full sm:w-auto`.
+
+*app/onboarding/page.tsx — MODIFIED*
+* Added `useEffect` that syncs `step` state with `searchParams` — browser back/forward now correctly updates the displayed step. Previously `step` was initialized from `searchParams` on mount only; pressing back changed the URL but left `step` at its current value (showing the wrong step). The sync effect calls `setStep(s)` whenever `searchParams` changes.
+
+*Skip flow verified (code review only — no changes needed):*
+* `step > 1` guard on skip button: ✓
+* `skipOnboarding` calls `POST /api/onboarding/complete` then `router.push('/dashboard')`: ✓
+* Error handling — try/catch, redirects even if complete fails: ✓
+* `/api/onboarding/complete` requires auth (401), sets `onboarding_completed=true`, returns `{success:true}`: ✓
+
+---
 
 ### Week 3 — Day 24 (2026-05-04)
 
@@ -1905,7 +1941,7 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-04 — Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
+*Last updated: 2026-05-04 — Day 25: Onboarding polish. StepFirstAnalysis auto-triggers /api/ideas/generate when ideas table is empty (full pipeline: insights + ideas in one call). Mobile responsive: all buttons w-full sm:w-auto, StepConfirmChannel buttons flex-col sm:flex-row with py-3 tap targets, gap score text-5xl sm:text-7xl, idea title break-words. page.tsx searchParams sync effect fixes browser back/forward. Skip flow verified correct (no changes). Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
 Previous Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
 Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
 Previous Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
