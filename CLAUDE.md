@@ -668,9 +668,11 @@ const planLimits = {
 | Route | Status | Notes |
 |---|---|---|
 | `app/api/auth/[...nextauth]/route.ts` | ✅ | NextAuth v5 with Google + YouTube scopes |
-| `app/api/sync/route.ts` | ✅ | Auth-gated + cron bypass; now also fires sub-niche detection fire-and-forget on first sync |
+| `app/api/sync/route.ts` | ✅ | Thin session-auth wrapper around `lib/sync-logic.ts`; fires sub-niche detection fire-and-forget on first sync |
+| `lib/sync-logic.ts` | ✅ | `syncUserChannel` + `refreshAccessToken` — all user analytics sync logic; callable without HTTP |
+| `app/api/cron/user-sync/route.ts` | ✅ | Daily 3am UTC; calls `syncUserChannel()` directly per user via Promise.allSettled |
 | `app/api/cron/weekly-digest/route.ts` | ✅ | Runs every Monday 9am UTC; generateDigest for all active users |
-| `app/api/cron/refresh-data/route.ts` | ✅ | Runs daily 3am UTC; calls /api/sync for every active user via cron bypass |
+| `app/api/cron/refresh-data/route.ts` | ✅ | Runs daily 3am UTC; competitor data sync only (user sync moved to user-sync cron) |
 | `app/api/cron/trend-detection/route.ts` | ✅ | Runs daily 6am UTC; fetches competitor videos, calculates velocity + is_viral |
 | `app/api/cron/cache-cleanup/route.ts` | ✅ | Runs daily 2am UTC; purges expired searched_channels_cache + search_history >90 days |
 | `app/api/cron/sub-niche-detection/route.ts` | ✅ | Runs daily 5am UTC; refreshes sub_niche for users missing it or stale >30 days |
@@ -786,6 +788,42 @@ const planLimits = {
 
 *app/layout.tsx — updated*
 * Added `SessionProvider` from `next-auth/react` wrapping `{children}` in the body. Required for `useSession` in the landing page (and any other client component) to work. Instrument Serif font link was already present.
+
+---
+
+### Week 3 — Day 22b (2026-04-30)
+
+**Three infrastructure fixes: sync refactor, niche avg chart, insights truncation**
+
+*lib/sync-logic.ts — NEW*
+* Extracted `syncUserChannel(userId)` and `refreshAccessToken(userId, refreshToken)` out of `app/api/sync/route.ts` into a standalone library module. Single callable function — no HTTP required. Used by both the HTTP route and the new cron directly.
+* `syncUserChannel` runs all 5 YouTube Analytics calls in parallel, token-refreshes on expiry, saves channel snapshot + video data via `lib/db.ts`. Returns `{ success, channelSnapshot, videosSynced, message }`.
+
+*app/api/sync/route.ts — thinned to ~30 lines*
+* Now a pure session-auth wrapper around `syncUserChannel()`. All business logic removed. Cron bypass path (`x-cron-user-id` header) removed — nothing uses it after the dedicated `user-sync` cron was added.
+
+*app/api/cron/user-sync/route.ts — NEW*
+* Daily cron at 3am UTC (replaces the self-HTTP call in `refresh-data`). Queries all eligible users, calls `syncUserChannel()` directly via `Promise.allSettled` — no inter-service HTTP. Returns `{ processed, succeeded, failed }`.
+
+*app/api/cron/refresh-data/route.ts — Block 1 removed*
+* The self-HTTP call to `/api/sync` per user (Block 1) is gone. `refresh-data` now only handles competitor data sync (Block 2). User analytics sync is handled entirely by `user-sync`.
+
+*lib/db.ts — getNicheAvgViewsPerVideo added*
+* `getNicheAvgViewsPerVideo(userId)` — computes niche average views/video by averaging each Tier 1 competitor's own views from videos published in the last 30 days. Uses `competitor_videos.published_at` not `synced_at` so back-filled historical videos are included. Returns `number | null`.
+* Replaces the broken snapshot-date join approach (which produced zero overlap since competitors have 1 snapshot vs 30 days of user snapshots).
+
+*components/dashboard/DashboardClient.tsx — niche avg line fix*
+* Old: tried to join `competitorSnapshots` by date to draw a daily niche-avg line — zero matches, line never rendered.
+* New: receives `nicheAvgViews: number | null` scalar from the page and renders it as a Recharts `<ReferenceLine>` (horizontal dashed line) on the You vs Niche chart. Semantically correct for a rolling-window metric.
+* Top Ideas panel now reads from the `ideas` table (highest `opportunity_score`) instead of parsing digest text.
+
+*components/charts/SubscriberGrowthChart.tsx — dots added*
+* Added `dot={{ r: 2 }}` to competitor `<Line>` components so each data point is visibly marked, not just the connecting line.
+
+*lib/competitor-insights.ts — truncation salvage + token bump*
+* `max_tokens` raised from 1800 → 3500 to prevent mid-sentence truncation on longer insight sets.
+* Added truncation salvage pass: when full JSON parse fails, walks backwards through the raw response from the last `}` character, tries slicing at each `}` + appending `]` and calling `JSON.parse`. Returns the first slice that produces ≥ 3 complete, valid insight objects. Logs a warning with the salvage count. Falls back to empty array only when fewer than 3 can be recovered.
+* `REQUIRED_FIELDS` guard (`['type', 'title', 'description', 'priority']`) filters out any partially-written objects in the salvaged slice.
 
 ---
 
@@ -1741,6 +1779,8 @@ ALTER TABLE users
 * Competitor insights max_tokens set to 1800 (Day 17): The expanded prompt passes ~4× more data (best/worst videos, gap scores, viral videos, subscriber growth, revenue). 1800 tokens gives Claude enough room to generate 6-8 thorough insights with specific numbers and concrete next actions in each. Higher than 1800 provides diminishing returns for 6-8 insights and increases cost per generation.
 * Competitor insights prompt instructs 6-8 insights not 5-7 (Day 17): The additional data points (best/worst video patterns, viral title analysis, subscriber growth framing) each warrant their own insight. 5-7 forced Claude to merge distinct analyses; 6-8 produces cleaner, more actionable individual cards.
 * Competitor data refresh never depends on user OAuth token (Day 17): The daily cron's competitor sync uses the YouTube DATA API (public, no auth). It is implemented as Block 2 — a completely independent try/catch that always executes after Block 1 (user channel sync) regardless of Block 1's outcome. This ensures competitors receive daily snapshots even when the user's token is expired or revoked.
+* Sync logic extracted to lib/sync-logic.ts, separate user-sync cron added (Day 22b): User channel analytics sync was previously triggered by refresh-data calling /api/sync over HTTP. This created latency (HTTP round-trip per user), dependency on the server being up, and coupling between user sync and competitor sync failures. Fix: extracted all sync logic into lib/sync-logic.ts callable directly. Dedicated app/api/cron/user-sync runs at 3am UTC calling syncUserChannel() per user via Promise.allSettled. refresh-data now only handles competitor data. The /api/sync HTTP route is kept as a thin session-auth wrapper for dashboard-triggered syncs.
+* Niche avg line uses ReferenceLine from competitor_videos, not snapshot join (Day 22b): The You vs Niche chart tried to build a daily niche-avg line by joining user channel_snapshots to competitor_snapshots on exact date. Zero overlap in practice — competitors have 1 snapshot per day vs 30 days of user snapshots, and sync timing offsets mean dates never match. Fix: getNicheAvgViewsPerVideo() computes a single scalar avg from competitor_videos.view_count for videos published in the last 30 days and passes it as a Recharts ReferenceLine. A horizontal reference line is semantically correct for a rolling-window benchmark.
 * Auto-detection runs in /api/sync, per-tier check (Day 18, updated Day 19): Detection fires when any of tier 1/2/3 has no active auto-detected competitor. Changed from `existingAutoCount === 0` (first sync only) to per-tier Set check — handles both first-time onboarding and recovery after inactive competitors are removed. O(1) per sync when all tiers are filled.
 * Auto-detection falls back to 45,000 subscribers if no snapshot exists yet (Day 18): The first sync may not yield a channel snapshot (e.g. OAuth quota issues, non-monetized channel). Rather than skip detection entirely, the fallback of 45K gives reasonable Tier 1/2/Dominator ranges for a typical US finance creator and avoids a chicken-and-egg dependency between snapshots and competitor detection.
 * Auto-detection never blocks the sync response (Day 18): `detectAndAssignCompetitors` is called with `await` inside a try/catch. The catch logs the error and continues — the sync JSON response is built and returned regardless of detection outcome. Partial detection is kept; the missing tier will auto-fill on the next sync.
@@ -1777,7 +1817,7 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-03 — Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
+*Last updated: 2026-05-03 — Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
 Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
 Previous Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
 Previous Day 18: Competitor auto-detection wired into /api/sync. detectAndAssignCompetitors added to lib/niche-engine.ts — searches YouTube once (101 quota units) for the user's niche, classifies all 50 results into Tier 1/2/Dominator buckets, picks best per tier, runs assignCompetitor in parallel via Promise.allSettled. assignCompetitor mirrors track/route.ts pipeline: DB insert → getCompetitorFullProfile → video rows → updateCompetitorMetrics → saveCompetitorSnapshot. Sync step 6 checks existingAutoCount===0 and calls detectAndAssignCompetitors wrapped in try/catch — never blocks the sync response.
