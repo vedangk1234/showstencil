@@ -691,6 +691,11 @@ const planLimits = {
 | `app/api/ideas/[id]/plan/route.ts` | ✅ | POST mark idea as planned — sets planned_at |
 | `app/api/ideas/[id]/made/route.ts` | ✅ | POST mark idea as made — sets made_at |
 | `app/api/ideas/[id]/generate-thumbnail/route.ts` | ✅ | POST generate thumbnail — plan + quota gate, fetches creator photo (camera/upload/Google profile/no-photo), calls Gemini via lib/gemini-image.ts, uploads to Supabase Storage, updates ideas row; uses next/server after() for async DB writes |
+| `app/api/user/profile/route.ts` | ✅ | GET user profile + subscriber count; PATCH niche_id (validated against 12-niche list) |
+| `app/api/competitors/route.ts` | ✅ | GET competitor list for authenticated user, supports ?active=true filter |
+| `app/api/gap-score/latest/route.ts` | ✅ | GET most recent gap_scores row (overall_score, primary_bottleneck, all per-metric scores) |
+| `app/api/ideas/latest/route.ts` | ✅ | GET top 3 most recent ideas with non-null opportunity_score, ordered by generated_at DESC |
+| `app/api/onboarding/complete/route.ts` | ✅ | POST sets onboarding_completed=true — called by Step 5 and skip link |
 
 ### App pages
 
@@ -706,6 +711,7 @@ const planLimits = {
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, notification toggles, account actions |
 | `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Dedicated notifications sub-page — only .gitkeep exists |
+| `app/onboarding/page.tsx` | ✅ | 5-step onboarding wizard — URL state (?step=1..5), background sync on Step 1, skip anywhere Step 2+ |
 | `app/page.tsx` | ✅ | Full landing page — Nagai hero, time-of-day sky system, feature grid, CTA, footer |
 | `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
 | `app/privacy/page.tsx` | 🔲 | Legal — Week 3 |
@@ -733,6 +739,12 @@ const planLimits = {
 | `components/competitors/tabs/InsightsTab.tsx` | ✅ | Fetches Claude insights via /api/competitors/insights, renders typed insight cards |
 | `components/ideas/IdeasClient.tsx` | ✅ | Full ideas client — loading stages, 3-hook content brief (Safe/Bolder/Most controversial), thumbnail generation button/download/regenerate, mark-as-planned/made, done section, regenerate confirmation modal |
 | `components/ideas/ThumbnailGenerationModal.tsx` | ✅ | Multi-step modal — choose_source → camera/upload/google_profile/no_photo → generating → completed/failed; resizes images client-side before upload; framer-motion transitions |
+| `components/onboarding/OnboardingProgress.tsx` | ✅ | Animated dot progress bar — completed=green, current=wide white pill, future=zinc-700 |
+| `components/onboarding/StepWelcome.tsx` | ✅ | Hero step — Instrument Serif heading, italic amber accent, fires sync on "Let's go" |
+| `components/onboarding/StepConfirmChannel.tsx` | ✅ | Polls /api/user/profile, shows avatar/name/subs, "Wrong account" signout |
+| `components/onboarding/StepConfirmNiche.tsx` | ✅ | Polls for niche detection (1.5s × 20), dropdown override, PATCH on change |
+| `components/onboarding/StepMeetCompetitors.tsx` | ✅ | Polls for all 3 tiers (2s × 30), staggered reveal, tier badges, partial/timeout fallback |
+| `components/onboarding/StepFirstAnalysis.tsx` | ✅ | 20s progress bar + stage labels, fetches gap score + latest idea, reveal with fallback |
 | `components/ui/` | 🔲 | Reusable UI primitives — not yet extracted |
 | `components/charts/` | 🔲 | Recharts wrappers — not yet extracted |
 | `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
@@ -767,6 +779,78 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 3 — Day 24 (2026-05-04)
+
+**5-step onboarding flow — replaces the flag-flip + spinner**
+
+*app/onboarding/page.tsx — NEW*
+* Client Component (`'use client'`) at `/onboarding` — outside the `(dashboard)` route group so it uses only the root layout (no sidebar, no auth guard from the dashboard).
+* URL state: `?step=1..5` — parsed from `useSearchParams()` on mount so refreshing on any step returns to that step.
+* `startBackgroundSync()` — fires `POST /api/sync` once when user clicks "Let's go" on Step 1. Guarded by `syncStarted` ref so it never double-fires. `await` is intentional so sync runs in background while user reads channel info on Step 2.
+* `skipOnboarding()` — fires `POST /api/onboarding/complete` then pushes to `/dashboard`. Available on all steps after Step 1.
+* Wrapped in `<Suspense>` so `useSearchParams()` works safely in Next.js App Router without breaking static rendering.
+
+*components/onboarding/OnboardingProgress.tsx — NEW*
+* Dot row: completed steps = small green dots, current step = wide white pill, future steps = small zinc-700 dots. CSS `transition-all duration-300` for smooth width changes.
+* Label below: `"Step N of 5 — [Label]"` in `font-mono uppercase tracking-widest`.
+
+*components/onboarding/StepWelcome.tsx — NEW*
+* Instrument Serif heading: "Find out exactly why your competitors are *growing faster* than you."
+* Italic `<em>` in `text-amber-200` for the accent phrase — matches landing page aesthetic.
+* No skip link on this step — user must click "Let's go" to start the sync.
+
+*components/onboarding/StepConfirmChannel.tsx — NEW*
+* Fetches `/api/user/profile` on mount to get channel name, thumbnail, subscriber count.
+* Falls back to `session.user.name` / `session.user.image` if API fails.
+* Fallback initial avatar (letter in zinc-800 circle) when no thumbnail URL.
+* "Wrong account" button calls `signOut({ callbackUrl: '/' })` from `next-auth/react`.
+
+*components/onboarding/StepConfirmNiche.tsx — NEW*
+* Polls `/api/user/profile` every 1.5s up to 20 attempts (30 seconds) waiting for `niche_id` to populate.
+* Shows spinner during detection, reveals detected niche in heading + dropdown on success.
+* Dropdown defaults to `finance` after timeout (best guess for US creators).
+* If niche was changed from detected value, fires `PATCH /api/user/profile` with `{ niche_id }` before advancing.
+* Heading phrase updates live as dropdown changes: "Based on your recent videos, you create *[Niche]* content."
+
+*components/onboarding/StepMeetCompetitors.tsx — NEW*
+* Polls `/api/competitors?active=true` every 2s up to 30 attempts (60 seconds).
+* Considers detection complete when all 3 tiers are present (`tier===1`, `tier===2`, `is_dominator||tier===3`).
+* Partial detection (1-2 competitors after 20 attempts / 40s): shows whatever was found and lets user continue.
+* Full timeout (60s) with empty list: shows "still finding" fallback with Continue button.
+* Stagger reveal animation: competitor cards fade + slide in with 200ms per-card delay via inline `transitionDelay` CSS.
+* Tier badges: Tier 1 = blue, Tier 2 = purple, Dominator = amber — matching existing `TierBadge` colour scheme.
+
+*components/onboarding/StepFirstAnalysis.tsx — NEW*
+* Single `setInterval` progress ticker from mount — advances 0→99% over 20s total using `TOTAL_DURATION` constant. No per-stage timer conflicts.
+* Stage labels rotate on a fixed schedule (cumulative setTimeout array, all cleaned up on unmount) — completely independent from the progress bar.
+* `fetchedRef` prevents double-fetch when `stageIndex` fires the effect on re-renders.
+* After stages complete: `Promise.allSettled` on `/api/gap-score/latest` + `/api/ideas/latest`. Both failures handled gracefully — shows fallback "still running in background" card.
+* Reveal: gap score in `text-7xl italic text-amber-200 font-serif`, primary bottleneck card, first video idea card with title + why_now.
+* "Take me to my dashboard" fires `POST /api/onboarding/complete` then `router.push('/dashboard')`.
+
+*app/api/user/profile/route.ts — NEW*
+* `GET` — returns `niche_id, sub_niche, youtube_channel_id, onboarding_completed, name, channel_name, channel_thumbnail, subscriber_count` (subscriber_count from latest non-null channel_snapshots row).
+* `PATCH` — accepts `{ niche_id }`, validates against 12-item VALID_NICHES list, writes `niche_id + niche_detected_at` to users table.
+
+*app/api/competitors/route.ts — NEW*
+* `GET` — returns all competitors for authenticated user. Supports `?active=true` filter. Selects `id, channel_name, channel_thumbnail, subscriber_count, tier, is_dominator, sub_niche, is_active, is_auto_detected` ordered by tier ascending.
+
+*app/api/gap-score/latest/route.ts — NEW*
+* `GET` — returns the most recent `gap_scores` row for the user (`overall_score, primary_bottleneck, estimated_revenue_gap` + all per-metric scores). Returns `{ overall_score: null }` when no rows exist.
+
+*app/api/ideas/latest/route.ts — NEW*
+* `GET` — returns up to 3 most recent ideas with non-null `opportunity_score`, ordered by `generated_at DESC`. Returns `{ ideas: [] }` when none exist.
+
+*app/api/onboarding/complete/route.ts — NEW*
+* `POST` — auth-gated, sets `onboarding_completed = true` on the users table. Called by Step 5 "Take me to my dashboard" and by "Skip onboarding" on all other steps.
+
+*app/(dashboard)/layout.tsx — MODIFIED*
+* `updateUserOnboardingStatus` import removed — no longer auto-flips the flag.
+* After `getUser()`: if `!user` → `redirect('/login')`; if `!user.onboarding_completed` → `redirect('/onboarding')`.
+* `SyncProvider` kept for returning users but `needsSync={false}` always — first sync is now handled by the onboarding flow, daily syncs are handled by the `user-sync` cron.
+
+---
 
 ### Week 3 — Day 23 (2026-05-03)
 
@@ -1800,6 +1884,10 @@ ALTER TABLE users
 * Thumbnail modal uses client-side image resize before sending (Day 21): Camera captures and file uploads are resized to max 800px wide via canvas before being sent to the server as base64. This keeps request payloads under ~200KB regardless of the device's camera resolution. JPEG at 0.85 quality is sufficient for Gemini's image understanding — it doesn't need pixel-perfect source images.
 * Three hooks per idea ranked by boldness (Day 22): Each idea now has three hook variants — Safe (in content_brief sentence 1), Bolder (hook_2), Most Controversial (hook_3). All three lead to the same Angle/Structure/Takeaway — they are alternative openers for the same video, not three different ideas. The user picks the one matching their channel's comfort level. hook_2 and hook_3 are stored as separate nullable TEXT columns so old idea rows degrade gracefully (shown as —). The content_brief format is unchanged (4 sentences, '. ' delimited) — parseContentBullets requires no modification.
 * max_tokens bumped to 5000 for ideas generation (Day 22): Previously 3500. The two additional hook strings per idea (~150-200 tokens each × up to 10 ideas = ~2000 extra tokens) required headroom. 5000 gives comfortable space without over-provisioning.
+* Onboarding lives at /onboarding outside the (dashboard) route group (Day 24): The wizard uses only the root layout (SessionProvider only — no sidebar, no auth guard). New users arriving from the OAuth callback hit /onboarding and complete the 5 steps before ever seeing the dashboard. This avoids the sidebar flash and keeps the onboarding UX clean. The dashboard layout now hard-redirects onboarding_completed=false users to /onboarding so there's no way to access the dashboard mid-onboarding.
+* Sync fires on Step 1 "Let's go", not on page load (Day 24): POST /api/sync is called when the user clicks "Let's go" — not on onboarding page load. This prevents wasted sync calls if the user lands on /onboarding and immediately bounces. The `syncStarted` boolean guard in the page component ensures it fires exactly once per onboarding session regardless of re-renders.
+* Step 5 (FirstAnalysis) uses a fixed-schedule timer, not per-stage timers (Day 24): A single setInterval from mount drives the progress bar (elapsed / TOTAL_DURATION × 100). Stage label rotation uses a separate array of cumulative-offset setTimeouts built once on mount. This avoids the drift and restart issues that per-stage interval/timeout pairs cause when effects re-run.
+* onboarding_completed is set to true only at the end — never mid-flow (Day 24): Both "Take me to my dashboard" (Step 5) and "Skip onboarding →" (Steps 2-5) fire POST /api/onboarding/complete before redirecting. The dashboard layout checks this flag and redirects back to /onboarding if still false. This means partial onboarding completions are recoverable — the user returns to Step 1 (or whatever ?step= is in the URL) on next login.
 
 \---
 
@@ -1817,7 +1905,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-03 — Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
+*Last updated: 2026-05-04 — Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
+Previous Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
 Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
 Previous Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
 Previous Day 18: Competitor auto-detection wired into /api/sync. detectAndAssignCompetitors added to lib/niche-engine.ts — searches YouTube once (101 quota units) for the user's niche, classifies all 50 results into Tier 1/2/Dominator buckets, picks best per tier, runs assignCompetitor in parallel via Promise.allSettled. assignCompetitor mirrors track/route.ts pipeline: DB insert → getCompetitorFullProfile → video rows → updateCompetitorMetrics → saveCompetitorSnapshot. Sync step 6 checks existingAutoCount===0 and calls detectAndAssignCompetitors wrapped in try/catch — never blocks the sync response.
