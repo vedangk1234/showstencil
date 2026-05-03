@@ -737,6 +737,7 @@ async function runPhase4() {
   // 4.2 — sendWeeklyDigest
   try {
     const fakeDigest: DigestResult = {
+      id: 'test-digest-id',
       userId: SEEDED_USER_ID,
       generatedAt: new Date().toISOString(),
       overallGapScore: 58,

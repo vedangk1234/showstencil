@@ -297,6 +297,7 @@ export interface UncoveredTopic {
 
 // Digest generator — structured result returned by generateDigest
 export interface DigestResult {
+  id: string;                        // saved digests row UUID
   userId: string;
   generatedAt: string;              // ISO timestamp
   overallGapScore: number;

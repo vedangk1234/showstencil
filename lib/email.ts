@@ -116,26 +116,24 @@ export async function sendWeeklyDigest(
       return true
     }
 
-    // 3. Load latest generated ideas from ideas table
-    const { data: ideasRow } = await supabase
+    // 3. Load latest generated ideas from ideas table (new per-row schema from Day 20)
+    const { data: ideaRows } = await supabase
       .from('ideas')
-      .select('ideas')
+      .select('title, opportunity_score, why_now')
       .eq('user_id', userId)
+      .is('made_at', null)
+      .order('opportunity_score', { ascending: false })
       .order('generated_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    type RawIdea = { rank: number; title: string; score: number; whyNow: string }
-    const rawIdeas = (ideasRow?.ideas as RawIdea[] | null) ?? null
+      .limit(3)
 
     // Build video ideas array — prefer DB ideas, fall back to digest-parsed ideas
     const videoIdeas: { rank: number; title: string; score: number; whyNow: string }[] =
-      rawIdeas && rawIdeas.length > 0
-        ? rawIdeas.slice(0, 3).map((idea) => ({
-            rank: idea.rank ?? 1,
+      ideaRows && ideaRows.length > 0
+        ? ideaRows.map((idea, i) => ({
+            rank: i + 1,
             title: idea.title,
-            score: idea.score ?? 50,
-            whyNow: idea.whyNow ?? '',
+            score: idea.opportunity_score ?? 50,
+            whyNow: idea.why_now ?? '',
           }))
         : digestData.videoIdeasParsed.slice(0, 3).map((idea, i) => ({
             rank: i + 1,
@@ -166,11 +164,22 @@ export async function sendWeeklyDigest(
 
     const userAvgViews = snapshot?.avg_views_per_video ?? 0
 
-    // Estimate competitor avg views from gap score
-    // Higher gap score → larger competitor avg relative to user
+    // Load real Tier 1 competitor avg views from DB
+    const { data: tier1Competitors } = await supabase
+      .from('competitors')
+      .select('avg_views_per_video')
+      .eq('user_id', userId)
+      .eq('tier', 1)
+      .eq('is_active', true)
+      .eq('is_dominator', false)
+      .not('avg_views_per_video', 'is', null)
+
     const competitorAvgViews =
-      userAvgViews > 0
-        ? Math.round(userAvgViews * (1 + digestData.overallGapScore / 100))
+      tier1Competitors && tier1Competitors.length > 0
+        ? Math.round(
+            tier1Competitors.reduce((sum, c) => sum + (c.avg_views_per_video ?? 0), 0) /
+              tier1Competitors.length,
+          )
         : 0
 
     // 6. Load competitor viral videos for this user
@@ -235,17 +244,26 @@ export async function sendWeeklyDigest(
         videoIdeas,
         oneChange: digestData.sections.oneChange,
         unsubscribeToken,
+        viewFullAnalysisUrl: `${APP_URL}/digest/${digestData.id}`,
       }),
     )
 
     // 10. Send via Resend
-    const subject = `Your ShowStencil digest — ${weekDate} · Gap score: ${digestData.overallGapScore} · ${videoIdeas.length} ideas ready`
+    const firstName = user.name?.split(' ')[0] ?? 'creator'
+    const subject = `Your weekly analysis is ready, ${firstName}`
 
     const { data: sendData, error: sendError } = await resend.emails.send({
       from: `ShowStencil <${FROM_EMAIL}>`,
       to: user.email,
       subject,
       html: emailHtml,
+      headers: {
+        'X-Priority': '1',
+        'X-MSMail-Priority': 'High',
+        Importance: 'high',
+        'List-Unsubscribe': `<${APP_URL}/api/unsubscribe?token=${unsubscribeToken}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
     })
 
     if (sendError) {
@@ -362,6 +380,10 @@ export async function sendTrendAlert(
       to: user.email,
       subject,
       html: emailHtml,
+      headers: {
+        'List-Unsubscribe': `<${APP_URL}/api/unsubscribe?token=${unsubscribeToken}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
     })
 
     if (sendError) {

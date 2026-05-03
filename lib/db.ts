@@ -817,6 +817,33 @@ export async function getRecentDigests(userId: string, limit = 3): Promise<impor
 }
 
 // ---------------------------------------------------------------------------
+// getDigestById
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a single digest by ID, or null if not found.
+ * The caller must verify that the returned digest belongs to the requesting user.
+ */
+export async function getDigestById(digestId: string): Promise<import('@/types').Digest | null> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('digests')
+    .select('*')
+    .eq('id', digestId)
+    .single()
+
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      console.error('[db] getDigestById error:', error.message)
+    }
+    return null
+  }
+
+  return data as import('@/types').Digest
+}
+
+// ---------------------------------------------------------------------------
 // getLatestTrend
 // ---------------------------------------------------------------------------
 

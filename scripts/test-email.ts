@@ -19,6 +19,7 @@ import type { DigestResult } from '@/types'
 const USER_ID = '848f7497-9a46-40a3-8d90-a96d1c9cf909'
 
 const fakeDigest: DigestResult = {
+  id: 'test-digest-id',
   userId: USER_ID,
   generatedAt: new Date().toISOString(),
   overallGapScore: 58,

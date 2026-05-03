@@ -588,7 +588,7 @@ export default function DashboardClient({
             : '—'
 
           return (
-            <a key={d.id} href="/digest" className="grid grid-cols-[140px_70px_1fr_110px] gap-4 px-[22px] py-[14px] border-b border-dashed border-stencil-line items-center no-underline text-inherit">
+            <a key={d.id} href={`/digest/${d.id}`} className="grid grid-cols-[140px_70px_1fr_110px] gap-4 px-[22px] py-[14px] border-b border-dashed border-stencil-line items-center no-underline text-inherit">
               <span className="font-mono text-[11.5px] text-stencil-ink2">
                 {fmtWeek(d.week_start_date)}
               </span>
@@ -606,7 +606,7 @@ export default function DashboardClient({
           )
         }) : (
           <div className="px-[22px] py-8 text-center">
-            <Empty>No digests generated yet. Your first arrives Monday.</Empty>
+            <Empty>No digests yet. Your first digest arrives on Monday at 9 AM UTC.</Empty>
           </div>
         )}
       </div>

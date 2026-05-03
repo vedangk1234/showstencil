@@ -39,6 +39,7 @@ const TEST_EMAIL = 'vedangk2912@gmail.com'
   console.log(`Using digest from: ${digest.created_at}`)
 
   const digestResult: DigestResult = {
+    id: digest.id as string,
     userId: user.id,
     generatedAt: digest.created_at,
     overallGapScore: (digest.key_metrics as { overallGapScore?: number })?.overallGapScore ?? 0,

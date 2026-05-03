@@ -51,6 +51,7 @@ export interface WeeklyDigestEmailProps {
   }[]
   oneChange: string
   unsubscribeToken: string
+  viewFullAnalysisUrl?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +89,7 @@ export function WeeklyDigestEmail({
   videoIdeas,
   oneChange,
   unsubscribeToken,
+  viewFullAnalysisUrl,
 }: WeeklyDigestEmailProps) {
   const viewsDelta =
     metrics.competitorAvgViews > 0 && metrics.userAvgViews < metrics.competitorAvgViews
@@ -238,7 +240,7 @@ export function WeeklyDigestEmail({
 
           {/* ── SECTION 6: Footer ─────────────────────────────────────── */}
           <Section style={footerSectionStyle}>
-            <Button href={`${APP_URL}/digest`} style={ctaButtonStyle}>
+            <Button href={viewFullAnalysisUrl ?? `${APP_URL}/digest`} style={ctaButtonStyle}>
               View full analysis →
             </Button>
 

@@ -541,40 +541,79 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
   const videoIdeasParsed = parseVideoIdeas(sections.videoIdeas);
 
   // -------------------------------------------------------------------------
-  // Step 8: Save to digests table
+  // Step 8: Compute week_start_date (Monday UTC) + dedup check
   // -------------------------------------------------------------------------
   const weekStart = new Date();
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-  const weekStartDate = weekStart.toISOString().slice(0, 10);
+  weekStart.setUTCHours(0, 0, 0, 0);
+  const dayOfWeek = weekStart.getUTCDay();
+  const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  weekStart.setUTCDate(weekStart.getUTCDate() + daysToMonday);
+  const weekStartDate = weekStart.toISOString().split('T')[0];
 
-  const { error: digestError } = await supabase.from('digests').insert({
-    user_id: userId,
-    week_start_date: weekStartDate,
-    content: rawMarkdown,
-    video_ideas: videoIdeasParsed,
-    key_metrics: {
-      overallGapScore: gapScore.overallScore,
-      avgViews: avgViewsPerVideo,
-      ctr: avgCtr,
-      avgWatchSeconds,
-      uploadsPerMonth,
-      revenueGap: gapScore.revenueGap.gapMonthly,
-      usedFallback,
-      generatedAt,
-    },
-    created_at: generatedAt,
-  });
+  const { data: existingDigest } = await supabase
+    .from('digests')
+    .select('id, content, video_ideas, key_metrics, created_at')
+    .eq('user_id', userId)
+    .eq('week_start_date', weekStartDate)
+    .maybeSingle();
 
-  if (digestError) {
-    console.error('[digest-generator] Failed to save digest:', digestError.message);
+  if (existingDigest) {
+    console.log(`[digest-generator] Already generated for week ${weekStartDate} — skipping`);
+    const km = (existingDigest.key_metrics as Record<string, unknown> | null) ?? {};
+    const existingIdeas = (existingDigest.video_ideas ?? []) as DigestVideoIdea[];
+    const existingSections = {
+      thisWeek: extractSection(existingDigest.content ?? '', 'This week'),
+      competitorMoves: extractSection(existingDigest.content ?? '', 'What your competitors did'),
+      videoIdeas: extractSection(existingDigest.content ?? '', 'Your 3 video ideas'),
+      oneChange: extractSection(existingDigest.content ?? '', 'One thing to change this week'),
+    };
+    return {
+      id: existingDigest.id as string,
+      userId,
+      generatedAt: existingDigest.created_at as string,
+      overallGapScore: (km.overallGapScore as number | undefined) ?? 0,
+      sections: existingSections,
+      rawMarkdown: existingDigest.content ?? '',
+      videoIdeasParsed: existingIdeas,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 9: Save to digests table
+  // -------------------------------------------------------------------------
+  const { data: savedDigest, error: digestError } = await supabase
+    .from('digests')
+    .insert({
+      user_id: userId,
+      week_start_date: weekStartDate,
+      content: rawMarkdown,
+      video_ideas: videoIdeasParsed,
+      key_metrics: {
+        overallGapScore: gapScore.overallScore,
+        avgViews: avgViewsPerVideo,
+        ctr: avgCtr,
+        avgWatchSeconds,
+        uploadsPerMonth,
+        revenueGap: gapScore.revenueGap.gapMonthly,
+        usedFallback,
+        generatedAt,
+      },
+      created_at: generatedAt,
+    })
+    .select('id')
+    .single();
+
+  if (digestError || !savedDigest) {
+    console.error('[digest-generator] Failed to save digest:', digestError?.message);
   } else {
     console.log('[digest-generator] Digest saved to DB for week starting', weekStartDate);
   }
 
   // -------------------------------------------------------------------------
-  // Step 9: Send digest email + return DigestResult
+  // Step 10: Send digest email + return DigestResult
   // -------------------------------------------------------------------------
   const digestResult: DigestResult = {
+    id: (savedDigest?.id as string | undefined) ?? '',
     userId,
     generatedAt,
     overallGapScore: gapScore.overallScore,
