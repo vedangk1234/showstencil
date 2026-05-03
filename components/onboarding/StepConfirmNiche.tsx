@@ -134,7 +134,7 @@ export default function StepConfirmNiche({ onNext }: Props) {
       <button
         onClick={handleNext}
         disabled={saving || niche === ''}
-        className="bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-60"
+        className="w-full sm:w-auto bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-60"
       >
         {saving ? 'Saving...' : "That's right →"}
       </button>

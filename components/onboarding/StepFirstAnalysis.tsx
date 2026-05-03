@@ -55,7 +55,7 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
     let elapsed = 0
     const timers: ReturnType<typeof setTimeout>[] = []
 
-    LOADING_STAGES.forEach((stage, idx) => {
+    LOADING_STAGES.forEach((_stage, idx) => {
       if (idx === 0) return
       elapsed += LOADING_STAGES[idx - 1].duration
       const t = setTimeout(() => setStageIndex(idx), elapsed)
@@ -79,31 +79,67 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
     fetchedRef.current = true
 
     const fetchResults = async () => {
-      const [gapRes, ideaRes] = await Promise.allSettled([
-        fetch('/api/gap-score/latest'),
-        fetch('/api/ideas/latest'),
-      ])
-
+      // Fetch gap score
       let gapScore: number | null = null
       let bottleneck: string | null = null
-      if (gapRes.status === 'fulfilled' && gapRes.value.ok) {
-        const data = await gapRes.value.json() as {
-          overall_score?: number | null
-          primary_bottleneck?: string | null
+
+      try {
+        const gapRes = await fetch('/api/gap-score/latest')
+        if (gapRes.ok) {
+          const data = await gapRes.json() as {
+            overall_score?: number | null
+            primary_bottleneck?: string | null
+          }
+          gapScore = data.overall_score ?? null
+          bottleneck = data.primary_bottleneck ?? null
         }
-        gapScore = data.overall_score ?? null
-        bottleneck = data.primary_bottleneck ?? null
+      } catch {
+        // Non-blocking
       }
 
+      // Try to get existing ideas first
       let topIdeaTitle: string | null = null
       let topIdeaReason: string | null = null
-      if (ideaRes.status === 'fulfilled' && ideaRes.value.ok) {
-        const data = await ideaRes.value.json() as {
-          ideas?: Array<{ title?: string | null; why_now?: string | null }>
+
+      try {
+        const ideaRes = await fetch('/api/ideas/latest')
+        if (ideaRes.ok) {
+          const data = await ideaRes.json() as {
+            ideas?: Array<{ title?: string | null; why_now?: string | null }>
+          }
+          const idea = data.ideas?.[0] ?? null
+          topIdeaTitle = idea?.title ?? null
+          topIdeaReason = idea?.why_now ?? null
         }
-        const idea = data.ideas?.[0] ?? null
-        topIdeaTitle = idea?.title ?? null
-        topIdeaReason = idea?.why_now ?? null
+      } catch {
+        // Non-blocking
+      }
+
+      // If no ideas exist, trigger generation automatically.
+      // /api/ideas/generate already handles auto-generating competitor insights
+      // before calling Claude, so this is a single call that handles the full pipeline.
+      if (!topIdeaTitle) {
+        try {
+          const genRes = await fetch('/api/ideas/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: 'onboarding' }),
+          })
+
+          if (genRes.ok) {
+            const ideaRes2 = await fetch('/api/ideas/latest')
+            if (ideaRes2.ok) {
+              const data2 = await ideaRes2.json() as {
+                ideas?: Array<{ title?: string | null; why_now?: string | null }>
+              }
+              const idea2 = data2.ideas?.[0] ?? null
+              topIdeaTitle = idea2?.title ?? null
+              topIdeaReason = idea2?.why_now ?? null
+            }
+          }
+        } catch {
+          // Still non-blocking — fallback message is acceptable
+        }
       }
 
       setResult({ gapScore, primaryBottleneck: bottleneck, topIdeaTitle, topIdeaReason })
@@ -170,7 +206,7 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
           </div>
           <div className="flex items-baseline justify-center gap-2 mb-2">
             <div
-              className="text-7xl text-amber-200"
+              className="text-5xl sm:text-7xl text-amber-200"
               style={{ fontFamily: 'Instrument Serif, serif', fontStyle: 'italic' }}
             >
               {result.gapScore}
@@ -200,7 +236,7 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
             Your first video idea
           </div>
           <div
-            className="text-xl text-zinc-100 mb-3"
+            className="text-xl text-zinc-100 mb-3 break-words"
             style={{ fontFamily: 'Instrument Serif, serif' }}
           >
             &ldquo;{result.topIdeaTitle}&rdquo;
@@ -227,7 +263,7 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
       <button
         onClick={goToDashboard}
         disabled={completing}
-        className="bg-white text-black px-10 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-60"
+        className="w-full sm:w-auto bg-white text-black px-10 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-60"
       >
         {completing ? 'Loading dashboard...' : 'Take me to my dashboard →'}
       </button>

@@ -39,6 +39,12 @@ function OnboardingContent() {
   })
   const [syncStarted, setSyncStarted] = useState(false)
 
+  // Sync step state with URL so browser back/forward works correctly
+  useEffect(() => {
+    const s = Number(searchParams.get('step'))
+    if (s >= 1 && s <= 5) setStep(s as Step)
+  }, [searchParams])
+
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/api/auth/signin?callbackUrl=/onboarding')

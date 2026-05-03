@@ -30,7 +30,7 @@ export default function StepWelcome({ onNext }: Props) {
 
       <button
         onClick={onNext}
-        className="bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors"
+        className="w-full sm:w-auto bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors"
       >
         Let&apos;s go →
       </button>

@@ -106,16 +106,16 @@ export default function StepConfirmChannel({ session, onNext }: Props) {
         Is this your channel?
       </p>
 
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
         <button
           onClick={onNext}
-          className="bg-white text-black px-6 py-2.5 text-sm font-medium hover:bg-zinc-200 transition-colors"
+          className="w-full sm:w-auto bg-white text-black px-6 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors"
         >
           Yes, that&apos;s me →
         </button>
         <button
           onClick={() => signOut({ callbackUrl: '/' })}
-          className="border border-zinc-700 text-zinc-400 px-6 py-2.5 text-sm hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+          className="w-full sm:w-auto border border-zinc-700 text-zinc-400 px-6 py-3 text-sm hover:border-zinc-500 hover:text-zinc-200 transition-colors"
         >
           Wrong account
         </button>

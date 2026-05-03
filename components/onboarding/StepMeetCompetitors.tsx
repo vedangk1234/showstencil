@@ -121,7 +121,7 @@ export default function StepMeetCompetitors({ onNext }: Props) {
         </p>
         <button
           onClick={onNext}
-          className="bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors"
+          className="w-full sm:w-auto bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors"
         >
           Continue →
         </button>
@@ -192,7 +192,7 @@ export default function StepMeetCompetitors({ onNext }: Props) {
 
       <button
         onClick={onNext}
-        className="bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors"
+        className="w-full sm:w-auto bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors"
       >
         Show me my analysis →
       </button>
