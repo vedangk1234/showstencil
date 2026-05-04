@@ -1,7 +1,8 @@
 import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import { getUser, getUserSettings } from '@/lib/db'
-import type { User, UserSettings } from '@/types'
+import type { User } from '@/types'
+import NotificationSettings from '@/components/settings/NotificationSettings'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,48 +78,6 @@ function Row({
   )
 }
 
-function Toggle({ enabled, label }: { enabled: boolean; label: string }) {
-  return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      padding: '12px 16px',
-      borderBottom: '1px solid #111111',
-    }}>
-      <span style={{ color: '#888888', fontSize: 13 }}>{label}</span>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-      }}>
-        <span style={{ color: enabled ? '#00c853' : '#444444', fontSize: 12 }}>
-          {enabled ? 'Enabled' : 'Disabled'}
-        </span>
-        <div style={{
-          width: 32, height: 18,
-          borderRadius: 9,
-          background: enabled ? '#00421a' : '#1a1a1a',
-          border: `1px solid ${enabled ? '#00c853' : '#333333'}`,
-          position: 'relative',
-          flexShrink: 0,
-        }}>
-          <div style={{
-            position: 'absolute',
-            top: 2,
-            left: enabled ? 14 : 2,
-            width: 12,
-            height: 12,
-            borderRadius: '50%',
-            background: enabled ? '#00c853' : '#444444',
-            transition: 'left 0.15s ease',
-          }} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function SettingsPage() {
@@ -129,10 +88,6 @@ export default async function SettingsPage() {
     getUser(session.user.id),
     getUserSettings(session.user.id),
   ])
-
-  const digestEnabled = settings?.weekly_digest_enabled ?? true
-  const alertsEnabled = settings?.alerts_enabled ?? true
-  const threshold = settings?.alert_threshold_multiplier ?? 3.0
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: 600 }}>
@@ -192,26 +147,12 @@ export default async function SettingsPage() {
 
       {/* Notifications */}
       <Section title="Notifications">
-        <Toggle enabled={digestEnabled} label="Weekly digest email" />
-        <Toggle enabled={alertsEnabled} label="Viral trend alerts" />
-        <div style={{ padding: '12px 16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: '#888888', fontSize: 13 }}>Alert threshold</span>
-            <span style={{ color: '#ffffff', fontSize: 13, fontWeight: 500 }}>
-              {threshold}× channel average
-            </span>
-          </div>
-          <p style={{ color: '#444444', fontSize: 11, margin: '4px 0 0', lineHeight: 1.5 }}>
-            A competitor video must exceed {threshold}× their average views to trigger an alert.
-          </p>
-        </div>
-        <div style={{ padding: '10px 16px', borderTop: '1px solid #111111' }}>
-          <p style={{ color: '#333333', fontSize: 11, margin: 0 }}>
-            To update notification preferences, use the API:{' '}
-            <code style={{ color: '#555555', fontSize: 10 }}>POST /api/settings/notifications</code>
-            {'. '}
-            Full settings UI coming soon.
-          </p>
+        <div style={{ padding: '0 16px' }}>
+          <NotificationSettings
+            initialDigestEnabled={settings?.weekly_digest_enabled ?? false}
+            initialAlertsEnabled={settings?.alerts_enabled ?? false}
+            initialThreshold={settings?.alert_threshold_multiplier ?? 3.0}
+          />
         </div>
       </Section>
 
