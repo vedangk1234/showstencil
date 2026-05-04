@@ -35,7 +35,6 @@ import {
 } from '@/lib/revenue-benchmarks'
 import { detectViralVideos, findUncoveredTopics } from '@/lib/trend-detector'
 import { generateDigest } from '@/lib/digest-generator'
-import { generateVideoIdeas } from '@/lib/idea-generator'
 import {
   generateUnsubscribeToken,
   sendWeeklyDigest,
@@ -55,7 +54,6 @@ import type {
   UserMetrics,
   CompetitorMetrics,
   DigestResult,
-  IdeaResult,
   ViralVideo,
 } from '@/types'
 
@@ -630,73 +628,47 @@ async function runPhase3() {
   }
   const step35Time = Date.now() - step35Start
 
-  // 3.6 + 3.7 — generateDigest and generateVideoIdeas in parallel (mirrors production cron)
-  const step3637Start = Date.now()
+  // 3.6 — generateDigest
+  const step36Start = Date.now()
+  let step36WallMs = 0
 
-  const [settled36, settled37] = await Promise.allSettled([
-    generateDigest(SEEDED_USER_ID),
-    generateVideoIdeas(SEEDED_USER_ID),
-  ])
+  try {
+    const digestResult: DigestResult = await generateDigest(SEEDED_USER_ID)
+    step36WallMs = Date.now() - step36Start
 
-  const step3637WallMs = Date.now() - step3637Start
-
-  // 3.6 — digest result
-  if (settled36.status === 'fulfilled') {
-    const result: DigestResult = settled36.value
-    console.log(`         digest generated in ${step3637WallMs}ms wall time (parallel)`)
-    console.log(`         thisWeek: "${result.sections.thisWeek.slice(0, 150)}…"`)
+    console.log(`         digest generated in ${step36WallMs}ms`)
+    console.log(`         thisWeek: "${digestResult.sections.thisWeek.slice(0, 150)}…"`)
 
     const allSections = [
-      result.sections.thisWeek,
-      result.sections.competitorMoves,
-      result.sections.videoIdeas,
-      result.sections.oneChange,
+      digestResult.sections.thisWeek,
+      digestResult.sections.competitorMoves,
+      digestResult.sections.videoIdeas,
+      digestResult.sections.oneChange,
     ]
     const allNonEmpty = allSections.every((s) => s && s.length > 0)
     const digestCost = 0.015
     totalApiCost += digestCost
 
     if (allNonEmpty) {
-      record('3.6', 'Digest generation', 'PASS', `${step3637WallMs}ms wall (parallel w/ ideas), ~$${digestCost.toFixed(4)}`)
+      record('3.6', 'Digest generation', 'PASS', `${step36WallMs}ms, ~$${digestCost.toFixed(4)}`)
     } else {
       const empty = ['thisWeek','competitorMoves','videoIdeas','oneChange'].filter((_, i) => !allSections[i])
       record('3.6', 'Digest generation', 'FAIL', undefined, `Empty sections: ${empty.join(', ')}`)
     }
-  } else {
-    record('3.6', 'Digest generation', 'FAIL', undefined, String(settled36.reason))
+  } catch (e: unknown) {
+    step36WallMs = Date.now() - step36Start
+    record('3.6', 'Digest generation', 'FAIL', undefined, String(e))
   }
 
-  // 3.7 — ideas result
-  if (settled37.status === 'fulfilled') {
-    const result: IdeaResult = settled37.value
-    console.log(`         ${result.ideas.length} idea(s) generated in ${step3637WallMs}ms wall time (parallel)`)
-    for (const idea of result.ideas) {
-      console.log(`           #${idea.rank} [${idea.score}] ${idea.title}`)
-    }
+  // 3.7 — SKIPPED: lib/idea-generator.ts removed; ideas now via POST /api/ideas/generate
+  record('3.7', 'Idea generation', 'SKIP', 'lib/idea-generator.ts removed — ideas via /api/ideas/generate')
 
-    const ideaCost = result.costUsd ?? 0.011
-    totalApiCost += ideaCost
-
-    const allValid =
-      result.ideas.length === 3 &&
-      result.ideas.every((idea) => idea.score > 0 && idea.title.length > 0)
-
-    if (allValid) {
-      record('3.7', 'Idea generation', 'PASS', `${result.ideas.length} ideas, ~$${ideaCost.toFixed(4)}`)
-    } else {
-      record('3.7', 'Idea generation', 'FAIL', undefined,
-        `Expected 3 valid ideas, got ${result.ideas.length}: ${result.ideas.map((i) => `"${i.title}"(${i.score})`).join(', ')}`)
-    }
-  } else {
-    record('3.7', 'Idea generation', 'FAIL', undefined, String(settled37.reason))
-  }
-
-  // 3.8 — Full pipeline timing (3.6+3.7 now counted as one parallel wall-clock slot)
-  const pipelineTotalMs = step32Time + step35Time + step3637WallMs
+  // 3.8 — Full pipeline timing
+  const pipelineTotalMs = step32Time + step35Time + step36WallMs
   console.log(`\n         Pipeline timing:`)
   console.log(`           3.2 gap scorer:      ${step32Time}ms`)
   console.log(`           3.5 uncov topics:    ${step35Time}ms`)
-  console.log(`           3.6+3.7 parallel:    ${step3637WallMs}ms  (digest + ideas ran simultaneously)`)
+  console.log(`           3.6 digest:          ${step36WallMs}ms`)
   console.log(`           Total:               ${pipelineTotalMs}ms`)
 
   if (pipelineTotalMs <= 30000) {
@@ -1214,7 +1186,7 @@ function printReport() {
       '3.4': 'lib/trend-detector.ts:detectViralVideos — check is_viral column in competitor_videos',
       '3.5': 'lib/trend-detector.ts:findUncoveredTopics — check Claude response parsing',
       '3.6': 'lib/digest-generator.ts:generateDigest — check ANTHROPIC_API_KEY and DB data',
-      '3.7': 'lib/idea-generator.ts:generateVideoIdeas — check Claude prompt and parsing',
+      '3.7': '(skipped — lib/idea-generator.ts removed, ideas now via /api/ideas/generate)',
       '3.8': 'Consider parallelising steps 3.5, 3.6, 3.7 in production',
       '4.1': 'lib/email.ts:generateUnsubscribeToken — check user_settings.unsubscribe_token column',
       '4.2': 'lib/email.ts:sendWeeklyDigest — check RESEND_API_KEY and RESEND_FROM_EMAIL',

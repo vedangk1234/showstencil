@@ -355,29 +355,6 @@ export interface ThumbnailJob {
   completed_at: string | null;
 }
 
-// Idea generator — a single generated video idea
-export interface GeneratedVideoIdea {
-  rank: number;             // 1, 2, or 3
-  title: string;
-  score: number;            // 0-100
-  whyNow: string;
-  angle: string;
-  format: string;           // tutorial / documentary / listicle / case study / opinion / challenge
-  estimatedLength: string;
-  generatedAt: string;      // ISO timestamp
-}
-
-// Idea generator — full result returned by generateVideoIdeas
-export interface IdeaResult {
-  userId: string;
-  generatedAt: string;      // ISO timestamp
-  ideas: GeneratedVideoIdea[];
-  nicheId: string;
-  inputGapScore: number;    // gap score used as context (0 if unavailable)
-  tokensUsed: number;       // total Claude tokens consumed
-  costUsd: number;          // USD cost of the Claude call
-}
-
 // Revenue benchmarks — per-niche benchmark data
 export interface NicheBenchmark {
   nicheId: string;
