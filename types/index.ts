@@ -202,6 +202,7 @@ export interface UserSettings {
   unsubscribe_token: string | null;
   digest_day: string | null;
   timezone: string | null;
+  ideas_refresh_available: boolean | null;
   created_at: string;
   updated_at: string;
 }
