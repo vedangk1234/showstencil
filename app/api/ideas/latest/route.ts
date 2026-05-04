@@ -9,14 +9,34 @@ export async function GET() {
   }
 
   const supabase = createServiceClient()
+  const userId = session.user.id
 
-  const { data } = await supabase
+  // Find the most recent generation timestamp
+  const { data: latestIdea } = await supabase
     .from('ideas')
-    .select('id, title, opportunity_score, why_now, content_brief')
-    .eq('user_id', session.user.id)
+    .select('generated_at')
+    .eq('user_id', userId)
     .not('opportunity_score', 'is', null)
     .order('generated_at', { ascending: false })
-    .limit(3)
+    .limit(1)
+    .maybeSingle()
 
-  return NextResponse.json({ ideas: data ?? [] })
+  if (!latestIdea) {
+    return NextResponse.json({ ideas: [] })
+  }
+
+  // Fetch all ideas from that same batch (±1 minute window)
+  const batchStart = new Date(
+    new Date(latestIdea.generated_at).getTime() - 60 * 1000,
+  ).toISOString()
+
+  const { data: ideas } = await supabase
+    .from('ideas')
+    .select('id, title, opportunity_score, why_now, content_brief')
+    .eq('user_id', userId)
+    .gte('generated_at', batchStart)
+    .order('opportunity_score', { ascending: false })
+    .limit(10)
+
+  return NextResponse.json({ ideas: ideas ?? [] })
 }
