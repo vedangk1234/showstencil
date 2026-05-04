@@ -709,8 +709,8 @@ const planLimits = {
 | `app/(dashboard)/competitors/[id]/page.tsx` | ✅ | Per-competitor deep analysis: loads competitor + videos + user snapshots, renders CompetitorAnalysis (5 tabs) |
 | `app/(dashboard)/digest/page.tsx` | ✅ | Weekly digest view: list of past digests with preview, gap score, status |
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
-| `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, notification toggles, account actions |
-| `app/(dashboard)/settings/notifications/page.tsx` | 🔲 | Dedicated notifications sub-page — only .gitkeep exists |
+| `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, interactive notification toggles + threshold slider wired to API, account actions |
+| `app/(dashboard)/settings/notifications/page.tsx` | ✅ | Notifications UI embedded in settings/page.tsx via NotificationSettings component — dedicated sub-page not needed |
 | `app/onboarding/page.tsx` | ✅ | 5-step onboarding wizard — URL state (?step=1..5), background sync on Step 1, skip anywhere Step 2+, browser back/forward syncs step state |
 | `app/page.tsx` | ✅ | Full landing page — Nagai hero, time-of-day sky system, feature grid, CTA, footer |
 | `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
@@ -745,6 +745,7 @@ const planLimits = {
 | `components/onboarding/StepConfirmNiche.tsx` | ✅ | Polls for niche detection (1.5s × 20), dropdown override, PATCH on change |
 | `components/onboarding/StepMeetCompetitors.tsx` | ✅ | Polls for all 3 tiers (2s × 30), staggered reveal, tier badges, partial/timeout fallback |
 | `components/onboarding/StepFirstAnalysis.tsx` | ✅ | 20s progress bar + stage labels, fetches gap score + latest idea, reveal with fallback |
+| `components/settings/NotificationSettings.tsx` | ✅ | Client Component — digest toggle, alerts toggle, threshold slider, optimistic updates, 2s "Saved ✓" indicator, slider disabled when alerts off |
 | `components/ui/` | 🔲 | Reusable UI primitives — not yet extracted |
 | `components/charts/` | 🔲 | Recharts wrappers — not yet extracted |
 | `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
@@ -779,6 +780,27 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 3 — Day 26 (2026-05-04)
+
+**Interactive notification settings — toggles and threshold slider wired to API**
+
+*components/settings/NotificationSettings.tsx — NEW*
+* Client Component (`'use client'`). Props: `initialDigestEnabled`, `initialAlertsEnabled`, `initialThreshold` — passed from the server component, preventing a client-side fetch on mount.
+* Three controls: weekly digest toggle, viral trend alerts toggle, alert threshold slider (1.5–10×, step 0.5).
+* All updates are optimistic — state updates immediately on click/release, API call fires in background via `useTransition`. Silent fail on network error (state already updated).
+* Slider saves only on `mouseUp`/`touchEnd`, not on every `onChange` pixel drag — prevents spamming `POST /api/settings/notifications`.
+* "Saved ✓" indicator per field: appears in green monospace next to the control, auto-clears after 2000ms via `setTimeout`.
+* Slider disables when `alertsEnabled` is false, with an explanatory italicised note below.
+* Styled with Tailwind classes (dark theme: zinc-700 backgrounds, zinc-800 borders, green-500 active state) to match the rest of the dashboard.
+
+*app/(dashboard)/settings/page.tsx — MODIFIED*
+* Added import: `NotificationSettings from '@/components/settings/NotificationSettings'`.
+* Removed: `UserSettings` type import (unused), `Toggle` sub-component (replaced), `digestEnabled` / `alertsEnabled` / `threshold` derived variables (unused).
+* Notifications Section content replaced: old read-only `Toggle` × 2 + threshold display + "use the API" note → `<NotificationSettings initialDigestEnabled={...} initialAlertsEnabled={...} initialThreshold={...} />` wrapped in a `style={{ padding: '0 16px' }}` div for horizontal alignment with the rest of the card.
+* Server component already fetched `settings` via `getUserSettings(session.user.id)` — no additional Supabase query added. Values passed directly: `settings?.weekly_digest_enabled ?? false`, `settings?.alerts_enabled ?? false`, `settings?.alert_threshold_multiplier ?? 3.0`.
+
+---
 
 ### Week 3 — Day 25 (2026-05-04)
 
@@ -1941,7 +1963,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-04 — Day 25: Onboarding polish. StepFirstAnalysis auto-triggers /api/ideas/generate when ideas table is empty (full pipeline: insights + ideas in one call). Mobile responsive: all buttons w-full sm:w-auto, StepConfirmChannel buttons flex-col sm:flex-row with py-3 tap targets, gap score text-5xl sm:text-7xl, idea title break-words. page.tsx searchParams sync effect fixes browser back/forward. Skip flow verified correct (no changes). Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
+*Last updated: 2026-05-04 — Day 26: Interactive notification settings. NotificationSettings client component (digest toggle, alerts toggle, threshold slider, optimistic updates, 2s Saved ✓ indicator). settings/page.tsx: Toggle sub-component removed, 3 derived vars removed, section replaced with component call. CLAUDE.md components table updated.
+Previous Day 25: Onboarding polish. StepFirstAnalysis auto-triggers /api/ideas/generate when ideas table is empty (full pipeline: insights + ideas in one call). Mobile responsive: all buttons w-full sm:w-auto, StepConfirmChannel buttons flex-col sm:flex-row with py-3 tap targets, gap score text-5xl sm:text-7xl, idea title break-words. page.tsx searchParams sync effect fixes browser back/forward. Skip flow verified correct (no changes). Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
 Previous Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
 Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
 Previous Day 19: 5 competitor system fixes. (1) Insights 422 for Rob Berger fixed — video_count fallback from competitor_videos COUNT when column is null. (2) Sub-niche detected immediately in assignCompetitor after videos inserted + refresh-data cron detects for null-sub_niche competitors. (3) Activity threshold check before assigning any competitor — meetsActivityThreshold requires ≥3 videos/30d + ≥6 videos/60d, iterates pool in preference order. (4) Immediate fire-and-forget refresh-data trigger after auto-detection so data populates without waiting overnight. (5) Per-tier presence check replaces existingAutoCount===0 in sync, filledTiers guard in detectAndAssignCompetitors prevents duplicate tier assignment. reset-inactive-competitors.ts script created and run — deleted School of Personal Finance + Erika Kullberg. Sync re-detected Personal Finance with Ravi Sharma (Tier 1) + Graham Stephan (Tier 3 Dominator). All 3 competitors now have videos and sub_niche (Rob's populates next cron run).
