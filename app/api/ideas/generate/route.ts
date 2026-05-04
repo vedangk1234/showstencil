@@ -147,18 +147,26 @@ export async function POST(_req: Request) {
 
     const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000
     const missing = (competitors ?? []).filter((c) => {
-      if (!c.insights || !c.insights_generated_at) return true
+      if (!c.insights) return true
+      if (Array.isArray(c.insights) && (c.insights as unknown[]).length === 0) return true
+      if (!c.insights_generated_at) return true
       return new Date(c.insights_generated_at).getTime() < sevenDaysAgoMs
     })
 
-    // ── 4. Generate missing insights sequentially ─────────────────────────
-    for (const comp of missing) {
-      try {
-        console.log('[ideas/generate] Generating insights for', comp.channel_name)
-        await generateAndCacheInsightsForCompetitor(comp.id, userId)
-      } catch (err) {
-        console.error('[ideas/generate] Insights failed for', comp.channel_name, err)
-      }
+    // ── 4. Generate missing insights in parallel ───────────────────────────
+    if (missing.length > 0) {
+      console.log(`[ideas/generate] Auto-generating insights for ${missing.length} competitor(s) in parallel`)
+      await Promise.allSettled(
+        missing.map(async (comp) => {
+          try {
+            console.log('[ideas/generate] Generating insights for', comp.channel_name)
+            await generateAndCacheInsightsForCompetitor(comp.id, userId)
+            console.log('[ideas/generate] Insights done for', comp.channel_name)
+          } catch (err) {
+            console.error('[ideas/generate] Insights failed for', comp.channel_name, err)
+          }
+        })
+      )
     }
 
     // ── 5. Re-fetch competitors with fresh insights ────────────────────────

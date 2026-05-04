@@ -16,10 +16,10 @@ interface Props {
 }
 
 const LOADING_STAGES = [
-  { label: 'Analysing your channel against your competitors...', duration: 4000 },
-  { label: 'Calculating your gap scores...', duration: 4000 },
-  { label: 'Finding your biggest opportunity...', duration: 4000 },
-  { label: 'Generating your first video idea...', duration: 5000 },
+  { label: 'Connecting to your YouTube channel...', duration: 3000 },
+  { label: 'Analysing your competitors...', duration: 6000 },
+  { label: 'Calculating your gap scores...', duration: 5000 },
+  { label: 'Generating your personalised video ideas...', duration: 10000 },
   { label: 'Almost ready...', duration: 3000 },
 ]
 
@@ -127,6 +127,8 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
           })
 
           if (genRes.ok) {
+            // Brief delay to let DB writes settle before re-fetching
+            await new Promise((r) => setTimeout(r, 1000))
             const ideaRes2 = await fetch('/api/ideas/latest')
             if (ideaRes2.ok) {
               const data2 = await ideaRes2.json() as {

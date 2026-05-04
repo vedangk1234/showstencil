@@ -53,9 +53,9 @@ function formatDate(iso: string): string {
 // ─── Loading stages ───────────────────────────────────────────────────────────
 
 const STAGES = [
-  'Gathering competitor intelligence',
-  'Analysing your top performing videos',
-  'Generating ideas',
+  'Analysing competitor insights...',
+  'Matching your top videos to proven topics...',
+  'Generating your personalised ideas...',
 ]
 
 // ─── Loading state ────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ function LoadingState({ staleIdeas }: { staleIdeas: Idea[] }) {
           Building your video ideas
         </h2>
         <p style={{ color: '#555555', fontSize: 13, margin: '0 0 24px', lineHeight: 1.6 }}>
-          Analysing your top videos and what&apos;s working for your competitors. This takes about 30 seconds.
+          Generating competitor insights and building your personalised ideas. This takes about 40 seconds.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto' }}>
           {STAGES.map((label, i) => {
