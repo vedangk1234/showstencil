@@ -36,6 +36,25 @@ function formatDuration(seconds: number | null): string {
 }
 
 export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }: ContentTabProps) {
+  if (competitorVideos.length === 0) {
+    return (
+      <div style={{
+        padding: '48px 24px',
+        textAlign: 'center',
+        background: '#0a0a0a',
+        border: '1px dashed #1a1a1a',
+        borderRadius: 8,
+      }}>
+        <p style={{ color: '#888888', fontSize: 13, margin: '0 0 6px' }}>
+          No content data yet — video data syncs overnight.
+        </p>
+        <p style={{ color: '#444444', fontSize: 12, margin: 0 }}>
+          Data syncs overnight — check back tomorrow.
+        </p>
+      </div>
+    )
+  }
+
   // ── Competitor avg length ────────────────────────────────────────────────
   const compAvgLength: number | null =
     (competitor.avg_video_length_seconds as number | null) ??

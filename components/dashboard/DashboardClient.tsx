@@ -125,9 +125,12 @@ function PulseDot() {
 export default function DashboardClient({
   user, snapshots, gapScore, competitors, recentDigests, competitorSnapshots, topIdea, nicheAvgViewsPerVideo,
 }: Props) {
-  const { isSyncing } = useSyncStatus()
+  const { isSyncing, syncError } = useSyncStatus()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
+  const [isSyncingManually, setIsSyncingManually] = useState(false)
+  const [manualSyncError, setManualSyncError] = useState(false)
+  const [syncErrorDismissed, setSyncErrorDismissed] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -136,6 +139,19 @@ export default function DashboardClient({
   useEffect(() => {
     if (!isSyncing && snapshots.length === 0) router.refresh()
   }, [isSyncing, snapshots.length, router])
+
+  async function handleManualSync() {
+    setIsSyncingManually(true)
+    setManualSyncError(false)
+    try {
+      const res = await fetch('/api/sync', { method: 'POST' })
+      if (!res.ok) throw new Error('Sync failed')
+      window.location.reload()
+    } catch {
+      setManualSyncError(true)
+      setIsSyncingManually(false)
+    }
+  }
 
   // ── Loading ────────────────────────────────────────────────────────────────
   if (isSyncing) {
@@ -181,14 +197,30 @@ export default function DashboardClient({
       <Shell>
         <div className="flex flex-col items-center justify-center min-h-[70vh] gap-4">
           <h1 className="font-serif text-[56px] m-0 tracking-[-0.025em]">
-            No data <em className="text-stencil-ink2">yet.</em>
+            Your dashboard <em className="text-stencil-ink2">is empty.</em>
           </h1>
           <p className="text-stencil-ink2 text-[13.5px] m-0 max-w-[40ch] text-center">
-            Connect your YouTube channel and we&apos;ll pull a full snapshot of your performance,
-            your competitors, and the gaps you can close.
+            We need to sync your YouTube channel data before we can show you anything.
+            This takes about 30 seconds.
           </p>
-          <div className="mt-2">
-            <Btn primary href="/api/sync">Connect YouTube</Btn>
+          <div className="mt-2 flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleManualSync()}
+              disabled={isSyncingManually}
+              className={`font-sans text-[12.5px] py-[6px] px-3 border inline-flex items-center gap-[6px] tracking-[-0.005em] ${
+                isSyncingManually
+                  ? 'border-stencil-line bg-transparent text-stencil-ink3 cursor-not-allowed'
+                  : 'border-stencil-ink bg-stencil-ink text-stencil-bg cursor-pointer'
+              }`}
+            >
+              {isSyncingManually ? 'Syncing your channel…' : 'Sync my channel →'}
+            </button>
+            {manualSyncError && (
+              <p className="text-stencil-red font-mono text-[11px] m-0">
+                Sync failed — please try again
+              </p>
+            )}
           </div>
         </div>
       </Shell>
@@ -247,6 +279,50 @@ export default function DashboardClient({
 
   return (
     <Shell>
+      {syncError && !syncErrorDismissed && (
+        <div style={{
+          background: '#1a0a0a',
+          border: '1px solid #3a1a1a',
+          borderRadius: 6,
+          padding: '10px 16px',
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>
+              Channel sync failed. We&apos;ll try again automatically, or you can sync now.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleManualSync()}
+              disabled={isSyncingManually}
+              style={{
+                background: '#2a0a0a',
+                border: '1px solid #5a2a2a',
+                color: '#f87171',
+                padding: '4px 12px',
+                borderRadius: 4,
+                fontSize: 12,
+                cursor: isSyncingManually ? 'default' : 'pointer',
+                fontFamily: 'monospace',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {isSyncingManually ? 'Syncing…' : 'Sync now'}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSyncErrorDismissed(true)}
+            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* ===== HERO ===== */}
       <div className="pb-6 border-b border-stencil-line">
         {/* Channel identity row */}
@@ -522,7 +598,7 @@ export default function DashboardClient({
               </div>
             </>
           ) : (
-            <Empty>Not enough data yet.</Empty>
+            <Empty>Not enough data yet — charts populate after a few daily syncs. Check back tomorrow.</Empty>
           )}
         </Col>
 

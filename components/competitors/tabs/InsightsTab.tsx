@@ -142,7 +142,27 @@ export function InsightsTab({ competitor }: InsightsTabProps) {
     }
     return (
       <div style={{ padding: '32px 20px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8, textAlign: 'center' }}>
-        <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>{error}</p>
+        <p style={{ color: '#f87171', fontSize: 13, margin: '0 0 12px' }}>
+          Could not generate insights right now.
+        </p>
+        <p style={{ color: '#555555', fontSize: 12, margin: '0 0 16px', lineHeight: 1.6 }}>
+          This usually happens when there isn&apos;t enough competitor data yet,
+          or when the AI service is temporarily unavailable.
+        </p>
+        <button
+          onClick={() => fetchInsights()}
+          style={{
+            background: '#1a1a1a',
+            border: '1px solid #333333',
+            color: '#ffffff',
+            padding: '8px 20px',
+            borderRadius: 6,
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Try again
+        </button>
       </div>
     )
   }

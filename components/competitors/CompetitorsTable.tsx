@@ -293,6 +293,36 @@ function EmptyState({ filter }: { filter: FilterType }) {
     filter === 'dominator' ? 'Dominator' :
     null
 
+  if (filter === 'all') {
+    return (
+      <div style={{
+        padding: '48px 24px',
+        textAlign: 'center',
+        background: '#0a0a0a',
+        border: '1px dashed #1a1a1a',
+        borderRadius: 8,
+      }}>
+        <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>
+          No competitors found yet
+        </p>
+        <p style={{ color: '#555555', fontSize: 12, margin: '0 0 12px', lineHeight: 1.6 }}>
+          We automatically detect competitors based on your YouTube niche and subscriber count.
+          This happens during your first channel sync — if you just signed up, check back in a few minutes.
+        </p>
+        <p style={{ color: '#444444', fontSize: 12, margin: 0 }}>
+          You can also{' '}
+          <a
+            href="#search"
+            style={{ color: '#60a5fa', textDecoration: 'none' }}
+            onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+          >
+            search for any YouTube channel manually →
+          </a>
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div style={{
       padding: '48px 24px',
@@ -301,11 +331,11 @@ function EmptyState({ filter }: { filter: FilterType }) {
       border: '1px dashed #1a1a1a',
       borderRadius: 8,
     }}>
-      <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 600, margin: '0 0 6px' }}>
-        {label ? `No ${label} competitors yet` : 'No competitors tracked yet'}
+      <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>
+        No {label} competitors yet
       </p>
       <p style={{ color: '#555555', fontSize: 12, margin: 0, lineHeight: 1.6 }}>
-        Competitors are auto-detected based on your niche and subscriber count.
+        Competitors are assigned to tiers automatically based on their subscriber count relative to yours.
       </p>
     </div>
   )

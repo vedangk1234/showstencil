@@ -33,6 +33,25 @@ export function GrowthTab({ userSnapshots, competitor, competitorSnapshots }: Gr
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
+  if (competitorSnapshots.length === 0) {
+    return (
+      <div style={{
+        padding: '48px 24px',
+        textAlign: 'center',
+        background: '#0a0a0a',
+        border: '1px dashed #1a1a1a',
+        borderRadius: 8,
+      }}>
+        <p style={{ color: '#888888', fontSize: 13, margin: '0 0 6px' }}>
+          Not enough history yet — growth charts appear after a few daily syncs.
+        </p>
+        <p style={{ color: '#444444', fontSize: 12, margin: 0 }}>
+          Data syncs overnight — check back tomorrow.
+        </p>
+      </div>
+    )
+  }
+
   const compName = competitor.channel_name as string
 
   const allDates = Array.from(new Set([

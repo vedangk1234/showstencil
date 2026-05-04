@@ -52,6 +52,25 @@ const NOT_PUBLIC = (
 )
 
 export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVideos }: OverviewTabProps) {
+  if (!userSnapshot) {
+    return (
+      <div style={{
+        padding: '48px 24px',
+        textAlign: 'center',
+        background: '#0a0a0a',
+        border: '1px dashed #1a1a1a',
+        borderRadius: 8,
+      }}>
+        <p style={{ color: '#888888', fontSize: 13, margin: '0 0 6px' }}>
+          Overview data is still syncing.
+        </p>
+        <p style={{ color: '#444444', fontSize: 12, margin: 0 }}>
+          Data syncs overnight — check back tomorrow.
+        </p>
+      </div>
+    )
+  }
+
   // ── User-side computed metrics ───────────────────────────────────────────
   const userAvgVideoLength =
     userVideos.length > 0

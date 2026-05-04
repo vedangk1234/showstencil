@@ -781,6 +781,70 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 3 — Day 34 (2026-05-04)
+
+**A4 + A5: Empty states and error states across all dashboard pages**
+
+*8 fixes applied across 12 files. tsc --noEmit: zero errors.*
+
+*components/dashboard/DashboardClient.tsx — Fix 1, Fix 2, Fix 5*
+* Fix 1 — Dashboard empty state CTA: replaced broken `href="/api/sync"` anchor (navigated to a JSON API response) with a proper `handleManualSync()` async function that calls `POST /api/sync`, shows a loading spinner during the call, reloads on success, and shows an inline error on failure. Empty state copy updated to "Your dashboard is empty." + "We need to sync your YouTube channel data before we can show you anything. This takes about 30 seconds." + "Sync my channel →" button.
+* Fix 2 — Chart empty text: changed `"Not enough data yet."` to `"Not enough data yet — charts populate after a few daily syncs. Check back tomorrow."` so users understand why the chart is empty and when to expect it to fill in.
+* Fix 5 — Sync error banner: added `syncError` to the `useSyncStatus()` destructure (it was already exposed by sync-context.tsx but never consumed). Added `syncErrorDismissed` state and a dismissable banner rendered as the first child of `<Shell>` when `syncError && !syncErrorDismissed`. Banner styled dark red (`background: '#1a0a0a'`, `border: '1px solid #3a1a1a'`); includes a "Sync now" button that calls `handleManualSync()` and a × dismiss button.
+
+*components/competitors/CompetitorsTable.tsx — Fix 3*
+* `EmptyState` function rewritten with two branches:
+  * `filter === 'all'`: "No competitors found yet." + "Competitors are automatically detected when you first sync your channel. This can take a few minutes. If you've just connected, check back shortly." + "You can also search for any YouTube channel manually →" scroll-to-top link.
+  * Tier-specific filters: "No {label} competitors yet." + "Competitors are assigned to tiers automatically based on their subscriber count relative to yours." message.
+
+*components/competitors/tabs/OverviewTab.tsx — Fix 4a*
+* Added early return at the top of the component when `userSnapshot === null`: renders a `48px`-padded card with `"Overview data is still syncing."` + `"Data syncs overnight — check back tomorrow."`. Prevents the tab from showing misleading 0-subscriber / 0% CTR values when the user's first sync hasn't completed yet.
+
+*components/competitors/tabs/ContentTab.tsx — Fix 4b*
+* Added early return when `competitorVideos.length === 0`: renders `"No content data yet — video data syncs overnight."` + `"Data syncs overnight — check back tomorrow."`. Consistent with OverviewTab empty state styling.
+
+*components/competitors/tabs/GrowthTab.tsx — Fix 4c*
+* Added early return when `competitorSnapshots.length === 0`: renders `"Not enough history yet — growth charts appear after a few daily syncs."` + `"Data syncs overnight — check back tomorrow."`. Placed before the existing `chartData.length < 2` guard so both conditions are handled cleanly.
+
+*components/competitors/tabs/InsightsTab.tsx — Fix 7*
+* Replaced the non-retryable hard error (`<p style={{ color: '#f87171' }}>{error}</p>`) with a proper error card: `"Could not generate insights right now."` + explanation (`"This usually happens when there isn't enough competitor data yet, or when the AI service is temporarily unavailable."`) + `"Try again"` button that calls `fetchInsights()`. The existing 422 retryable state ("Gathering data for this channel…") was already correct and was left untouched.
+
+*components/ideas/IdeasClient.tsx — Fix 6*
+* Added `useRef` to React imports.
+* Added `ideasRef` (synced via `useEffect`) so the `generate()` `useCallback` (which has empty `[]` deps and captures a stale empty `ideas` value) can read the current ideas count without requiring deps changes.
+* Added `regenError: string | null` state.
+* In `generate()`: `setRegenError(null)` called at start. Non-ok responses now route through `regenError` (not `error`) when `ideasRef.current.length > 0` — so existing ideas stay visible while the banner shows the failure. Same pattern applied in the `catch` block.
+* Added dismissable error banner rendered above the ideas grid when `regenError` is set: dark red style matching the dashboard sync error banner, with × dismiss button.
+
+*app/(dashboard)/dashboard/page.tsx — Fix 8*
+* Wrapped all Supabase fetches in try/catch. Error path returns a dark full-screen error UI: "Something went wrong", explanation, and `<a href="/dashboard">Refresh dashboard</a>` link. All inline styles (no Tailwind) consistent with other dashboard error screens.
+
+*app/(dashboard)/competitors/page.tsx — Fix 8*
+* Wrapped all Supabase fetches in try/catch. Moved `createServiceClient()` inside the try block. Error path returns dark error UI with "Back to competitors" → `/competitors` link.
+
+*app/(dashboard)/ideas/page.tsx — Fix 8*
+* Wrapped all Supabase fetches in try/catch. Moved `createServiceClient()` inside the try block. Error path returns dark error UI with "Refresh page" → `/ideas` link.
+
+*app/(dashboard)/digest/page.tsx — Fix 8*
+* Wrapped all Supabase fetches in try/catch. Renamed pre-existing unused `user` destructure to `_user` to clear TS hint. Error path returns dark error UI with "Refresh page" → `/digest` link.
+
+*app/(dashboard)/competitors/[id]/page.tsx — Fix 8*
+* Wrapped all Supabase fetches in try/catch. Moved `createServiceClient()` inside the try block. Error path returns dark error UI with "Back to competitors" → `/competitors` link. `notFound()` / `redirect()` calls left outside the try scope where appropriate.
+
+---
+
+### Week 3 — Day 33 (2026-05-04)
+
+**Ideas page: stop infinite reload loop + replace 429 with friendly message**
+
+*components/ideas/IdeasClient.tsx — MODIFIED*
+* Auto-trigger guard: `useEffect` that calls `generate()` on mount was checking `!isFresh && initialIdeas.length === 0`. A user with `ideas_refresh_available=false` and no ideas (e.g. new account, ideas not yet generated) would trigger `generate()` → get a 429 → reload → trigger again indefinitely. Fixed by adding `&& localRefreshAvailable` to the condition, so the auto-trigger only fires when the flag confirms generation is allowed.
+* 429 handler: `window.location.reload()` replaced with `setLocalRefreshAvailable(false)` + `setError('New ideas are available every Monday when competitor data refreshes.')` + `setIsGenerating(false)` + `setIsRegenerating(false)`. The page no longer reloads on 429 — it shows a friendly message and stops attempting generation. A 429 means the user has already generated this week; reloading served no purpose and caused the infinite loop.
+
+*tsc --noEmit: zero errors.*
+
+---
+
 ### Week 3 — Day 32 (2026-05-04)
 
 **lib/idea-generator.ts fully deleted — all orphaned Day 6 code gone**
@@ -846,7 +910,7 @@ const planLimits = {
 * Empty state error display extended to include `<a href="/pricing">View pricing →</a>` when the error string contains "Upgrade" (same pattern as the main error display).
 
 *Fix E — components/ideas/IdeasClient.tsx — MODIFIED (generate callback + error display)*
-* `generate()` callback restructured: 403 is now caught before reading the response body — shows human-readable `"Video ideas are available on Starter and Pro plans. Upgrade to start generating ideas for your channel."` instead of the raw `"upgrade_required"` error key. 429 reloads the page (same as before). Other non-ok responses read the body and show `errData.error ?? 'Generation failed. Please try again.'`
+* `generate()` callback restructured: 403 is now caught before reading the response body — shows human-readable `"Video ideas are available on Starter and Pro plans. Upgrade to start generating ideas for your channel."` instead of the raw `"upgrade_required"` error key. 429 reloads the page (later superseded by Day 33 fix — now shows friendly message instead). Other non-ok responses read the body and show `errData.error ?? 'Generation failed. Please try again.'`
 * Main-view error display extended: added `{error.includes('Upgrade') && <a href="/pricing">View pricing →</a>}` below the red error text.
 
 *Fix F — app/api/ideas/generate/route.ts — MODIFIED*
@@ -2130,9 +2194,11 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-04 — Day 32: lib/idea-generator.ts fully deleted. scripts/test-full-pipeline.ts deleted entirely (Day 6 artifact, tested old 7-step pipeline with dead JSONB ideas writer, no current value). scripts/test-everything.ts stripped of idea-generator import — test 3.7 changed to SKIP with note, IdeaResult removed from @/types import, 3.6+3.7 Promise.allSettled restructured to plain await on generateDigest alone. GeneratedVideoIdea and IdeaResult types deleted from types/index.ts (zero external references after deletions confirmed by grep). tsc --noEmit: zero errors. lib/idea-generator.ts is now fully gone from the codebase.
+*Last updated: 2026-05-04 — Day 34: A4 + A5 — empty states and error states across all dashboard pages. 8 fixes: dashboard empty-state CTA now calls POST /api/sync (Fix 1), chart empty copy explains timing (Fix 2), CompetitorsTable empty states per filter tab (Fix 3), OverviewTab/ContentTab/GrowthTab early returns when data missing (Fix 4), dismissable sync error banner in DashboardClient (Fix 5), regenError banner with useRef in IdeasClient (Fix 6), InsightsTab friendly error + Try again button (Fix 7), try/catch error screens on all 5 server pages (Fix 8). tsc --noEmit: zero errors.
+Previous Day 33: Infinite reload loop fix in IdeasClient — auto-trigger now guarded by `localRefreshAvailable`, 429 handler replaced `window.location.reload()` with friendly message + flag disable.
+Previous Day 32: lib/idea-generator.ts fully deleted. scripts/test-full-pipeline.ts deleted entirely (Day 6 artifact, tested old 7-step pipeline with dead JSONB ideas writer, no current value). scripts/test-everything.ts stripped of idea-generator import — test 3.7 changed to SKIP with note, IdeaResult removed from @/types import, 3.6+3.7 Promise.allSettled restructured to plain await on generateDigest alone. GeneratedVideoIdea and IdeaResult types deleted from types/index.ts (zero external references after deletions confirmed by grep). tsc --noEmit: zero errors. lib/idea-generator.ts is now fully gone from the codebase.
 Previous Day 31: Weekly digest cron cleanup. Removed zombie generateVideoIdeas call from weekly-digest cron (was calling old JSONB lib/idea-generator.ts, discarding result, burning Claude credits every Monday).
-Previous Day 30: Ideas system diagnostic — 7 of 8 fixes applied. Fix A (idea-generator.ts) not deleted — active import in weekly-digest cron. Fix B: ideas_refresh_available added to UserSettings type. Fix C: "monthly" text replaced with "this week / Refreshes every Monday" in indicator bar. Fix D: empty state canRegenerate={true} → localRefreshAvailable, Generate Ideas button gated by flag, disabled message shown when false. Fix E: 403 handler shows human-readable upgrade message instead of raw error key, upgrade CTA link added to error display in both empty state and main view. Fix F: regenerateAvailableAt computation and return field removed from generate route. Fix G: getRecentIdeas deleted from lib/db.ts (zero external callers confirmed). Fix H: ideas/latest now uses ±1-minute batch window matching getRecentIdeasBatch. tsc --noEmit: zero errors.
+Previous Day 30: Ideas system diagnostic — 7 of 8 fixes applied. Fix A (idea-generator.ts) not deleted — active import in weekly-digest cron. Fix B: ideas_refresh_available added to UserSettings type. Fix C: "monthly" text replaced with "this week / Refreshes every Monday" in indicator bar. Fix D: empty state canRegenerate={true} → localRefreshAvailable, Generate Ideas button gated by flag, disabled message shown when false. Fix E: 403 handler shows human-readable upgrade message instead of raw error key, upgrade CTA link added to error display in both empty state and main view (429 behavior noted as reload here, later corrected by Day 33). Fix F: regenerateAvailableAt computation and return field removed from generate route. Fix G: getRecentIdeas deleted from lib/db.ts (zero external callers confirmed). Fix H: ideas/latest now uses ±1-minute batch window matching getRecentIdeasBatch. tsc --noEmit: zero errors.
 Previous Day 28: Weekly insights cache rhythm + Generate Ideas button flag. (1) page.tsx bug fixed: getIdeasRefreshAvailable(userId) was missing from Promise.all (5 variables, 4 items — ideasRefreshAvailable was undefined). Added as 5th item. (2) ideasRefreshAvailable passed to IdeasClient as a new prop. (3) IdeasClient: added ideasRefreshAvailable prop, localRefreshAvailable useState, setLocalRefreshAvailable(false) on successful generation, canRegenerate simplified to localRefreshAvailable (dropped plan-based date math), Header updated — when enabled shows "Fresh competitor data available — generate new ideas", when disabled shows "New ideas available every Monday when competitor data refreshes". (4) mostRecentGeneratedAt removed as a prop (still computed in page.tsx for imageSeed but no longer passed to client). (5) user_settings.ideas_refresh_available column documented in schema. (6) setIdeasRefreshAvailable + getIdeasRefreshAvailable documented in lib/db.ts section. Already done in prior session: daily cron insights wipe removed, cache-cleanup Monday branch wires insights wipe + flag reset, DB functions added, ideas/generate sets flag false after save. Previous Day 27: Ideas parallel insight generation fix. /api/ideas/generate: sequential for-loop → Promise.allSettled (prevents 60s Vercel timeout on 3+ competitors), empty-array insights check added. StepFirstAnalysis: LOADING_STAGES extended 20s→27s, 1s settle delay after generation. IdeasClient: stage labels updated to match actual pipeline. Previous Day 26: Interactive notification settings. NotificationSettings client component (digest toggle, alerts toggle, threshold slider, optimistic updates, 2s Saved ✓ indicator). settings/page.tsx: Toggle sub-component removed, 3 derived vars removed, section replaced with component call. CLAUDE.md components table updated.
 Previous Day 25: Onboarding polish. StepFirstAnalysis auto-triggers /api/ideas/generate when ideas table is empty (full pipeline: insights + ideas in one call). Mobile responsive: all buttons w-full sm:w-auto, StepConfirmChannel buttons flex-col sm:flex-row with py-3 tap targets, gap score text-5xl sm:text-7xl, idea title break-words. page.tsx searchParams sync effect fixes browser back/forward. Skip flow verified correct (no changes). Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
 Previous Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.

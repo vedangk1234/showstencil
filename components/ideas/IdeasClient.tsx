@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Idea } from '@/types'
 import { ExpandableCard } from '@/components/ui/expandable-card'
 import { getShuffledNicheImages } from '@/lib/niche-images'
@@ -213,9 +213,12 @@ export function IdeasClient({
   ideasRefreshAvailable,
 }: IdeasClientProps) {
   const [ideas, setIdeas] = useState<Idea[]>(initialIdeas)
+  const ideasRef = useRef<Idea[]>(initialIdeas)
+  useEffect(() => { ideasRef.current = ideas }, [ideas])
   const [isGenerating, setIsGenerating] = useState(!isFresh && initialIdeas.length === 0)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [regenError, setRegenError] = useState<string | null>(null)
   const [doneExpanded, setDoneExpanded] = useState(false)
   const [thumbnailModalIdeaId, setThumbnailModalIdeaId] = useState<string | null>(null)
   const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false)
@@ -231,6 +234,7 @@ export function IdeasClient({
 
   const generate = useCallback(async () => {
     setError(null)
+    setRegenError(null)
     try {
       const res = await fetch('/api/ideas/generate', { method: 'POST' })
       if (res.status === 403) {
@@ -251,7 +255,12 @@ export function IdeasClient({
       }
       if (!res.ok) {
         const errData = await res.json()
-        setError(errData.error ?? 'Generation failed. Please try again.')
+        const msg = errData.error ?? 'Generation failed. Please try again.'
+        if (ideasRef.current.length > 0) {
+          setRegenError('Could not generate new ideas right now. Please try again in a few minutes.')
+        } else {
+          setError(msg)
+        }
         return
       }
       const data = await res.json()
@@ -259,7 +268,11 @@ export function IdeasClient({
       // Disable button locally — server already set ideas_refresh_available = false
       setLocalRefreshAvailable(false)
     } catch {
-      setError('Network error — please check your connection and try again.')
+      if (ideasRef.current.length > 0) {
+        setRegenError('Could not generate new ideas right now. Please try again in a few minutes.')
+      } else {
+        setError('Network error — please check your connection and try again.')
+      }
     } finally {
       setIsGenerating(false)
       setIsRegenerating(false)
@@ -446,6 +459,29 @@ export function IdeasClient({
               View pricing →
             </a>
           )}
+        </div>
+      )}
+
+      {regenError && (
+        <div style={{
+          background: '#1a0a0a',
+          border: '1px solid #3a1a1a',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>
+            {regenError}
+          </p>
+          <button
+            onClick={() => setRegenError(null)}
+            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}
+          >
+            ×
+          </button>
         </div>
       )}
 
