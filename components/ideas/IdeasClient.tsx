@@ -233,15 +233,23 @@ export function IdeasClient({
     setError(null)
     try {
       const res = await fetch('/api/ideas/generate', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) {
-        if (res.status === 429) {
-          window.location.reload()
-          return
-        }
-        setError(data.error ?? 'Generation failed. Please try again.')
+      if (res.status === 403) {
+        setError(
+          'Video ideas are available on Starter and Pro plans. ' +
+          'Upgrade to start generating ideas for your channel.'
+        )
         return
       }
+      if (res.status === 429) {
+        window.location.reload()
+        return
+      }
+      if (!res.ok) {
+        const errData = await res.json()
+        setError(errData.error ?? 'Generation failed. Please try again.')
+        return
+      }
+      const data = await res.json()
       setIdeas(data.ideas ?? [])
       // Disable button locally — server already set ideas_refresh_available = false
       setLocalRefreshAvailable(false)
@@ -364,7 +372,7 @@ export function IdeasClient({
       <div style={{ padding: '28px 32px', maxWidth: 1100 }}>
         <Header
           latestGeneratedAt={null}
-          canRegenerate={true}
+          canRegenerate={localRefreshAvailable}
           plan={plan}
           onRegenerate={() => { setIsGenerating(true); void generate() }}
           isRegenerating={false}
@@ -382,17 +390,32 @@ export function IdeasClient({
             We&apos;ll analyse your top videos and your competitors&apos; winning content, then generate{' '}
             {ideaLimit} original ideas tailored to your channel.
           </p>
-          <button
-            onClick={() => { setIsGenerating(true); void generate() }}
-            style={{
-              fontSize: 13, fontWeight: 600, color: '#000000',
-              background: '#4ade80', border: 'none', borderRadius: 6,
-              padding: '10px 22px', cursor: 'pointer',
-            }}
-          >
-            Generate ideas
-          </button>
-          {error && <p style={{ color: '#f87171', fontSize: 12, marginTop: 12 }}>{error}</p>}
+          {localRefreshAvailable ? (
+            <button
+              onClick={() => { setIsGenerating(true); void generate() }}
+              style={{
+                fontSize: 13, fontWeight: 600, color: '#000000',
+                background: '#4ade80', border: 'none', borderRadius: 6,
+                padding: '10px 22px', cursor: 'pointer',
+              }}
+            >
+              Generate ideas
+            </button>
+          ) : (
+            <div style={{ fontSize: 13, color: '#555555', fontFamily: 'monospace' }}>
+              New ideas available every Monday when competitor data refreshes.
+            </div>
+          )}
+          {error && (
+            <div style={{ marginTop: 12 }}>
+              <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>{error}</p>
+              {error.includes('Upgrade') && (
+                <a href="/pricing" style={{ color: '#60a5fa', fontSize: 12, display: 'block', marginTop: 6, textDecoration: 'none', fontFamily: 'monospace' }}>
+                  View pricing →
+                </a>
+              )}
+            </div>
+          )}
         </div>
       </div>
     )
@@ -413,6 +436,11 @@ export function IdeasClient({
       {error && (
         <div style={{ background: '#1a0000', border: '1px solid #6e1d1d', borderRadius: 6, padding: '10px 14px', marginBottom: 16 }}>
           <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>{error}</p>
+          {error.includes('Upgrade') && (
+            <a href="/pricing" style={{ color: '#60a5fa', fontSize: 13, display: 'block', marginTop: 8, textDecoration: 'none', fontFamily: 'monospace' }}>
+              View pricing →
+            </a>
+          )}
         </div>
       )}
 
@@ -777,9 +805,7 @@ function Header({
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
           <p style={{ color: '#444444', fontSize: 12, margin: 0 }}>
-            {ideasCount} of {ideaLimit} monthly ideas generated.{' '}
-            Pro users get 10 ideas, refreshed weekly.{' '}
-            <a href="/pricing" style={{ color: '#60a5fa', textDecoration: 'none' }}>Upgrade to Pro</a>
+            {ideasCount} of {ideaLimit} ideas generated this week. Refreshes every Monday.
           </p>
         </div>
       )}
