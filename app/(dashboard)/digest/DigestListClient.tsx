@@ -1,10 +1,21 @@
 'use client'
 
 import * as React from 'react'
-import Link from 'next/link'
 import { ExpandableCard } from '@/components/ui/expandable-card'
-import { getNicheImage } from '@/lib/niche-images'
-import type { Digest, DigestVideoIdea } from '@/types'
+import type { Digest } from '@/types'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface CompetitorRow {
+  id: string
+  channel_name: string | null
+  tier: number | null
+  is_dominator: boolean
+  subscriber_count: number | null
+  avg_views_per_video: number | null
+  upload_frequency_30d: number | null
+  sub_niche: string | null
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -28,6 +39,12 @@ function fmtWeekDate(dateStr: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   })
+}
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return n.toLocaleString()
 }
 
 /** Render a string that may contain **bold** markers into React nodes. */
@@ -74,6 +91,76 @@ function parseSections(content: string): { header: string; body: string }[] {
   })
 }
 
+// ─── Competitor helpers ───────────────────────────────────────────────────────
+
+function tierBadgeLabel(tier: number | null, isDominator: boolean): string {
+  if (isDominator || tier === 3) return 'Dominator'
+  if (tier === 2) return 'Tier 2'
+  return 'Tier 1'
+}
+
+function tierBadgeClass(tier: number | null, isDominator: boolean): string {
+  if (isDominator || tier === 3)
+    return 'text-[10px] font-mono uppercase tracking-wide px-2 py-0.5 border rounded-sm text-amber-400 border-amber-400/40 bg-amber-400/10'
+  if (tier === 2)
+    return 'text-[10px] font-mono uppercase tracking-wide px-2 py-0.5 border rounded-sm text-purple-400 border-purple-400/40 bg-purple-400/10'
+  return 'text-[10px] font-mono uppercase tracking-wide px-2 py-0.5 border rounded-sm text-blue-400 border-blue-400/40 bg-blue-400/10'
+}
+
+function buildCompetitorSummary(comp: CompetitorRow): string {
+  const parts: string[] = []
+
+  if (comp.upload_frequency_30d != null && comp.avg_views_per_video != null) {
+    parts.push(
+      `Posting ${comp.upload_frequency_30d} videos/month with an average of ${fmtNum(comp.avg_views_per_video)} views per video.`,
+    )
+  } else if (comp.avg_views_per_video != null) {
+    parts.push(`Averaging ${fmtNum(comp.avg_views_per_video)} views per video.`)
+  }
+
+  if (comp.subscriber_count != null) {
+    parts.push(`${fmtNum(comp.subscriber_count)} subscribers.`)
+  }
+
+  if (comp.sub_niche) {
+    parts.push(`Focused on ${comp.sub_niche}.`)
+  }
+
+  return parts.join(' ') || 'No data available yet — syncing in progress.'
+}
+
+function CompetitorList({ competitors }: { competitors: CompetitorRow[] }) {
+  if (competitors.length === 0) {
+    return (
+      <p className="text-zinc-500 text-sm m-0">
+        No competitor data available yet — check back after the next sync.
+      </p>
+    )
+  }
+  return (
+    <div className="flex flex-col">
+      {competitors.map((comp) => (
+        <div
+          key={comp.id}
+          className="flex flex-col gap-1 py-3 border-b border-dashed border-zinc-800 last:border-0"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-white font-medium text-sm">
+              {comp.channel_name ?? 'Unknown'}
+            </span>
+            <span className={tierBadgeClass(comp.tier, comp.is_dominator)}>
+              {tierBadgeLabel(comp.tier, comp.is_dominator)}
+            </span>
+          </div>
+          <p className="text-zinc-400 text-sm leading-relaxed m-0">
+            {buildCompetitorSummary(comp)}
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── Opportunity score pill ───────────────────────────────────────────────────
 
 function ScorePill({ score }: { score: number | null }) {
@@ -102,10 +189,63 @@ interface KeyMetrics {
   avgWatchSeconds?: number
 }
 
-function ExpandedDigest({ digest }: { digest: Digest }) {
+function ExpandedDigest({
+  digest,
+  competitors,
+}: {
+  digest: Digest
+  competitors: CompetitorRow[]
+}) {
   const km = (digest.key_metrics as KeyMetrics | null) ?? {}
-  const ideas = (digest.video_ideas as unknown as DigestVideoIdea[] | null) ?? []
-  const sections = parseSections(digest.content ?? '')
+  const allSections = parseSections(digest.content ?? '')
+
+  // Build section elements: replace competitor section with DB block, remove ideas
+  const sectionElements: React.ReactNode[] = []
+  let competitorBlockAdded = false
+
+  for (const [i, sec] of allSections.entries()) {
+    const h = sec.header.toLowerCase()
+
+    // Remove ideas section
+    if (h.includes('video idea') || h.includes('3 video')) continue
+
+    // Replace competitor markdown section with DB-driven block
+    if (h.includes('competitor')) {
+      if (!competitorBlockAdded) {
+        sectionElements.push(
+          <div key={`comp-${i}`} className="flex flex-col gap-3">
+            <h4 className="font-mono text-[11px] tracking-[0.12em] uppercase text-zinc-500">
+              {sec.header}
+            </h4>
+            <CompetitorList competitors={competitors} />
+          </div>,
+        )
+        competitorBlockAdded = true
+      }
+      continue
+    }
+
+    sectionElements.push(
+      <div key={i} className="flex flex-col gap-2">
+        <h4 className="font-mono text-[11px] tracking-[0.12em] uppercase text-zinc-500">
+          {sec.header}
+        </h4>
+        <SectionBody body={sec.body} />
+      </div>,
+    )
+  }
+
+  // If digest had no competitor section in markdown, append competitor block at end
+  if (!competitorBlockAdded && competitors.length > 0) {
+    sectionElements.push(
+      <div key="comp-fallback" className="flex flex-col gap-3">
+        <h4 className="font-mono text-[11px] tracking-[0.12em] uppercase text-zinc-500">
+          YOUR COMPETITORS
+        </h4>
+        <CompetitorList competitors={competitors} />
+      </div>,
+    )
+  }
 
   return (
     <div className="w-full flex flex-col gap-8">
@@ -129,40 +269,8 @@ function ExpandedDigest({ digest }: { digest: Digest }) {
         )}
       </div>
 
-      {/* Markdown sections */}
-      {sections.map((sec, i) => (
-        <div key={i} className="flex flex-col gap-2">
-          <h4 className="font-mono text-[11px] tracking-[0.12em] uppercase text-zinc-500">
-            {sec.header}
-          </h4>
-          <SectionBody body={sec.body} />
-        </div>
-      ))}
-
-      {/* Video ideas */}
-      {ideas.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <h4 className="font-mono text-[11px] tracking-[0.12em] uppercase text-zinc-500">
-            Video Ideas
-          </h4>
-          {ideas.map((idea, i) => (
-            <div
-              key={i}
-              className="border border-zinc-800 rounded-xl p-4 flex flex-col gap-2 bg-zinc-900/50"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-white text-sm font-medium leading-snug">
-                  {idea.title}
-                </span>
-                <ScorePill score={idea.opportunityScore ?? null} />
-              </div>
-              {idea.reasoning && (
-                <p className="text-zinc-500 text-xs leading-relaxed m-0">{idea.reasoning}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Sections with competitor block injected and ideas removed */}
+      {sectionElements}
 
       {/* Email sent footer */}
       {digest.email_sent_at && (
@@ -176,13 +284,6 @@ function ExpandedDigest({ digest }: { digest: Digest }) {
         </p>
       )}
 
-      {/* Deep link */}
-      <Link
-        href={`/digest/${digest.id}`}
-        className="self-start font-mono text-[11px] text-zinc-500 hover:text-white transition-colors"
-      >
-        Open full page →
-      </Link>
     </div>
   )
 }
@@ -196,20 +297,14 @@ function MetricCell({ label, value }: { label: string; value: string }) {
   )
 }
 
-function fmtNum(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toLocaleString()
-}
-
 // ─── Main client component ────────────────────────────────────────────────────
 
 interface Props {
   digests: Digest[]
-  nicheId: string
+  competitors: CompetitorRow[]
 }
 
-export default function DigestListClient({ digests, nicheId }: Props) {
+export default function DigestListClient({ digests, competitors }: Props) {
   return (
     <div className="bg-stencil-bg text-stencil-ink font-sans min-h-full p-7 max-w-[860px]">
 
@@ -248,7 +343,7 @@ export default function DigestListClient({ digests, nicheId }: Props) {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {digests.map((digest, i) => {
+          {digests.map((digest) => {
             const km = (digest.key_metrics as KeyMetrics | null) ?? {}
             const score = km.overallGapScore
             const uploads = km.uploadsPerMonth
@@ -261,12 +356,13 @@ export default function DigestListClient({ digests, nicheId }: Props) {
             return (
               <ExpandableCard
                 key={digest.id}
-                src={getNicheImage(nicheId, (i % 13) + 1)}
+                src=""
                 title={`Week of ${fmtWeekDate(digest.week_start_date)}`}
                 description={description}
-                classNameExpanded="max-h-[90vh]"
+                className="[&_img]:hidden [&_img]:h-0"
+                classNameExpanded="max-h-[90vh] [&_img]:hidden [&_img]:h-0"
               >
-                <ExpandedDigest digest={digest} />
+                <ExpandedDigest digest={digest} competitors={competitors} />
               </ExpandableCard>
             )
           })}

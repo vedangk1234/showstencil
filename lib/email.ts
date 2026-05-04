@@ -12,6 +12,16 @@
  *   ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS unsubscribe_token TEXT;
  *
  * Never throws — all functions return a boolean or primitive on failure.
+ *
+ * sendWeeklyDigest flow:
+ *  1. Load user
+ *  2. Check weekly_digest_enabled
+ *  3. Load gap score for revenue gap
+ *  4. Load latest channel snapshot for user avg views + Tier 1 competitor avg
+ *  5. Load ALL active competitors for the email competitor section
+ *  6. Generate unsubscribe token
+ *  7. Render + send via Resend
+ *  8. Update digests.email_sent_at
  */
 
 import { Resend } from 'resend'
@@ -79,14 +89,13 @@ export async function generateUnsubscribeToken(userId: string): Promise<string> 
  * Flow:
  *  1. Load user from DB (email, name)
  *  2. Check user_settings.weekly_digest_enabled — skip if false
- *  3. Load latest ideas from the ideas table
- *  4. Load latest gap score for revenue gap
- *  5. Load latest channel snapshot for user avg views
- *  6. Load this user's viral competitor videos for "what competitors did"
- *  7. Generate unsubscribe token
- *  8. Render WeeklyDigestEmail to HTML
- *  9. Send via Resend
- * 10. Update digests.email_sent_at
+ *  3. Load latest gap score for revenue gap
+ *  4. Load latest channel snapshot for user avg views + Tier 1 competitor avg
+ *  5. Load ALL active competitors for the competitor section
+ *  6. Generate unsubscribe token
+ *  7. Render WeeklyDigestEmail to HTML
+ *  8. Send via Resend
+ *  9. Update digests.email_sent_at
  *
  * @returns true on success, false on any error — never throws
  */
@@ -116,33 +125,7 @@ export async function sendWeeklyDigest(
       return true
     }
 
-    // 3. Load latest generated ideas from ideas table (new per-row schema from Day 20)
-    const { data: ideaRows } = await supabase
-      .from('ideas')
-      .select('title, opportunity_score, why_now')
-      .eq('user_id', userId)
-      .is('made_at', null)
-      .order('opportunity_score', { ascending: false })
-      .order('generated_at', { ascending: false })
-      .limit(3)
-
-    // Build video ideas array — prefer DB ideas, fall back to digest-parsed ideas
-    const videoIdeas: { rank: number; title: string; score: number; whyNow: string }[] =
-      ideaRows && ideaRows.length > 0
-        ? ideaRows.map((idea, i) => ({
-            rank: i + 1,
-            title: idea.title,
-            score: idea.opportunity_score ?? 50,
-            whyNow: idea.why_now ?? '',
-          }))
-        : digestData.videoIdeasParsed.slice(0, 3).map((idea, i) => ({
-            rank: i + 1,
-            title: idea.title,
-            score: idea.opportunityScore ?? 50,
-            whyNow: idea.reasoning,
-          }))
-
-    // 4. Load latest gap score for revenue gap
+    // 3. Load latest gap score for revenue gap
     const { data: gapScore } = await supabase
       .from('gap_scores')
       .select('estimated_revenue_gap')
@@ -153,7 +136,7 @@ export async function sendWeeklyDigest(
 
     const revenueGap = gapScore?.estimated_revenue_gap ?? 0
 
-    // 5. Load latest channel snapshot for user avg views
+    // 4. Load latest channel snapshot for user avg views
     const { data: snapshot } = await supabase
       .from('channel_snapshots')
       .select('avg_views_per_video')
@@ -182,54 +165,35 @@ export async function sendWeeklyDigest(
           )
         : 0
 
-    // 6. Load competitor viral videos for this user
-    // First get the competitor IDs for this user
-    const { data: userCompetitors } = await supabase
+    // 6. Load ALL active competitors for the competitor section
+    const { data: allCompetitors } = await supabase
       .from('competitors')
-      .select('id, channel_name')
+      .select('channel_name, tier, is_dominator, subscriber_count, avg_views_per_video, upload_frequency_30d, sub_niche')
       .eq('user_id', userId)
       .eq('is_active', true)
+      .order('tier', { ascending: true })
 
-    const competitorIds = (userCompetitors ?? []).map((c) => c.id)
-    const nameMap = new Map(
-      (userCompetitors ?? []).map((c) => [c.id as string, c.channel_name as string | null]),
-    )
-
-    let competitorMoves: {
-      videoTitle: string
-      channelName: string
-      viewCount: number
-      performanceMultiplier: number
-    }[] = []
-
-    if (competitorIds.length > 0) {
-      const { data: viralVideos } = await supabase
-        .from('competitor_videos')
-        .select('title, view_count, performance_vs_avg, competitor_id')
-        .in('competitor_id', competitorIds)
-        .eq('is_viral', true)
-        .order('velocity_score', { ascending: false })
-        .limit(3)
-
-      competitorMoves = (viralVideos ?? []).map((v) => ({
-        videoTitle: v.title ?? 'Untitled',
-        channelName: nameMap.get(v.competitor_id) ?? 'Unknown',
-        viewCount: v.view_count ?? 0,
-        performanceMultiplier: v.performance_vs_avg ?? 1,
-      }))
-    }
+    const competitors = (allCompetitors ?? []).map((c) => ({
+      channelName: c.channel_name ?? 'Unknown',
+      tier: c.tier as number | null,
+      isDominator: (c.is_dominator ?? false) as boolean,
+      subscriberCount: c.subscriber_count as number | null,
+      avgViewsPerVideo: c.avg_views_per_video as number | null,
+      uploadFrequency30d: c.upload_frequency_30d as number | null,
+      subNiche: c.sub_niche as string | null,
+    }))
 
     // 7. Generate unsubscribe token
     const unsubscribeToken = await generateUnsubscribeToken(userId)
 
-    // 8. Format week date from digest timestamp
+    // 7b. Format week date from digest timestamp
     const weekDate = new Date(digestData.generatedAt).toLocaleDateString('en-US', {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
     })
 
-    // 9. Render email component to HTML
+    // 7c. Render email component to HTML
     const emailHtml = await render(
       React.createElement(WeeklyDigestEmail, {
         channelName: user.name ?? user.email,
@@ -240,8 +204,7 @@ export async function sendWeeklyDigest(
           competitorAvgViews,
           revenueGap,
         },
-        competitorMoves,
-        videoIdeas,
+        competitors,
         oneChange: digestData.sections.oneChange,
         unsubscribeToken,
         viewFullAnalysisUrl: `${APP_URL}/digest/${digestData.id}`,

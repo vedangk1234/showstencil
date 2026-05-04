@@ -37,17 +37,14 @@ export interface WeeklyDigestEmailProps {
     competitorAvgViews: number
     revenueGap: number
   }
-  competitorMoves: {
-    videoTitle: string
+  competitors: {
     channelName: string
-    viewCount: number
-    performanceMultiplier: number
-  }[]
-  videoIdeas: {
-    rank: number
-    title: string
-    score: number
-    whyNow: string
+    tier: number | null
+    isDominator: boolean
+    subscriberCount: number | null
+    avgViewsPerVideo: number | null
+    uploadFrequency30d: number | null
+    subNiche: string | null
   }[]
   oneChange: string
   unsubscribeToken: string
@@ -64,16 +61,43 @@ function formatNumber(n: number): string {
   return n.toLocaleString()
 }
 
-function ideaBadge(score: number): { bg: string; color: string; label: string } {
-  if (score >= 80) return { bg: '#dcfce7', color: '#15803d', label: 'High' }
-  if (score >= 60) return { bg: '#fef9c3', color: '#a16207', label: 'Medium' }
-  return { bg: '#f3f4f6', color: '#6b7280', label: 'Low' }
-}
-
 function gapScoreColor(score: number): string {
   if (score >= 70) return '#dc2626'
   if (score >= 40) return '#d97706'
   return '#16a34a'
+}
+
+function emailTierLabel(tier: number | null, isDominator: boolean): string {
+  if (isDominator || tier === 3) return 'Dominator'
+  if (tier === 2) return 'Tier 2'
+  return 'Tier 1'
+}
+
+function buildEmailCompetitorSummary(comp: {
+  avgViewsPerVideo: number | null
+  subscriberCount: number | null
+  uploadFrequency30d: number | null
+  subNiche: string | null
+}): string {
+  const parts: string[] = []
+
+  if (comp.uploadFrequency30d != null && comp.avgViewsPerVideo != null) {
+    parts.push(
+      `${comp.uploadFrequency30d} videos/month · ${formatNumber(comp.avgViewsPerVideo)} avg views`,
+    )
+  } else if (comp.avgViewsPerVideo != null) {
+    parts.push(`${formatNumber(comp.avgViewsPerVideo)} avg views per video`)
+  }
+
+  if (comp.subscriberCount != null) {
+    parts.push(`${formatNumber(comp.subscriberCount)} subscribers`)
+  }
+
+  if (comp.subNiche) {
+    parts.push(`Focus: ${comp.subNiche}`)
+  }
+
+  return parts.join(' · ') || 'Data syncing in progress.'
 }
 
 // ---------------------------------------------------------------------------
@@ -85,8 +109,7 @@ export function WeeklyDigestEmail({
   weekDate,
   gapScore,
   metrics,
-  competitorMoves,
-  videoIdeas,
+  competitors,
   oneChange,
   unsubscribeToken,
   viewFullAnalysisUrl,
@@ -106,7 +129,7 @@ export function WeeklyDigestEmail({
     <Html lang="en" dir="ltr">
       <Head />
       <Preview>
-        {channelName}: gap score {String(gapScore)}/100 · {String(videoIdeas.length)} ideas ready this week
+        {channelName}: gap score {String(gapScore)}/100 · your weekly analysis is ready
       </Preview>
 
       <Body style={bodyStyle}>
@@ -171,64 +194,35 @@ export function WeeklyDigestEmail({
 
           <Hr style={hrStyle} />
 
-          {/* ── SECTION 3: Competitor moves ───────────────────────────── */}
-          {competitorMoves.length > 0 && (
-            <>
-              <Section style={sectionStyle}>
-                <Text style={sectionLabelStyle}>WHAT YOUR COMPETITORS DID</Text>
-
-                {competitorMoves.map((move, i) => (
-                  <Section key={i} style={competitorCardStyle}>
-                    <Text style={competitorVideoTitleStyle}>{move.videoTitle}</Text>
-                    <Text style={competitorMetaStyle}>
-                      {move.channelName}
-                      {'  ·  '}
-                      {formatNumber(move.viewCount)} views
-                      {'  ·  '}
-                      {move.performanceMultiplier.toFixed(2)}x their average
-                    </Text>
-                  </Section>
-                ))}
-              </Section>
-
-              <Hr style={hrStyle} />
-            </>
-          )}
-
-          {/* ── SECTION 4: Video ideas ────────────────────────────────── */}
+          {/* ── SECTION 3: Competitors ────────────────────────────────── */}
           <Section style={sectionStyle}>
-            <Text style={sectionLabelStyle}>YOUR 3 VIDEO IDEAS</Text>
+            <Text style={sectionLabelStyle}>WHAT YOUR COMPETITORS DID</Text>
 
-            {videoIdeas.map((idea) => {
-              const badge = ideaBadge(idea.score)
-              return (
-                <Section key={idea.rank} style={ideaCardStyle}>
-                  <Row>
-                    <Column style={{ width: '32px', verticalAlign: 'top' }}>
-                      <Text style={ideaRankStyle}>{idea.rank}</Text>
-                    </Column>
-                    <Column style={{ verticalAlign: 'top' }}>
-                      <Text style={ideaTitleStyle}>{idea.title}</Text>
-                      <Text
-                        style={{
-                          ...scoreBadgeStyle,
-                          backgroundColor: badge.bg,
-                          color: badge.color,
-                        }}
-                      >
-                        {idea.score}/100 · {badge.label} opportunity
-                      </Text>
-                      <Text style={ideaWhyStyle}>{idea.whyNow}</Text>
-                    </Column>
-                  </Row>
+            {competitors.length === 0 ? (
+              <Text style={competitorMetaStyle}>
+                No competitor data available yet — syncing in progress.
+              </Text>
+            ) : (
+              competitors.map((comp, i) => (
+                <Section key={i} style={competitorCardStyle}>
+                  <Text style={competitorVideoTitleStyle}>
+                    {comp.channelName}
+                    {'  ·  '}
+                    <span style={{ color: '#6b7280', fontWeight: '400', fontSize: '12px' }}>
+                      {emailTierLabel(comp.tier, comp.isDominator)}
+                    </span>
+                  </Text>
+                  <Text style={competitorMetaStyle}>
+                    {buildEmailCompetitorSummary(comp)}
+                  </Text>
                 </Section>
-              )
-            })}
+              ))
+            )}
           </Section>
 
           <Hr style={hrStyle} />
 
-          {/* ── SECTION 5: One thing to change ───────────────────────── */}
+          {/* ── SECTION 4: One thing to change ───────────────────────── */}
           <Section style={sectionStyle}>
             <Text style={sectionLabelStyle}>ONE THING TO CHANGE THIS WEEK</Text>
             <Section style={oneChangeBoxStyle}>
@@ -238,7 +232,7 @@ export function WeeklyDigestEmail({
 
           <Hr style={hrStyle} />
 
-          {/* ── SECTION 6: Footer ─────────────────────────────────────── */}
+          {/* ── SECTION 5: Footer ─────────────────────────────────────── */}
           <Section style={footerSectionStyle}>
             <Button href={viewFullAnalysisUrl ?? `${APP_URL}/digest`} style={ctaButtonStyle}>
               View full analysis →
@@ -406,53 +400,6 @@ const competitorMetaStyle: React.CSSProperties = {
   color: '#6b7280',
   fontSize: '12px',
   margin: '0',
-}
-
-// Idea cards
-
-const ideaCardStyle: React.CSSProperties = {
-  backgroundColor: '#f9fafb',
-  borderRadius: '6px',
-  padding: '16px',
-  marginBottom: '12px',
-}
-
-const ideaRankStyle: React.CSSProperties = {
-  backgroundColor: '#185FA5',
-  color: '#ffffff',
-  fontSize: '12px',
-  fontWeight: '700',
-  width: '24px',
-  height: '24px',
-  borderRadius: '50%',
-  textAlign: 'center',
-  lineHeight: '24px',
-  margin: '2px 12px 0 0',
-  display: 'inline-block',
-}
-
-const ideaTitleStyle: React.CSSProperties = {
-  color: '#1a1a1a',
-  fontSize: '15px',
-  fontWeight: '600',
-  margin: '0 0 6px',
-  lineHeight: '1.4',
-}
-
-const scoreBadgeStyle: React.CSSProperties = {
-  display: 'inline-block',
-  fontSize: '11px',
-  fontWeight: '600',
-  padding: '2px 8px',
-  borderRadius: '4px',
-  margin: '0 0 8px',
-}
-
-const ideaWhyStyle: React.CSSProperties = {
-  color: '#444444',
-  fontSize: '13px',
-  margin: '0',
-  lineHeight: '1.5',
 }
 
 // One change box
