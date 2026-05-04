@@ -223,7 +223,7 @@ export function IdeasClient({
 
   // Trigger generation on mount when no fresh ideas
   useEffect(() => {
-    if (!isFresh && initialIdeas.length === 0) {
+    if (!isFresh && initialIdeas.length === 0 && localRefreshAvailable) {
       void generate()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,7 +241,12 @@ export function IdeasClient({
         return
       }
       if (res.status === 429) {
-        window.location.reload()
+        setLocalRefreshAvailable(false)
+        setError(
+          'New ideas are available every Monday when competitor data refreshes.'
+        )
+        setIsGenerating(false)
+        setIsRegenerating(false)
         return
       }
       if (!res.ok) {
