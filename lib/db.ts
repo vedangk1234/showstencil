@@ -872,48 +872,6 @@ export async function getLatestTrend(userId: string): Promise<import('@/types').
 }
 
 // ---------------------------------------------------------------------------
-// getRecentIdeas
-// ---------------------------------------------------------------------------
-
-/**
- * Returns the most recent AI-generated video ideas for a user.
- *
- * @returns GeneratedVideoIdea[] sorted by generated_at desc, empty array on error
- */
-export async function getRecentIdeas(
-  userId: string,
-  limit: number = 5,
-): Promise<import('@/types').GeneratedVideoIdea[]> {
-  const supabase = createServiceClient()
-
-  const { data, error } = await supabase
-    .from('ideas')
-    .select('*')
-    .eq('user_id', userId)
-    .order('generated_at', { ascending: false })
-    .limit(limit)
-
-  if (error) {
-    // Table may not exist yet — treat as empty rather than crashing
-    if (error.code !== '42P01') {
-      console.error('[db] getRecentIdeas error:', error.message)
-    }
-    return []
-  }
-
-  return (data ?? []).map((row) => ({
-    rank: row.rank ?? 1,
-    title: row.title ?? '',
-    score: row.score ?? 0,
-    whyNow: row.why_now ?? '',
-    angle: row.angle ?? '',
-    format: row.format ?? '',
-    estimatedLength: row.estimated_length ?? '',
-    generatedAt: row.generated_at ?? '',
-  })) as import('@/types').GeneratedVideoIdea[]
-}
-
-// ---------------------------------------------------------------------------
 // upsertUserSettings
 // ---------------------------------------------------------------------------
 
