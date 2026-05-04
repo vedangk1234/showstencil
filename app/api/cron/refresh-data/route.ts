@@ -270,14 +270,10 @@ export async function GET(request: Request) {
         `[cron/refresh-data] User ${user.id}: synced ${competitorCount} competitors`
       )
 
-      // Wipe insights cache for auto-detected competitors after data refresh so they regenerate
-      // from fresh video data. Manually-added (is_searched=true) competitor insights are kept —
-      // they would otherwise be wiped nightly and fail to regenerate if Claude has a transient error.
-      await supabase
-        .from('competitors')
-        .update({ insights: null, insights_generated_at: null })
-        .eq('user_id', user.id)
-        .eq('is_searched', false)
+      // Insights cache is managed by the weekly cache-clear logic inside
+      // app/api/cron/cache-cleanup/route.ts (runs every Monday via getUTCDay() === 1 check).
+      // Do not wipe insights here.
+      console.log('[cron/refresh-data] Competitor data updated. Insights cache untouched — managed by weekly Monday logic in cache-cleanup.')
     } catch (blockErr) {
       console.error(
         `[cron/refresh-data] Competitor sync block failed for user ${user.id}:`,

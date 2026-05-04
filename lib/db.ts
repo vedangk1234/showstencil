@@ -1460,3 +1460,48 @@ export async function deleteAllUserThumbnails(userId: string): Promise<void> {
     .eq('user_id', userId)
     .not('thumbnail_image_url', 'is', null)
 }
+
+// ---------------------------------------------------------------------------
+// setIdeasRefreshAvailable
+// ---------------------------------------------------------------------------
+
+export async function setIdeasRefreshAvailable(
+  userId: string,
+  available: boolean,
+): Promise<boolean> {
+  const supabase = createServiceClient()
+
+  const { error } = await supabase
+    .from('user_settings')
+    .upsert(
+      { user_id: userId, ideas_refresh_available: available },
+      { onConflict: 'user_id' },
+    )
+
+  if (error) {
+    console.error('[db] setIdeasRefreshAvailable error:', error.message)
+    return false
+  }
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// getIdeasRefreshAvailable
+// ---------------------------------------------------------------------------
+
+export async function getIdeasRefreshAvailable(userId: string): Promise<boolean> {
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('ideas_refresh_available')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error || !data) {
+    // Default to true if no row exists — new users can generate immediately
+    return true
+  }
+
+  return data.ideas_refresh_available ?? true
+}

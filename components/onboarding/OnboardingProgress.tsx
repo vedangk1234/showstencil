@@ -36,7 +36,7 @@ export default function OnboardingProgress({ currentStep, totalSteps }: Props) {
           )
         })}
       </div>
-      <div className="text-[11px] font-mono uppercase tracking-widest text-zinc-500">
+      <div className="text-[11px] font-mono uppercase tracking-widest text-zinc-500 text-center">
         Step {currentStep} of {totalSteps} — {STEP_LABELS[currentStep]}
       </div>
     </div>

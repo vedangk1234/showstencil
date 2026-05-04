@@ -84,7 +84,7 @@ function OnboardingContent() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] text-white flex flex-col">
+    <div className="relative min-h-screen bg-[#0A0A0A] text-white flex flex-col">
       {step > 1 && (
         <button
           onClick={skipOnboarding}

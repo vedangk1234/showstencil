@@ -87,11 +87,90 @@ export async function GET(request: Request) {
     deletedThumbnails++
   }
 
+  // ── Monday-only: wipe competitor insights cache + enable ideas refresh ────
+  // Runs only on Mondays so users get fresh competitor-data-driven insights
+  // and the Generate Ideas button re-enables once per week.
+  let insightsWiped = 0
+  let usersEnabled = 0
+
+  if (new Date().getUTCDay() === 1) {
+    console.log('[cron/cache-cleanup] Monday detected — running weekly insights cache clear')
+
+    // Count how many competitors currently have cached insights
+    const { count: cachedCount } = await supabase
+      .from('competitors')
+      .select('*', { count: 'exact', head: true })
+      .not('insights', 'is', null)
+
+    console.log(`[cron/cache-cleanup] Found ${cachedCount ?? 0} competitors with cached insights`)
+
+    // Wipe insights for ALL competitors across ALL users — forces fresh
+    // generation on next user visit to the AI Insights tab or Ideas page
+    const { error: wipeError } = await supabase
+      .from('competitors')
+      .update({ insights: null, insights_generated_at: null })
+      .not('id', 'is', null)
+
+    if (wipeError) {
+      console.error('[cron/cache-cleanup] Failed to wipe insights:', wipeError.message)
+    } else {
+      insightsWiped = cachedCount ?? 0
+      console.log(`[cron/cache-cleanup] Wiped insights for ${insightsWiped} competitors`)
+    }
+
+    // Enable the Generate Ideas button for all users with an existing settings row
+    const { count: flaggedCount, error: flagError } = await supabase
+      .from('user_settings')
+      .update({ ideas_refresh_available: true }, { count: 'exact' })
+      .not('user_id', 'is', null)
+
+    if (flagError) {
+      console.error('[cron/cache-cleanup] Failed to set ideas_refresh_available:', flagError.message)
+    } else {
+      usersEnabled = flaggedCount ?? 0
+      console.log(`[cron/cache-cleanup] Enabled ideas refresh for ${usersEnabled} users`)
+    }
+
+    // Create user_settings rows for any users who don't have one yet,
+    // with ideas_refresh_available = true so they can generate immediately
+    const { data: usersWithoutSettings } = await supabase
+      .from('users')
+      .select('id')
+      .not('id', 'in', supabase.from('user_settings').select('user_id'))
+
+    if (usersWithoutSettings && usersWithoutSettings.length > 0) {
+      const newRows = usersWithoutSettings.map((u) => ({
+        user_id: u.id,
+        ideas_refresh_available: true,
+        weekly_digest_enabled: true,
+        alerts_enabled: true,
+        alert_threshold_multiplier: 3.0,
+      }))
+
+      const { error: insertError } = await supabase
+        .from('user_settings')
+        .insert(newRows)
+
+      if (insertError) {
+        console.error('[cron/cache-cleanup] Failed to create missing user_settings rows:', insertError.message)
+      } else {
+        console.log(`[cron/cache-cleanup] Created user_settings for ${newRows.length} users without settings`)
+        usersEnabled += newRows.length
+      }
+    }
+
+    console.log('[cron/cache-cleanup] Weekly insights cache clear complete')
+  }
+
   return NextResponse.json({
     deleted_cache_rows: deletedCache ?? 0,
     deleted_history_rows: deletedHistory ?? 0,
     deleted_competitor_rows: deletedCompetitors ?? 0,
     deleted_thumbnail_jobs: deletedJobs ?? 0,
     deleted_thumbnails: deletedThumbnails,
+    ...(new Date().getUTCDay() === 1 && {
+      insights_wiped: insightsWiped,
+      users_ideas_enabled: usersEnabled,
+    }),
   })
 }

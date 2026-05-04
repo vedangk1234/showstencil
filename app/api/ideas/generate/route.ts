@@ -3,7 +3,7 @@ import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
-import { deleteAllUserThumbnails } from '@/lib/db'
+import { deleteAllUserThumbnails, setIdeasRefreshAvailable } from '@/lib/db'
 import type { Idea } from '@/types'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -440,6 +440,10 @@ Respond in this exact JSON structure with no text before or after:
       console.error('[ideas/generate] Insert error:', insertError.message)
       return NextResponse.json({ error: 'Failed to save ideas: ' + insertError.message }, { status: 500 })
     }
+
+    // Ideas saved successfully — disable the Generate Ideas button until next
+    // Monday's cache-cleanup cron sets ideas_refresh_available = true again
+    await setIdeasRefreshAvailable(userId, false)
 
     // ── 10. Prune ideas older than 4 weeks ────────────────────────────────
     const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString()
