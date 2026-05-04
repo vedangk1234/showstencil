@@ -101,7 +101,6 @@ showstencil/
 │   ├── gap-scorer.ts                 ← core gap scoring algorithm
 │   ├── trend-detector.ts             ← viral video detection
 │   ├── digest-generator.ts           ← Claude API integration
-│   ├── idea-generator.ts             ← video idea generation
 │   ├── email.ts                      ← Resend email functions
 │   ├── stripe.ts                     ← replaced by Lemon Squeezy (stub)
 │   ├── access.ts                     ← plan gating (canAccess function)
@@ -647,7 +646,7 @@ const planLimits = {
 | `lib/db.ts` | ✅ | All snapshot/video/competitor CRUD + getCompetitorMetricsFromDB |
 | `lib/trend-detector.ts` | ✅ | detectViralVideos, findUncoveredTopics (Claude), getTrendingInNiche |
 | `lib/digest-generator.ts` | ✅ | Full Claude digest pipeline — best/worst videos, posting day, structured ideas, fallback mode, multi-niche test |
-| `lib/idea-generator.ts` | ✅ | generateVideoIdeas — Claude Sonnet 4.6, 3 ranked ideas with score/why/angle/format/length, DB save + prune |
+| `lib/idea-generator.ts` | 🗑️ deleted | Superseded by `app/api/ideas/generate/route.ts` (Day 20). Dead JSONB schema writer removed Day 32. |
 | `lib/revenue-benchmarks.ts` | ✅ | getNicheBenchmarks (12 niches), calculateRevenuePotential, getBenchmarkComparison, getSubscriberTier |
 | `lib/email.ts` | ✅ | sendWeeklyDigest, sendTrendAlert, checkAndSendAlerts, generateUnsubscribeToken |
 | `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — see webhook route |
@@ -768,7 +767,7 @@ const planLimits = {
 | `scripts/test-youtube-data.ts` | ✅ | Manual test for all 6 Data API functions |
 | `scripts/seed-test-data.ts` | ✅ | Inserts realistic finance creator test data into Supabase |
 | `scripts/test-gap-scorer.ts` | ✅ | End-to-end DB → gap scorer → save pipeline test |
-| `scripts/test-full-pipeline.ts` | ✅ | All 7 pipeline steps timed end-to-end with cost tracking |
+| `scripts/test-full-pipeline.ts` | 🗑️ deleted | Day 6 artifact. Tested old 7-step pipeline incl. dead JSONB ideas writer. Deleted Day 32. |
 | `scripts/create-ideas-table.ts` | ✅ | Provisions the ideas table in Supabase (run once) |
 | `scripts/test-email.ts` | ✅ | Sends real weekly digest email to test user inbox |
 | `scripts/test-trend-alert.ts` | ✅ | Sends real trend alert email + tests checkAndSendAlerts |
@@ -781,6 +780,29 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 3 — Day 32 (2026-05-04)
+
+**lib/idea-generator.ts fully deleted — all orphaned Day 6 code gone**
+
+*scripts/test-full-pipeline.ts — DELETED*
+* Day 6 artifact testing the old 7-step pipeline (data sync → gap score → trend detection → uncovered topics → digest → old JSONB ideas → revenue benchmarks). Step 6 called `generateVideoIdeas` which writes to the old JSONB schema the UI never reads. Not referenced in package.json scripts. Last commit was `day 6 night: full pipeline test`. No current value — deleted entirely.
+
+*scripts/test-everything.ts — MODIFIED*
+* Removed `import { generateVideoIdeas } from '@/lib/idea-generator'` (was line 38). Removed `IdeaResult` from the `@/types` import block.
+* 3.6+3.7 `Promise.allSettled([generateDigest, generateVideoIdeas])` block restructured: digest now runs with a plain `try/await`, test 3.7 changed to `record('3.7', ... 'SKIP', 'lib/idea-generator.ts removed — ideas via /api/ideas/generate')`. `step3637WallMs` → `step36WallMs`. Pipeline timing log updated to show "3.6 digest" instead of "3.6+3.7 parallel".
+* The rest of the suite (28 tests — Phase 1 env vars, Phase 2 DB, Phase 3 intelligence pipeline, Phase 4 email, Phase 5 payments) remains intact and still runs. Only the dead test 3.7 was removed.
+* fileMap entry for 3.7 updated to note it is skipped.
+
+*lib/idea-generator.ts — DELETED*
+* Confirmed zero imports after script changes (grep showed only string literals in test-everything.ts comments). Deleted.
+
+*types/index.ts — MODIFIED*
+* `GeneratedVideoIdea` and `IdeaResult` interfaces deleted (22 lines). Grep confirmed zero external references after lib/idea-generator.ts deletion.
+
+*tsc --noEmit: zero errors.*
+
+---
 
 ### Week 3 — Day 31 (2026-05-04)
 
@@ -2108,7 +2130,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-04 — Day 31: Weekly digest cron cleanup. Removed zombie generateVideoIdeas call from weekly-digest cron (was calling old JSONB lib/idea-generator.ts, discarding result, burning Claude credits every Monday). Change 2 (delete lib/idea-generator.ts) and Change 3 (delete GeneratedVideoIdea/IdeaResult types) both blocked — scripts/test-full-pipeline.ts:17 and scripts/test-everything.ts:38 still import from the file. Key Decisions updated: weekly digest cron no longer generates ideas.
+*Last updated: 2026-05-04 — Day 32: lib/idea-generator.ts fully deleted. scripts/test-full-pipeline.ts deleted entirely (Day 6 artifact, tested old 7-step pipeline with dead JSONB ideas writer, no current value). scripts/test-everything.ts stripped of idea-generator import — test 3.7 changed to SKIP with note, IdeaResult removed from @/types import, 3.6+3.7 Promise.allSettled restructured to plain await on generateDigest alone. GeneratedVideoIdea and IdeaResult types deleted from types/index.ts (zero external references after deletions confirmed by grep). tsc --noEmit: zero errors. lib/idea-generator.ts is now fully gone from the codebase.
+Previous Day 31: Weekly digest cron cleanup. Removed zombie generateVideoIdeas call from weekly-digest cron (was calling old JSONB lib/idea-generator.ts, discarding result, burning Claude credits every Monday).
 Previous Day 30: Ideas system diagnostic — 7 of 8 fixes applied. Fix A (idea-generator.ts) not deleted — active import in weekly-digest cron. Fix B: ideas_refresh_available added to UserSettings type. Fix C: "monthly" text replaced with "this week / Refreshes every Monday" in indicator bar. Fix D: empty state canRegenerate={true} → localRefreshAvailable, Generate Ideas button gated by flag, disabled message shown when false. Fix E: 403 handler shows human-readable upgrade message instead of raw error key, upgrade CTA link added to error display in both empty state and main view. Fix F: regenerateAvailableAt computation and return field removed from generate route. Fix G: getRecentIdeas deleted from lib/db.ts (zero external callers confirmed). Fix H: ideas/latest now uses ±1-minute batch window matching getRecentIdeasBatch. tsc --noEmit: zero errors.
 Previous Day 28: Weekly insights cache rhythm + Generate Ideas button flag. (1) page.tsx bug fixed: getIdeasRefreshAvailable(userId) was missing from Promise.all (5 variables, 4 items — ideasRefreshAvailable was undefined). Added as 5th item. (2) ideasRefreshAvailable passed to IdeasClient as a new prop. (3) IdeasClient: added ideasRefreshAvailable prop, localRefreshAvailable useState, setLocalRefreshAvailable(false) on successful generation, canRegenerate simplified to localRefreshAvailable (dropped plan-based date math), Header updated — when enabled shows "Fresh competitor data available — generate new ideas", when disabled shows "New ideas available every Monday when competitor data refreshes". (4) mostRecentGeneratedAt removed as a prop (still computed in page.tsx for imageSeed but no longer passed to client). (5) user_settings.ideas_refresh_available column documented in schema. (6) setIdeasRefreshAvailable + getIdeasRefreshAvailable documented in lib/db.ts section. Already done in prior session: daily cron insights wipe removed, cache-cleanup Monday branch wires insights wipe + flag reset, DB functions added, ideas/generate sets flag false after save. Previous Day 27: Ideas parallel insight generation fix. /api/ideas/generate: sequential for-loop → Promise.allSettled (prevents 60s Vercel timeout on 3+ competitors), empty-array insights check added. StepFirstAnalysis: LOADING_STAGES extended 20s→27s, 1s settle delay after generation. IdeasClient: stage labels updated to match actual pipeline. Previous Day 26: Interactive notification settings. NotificationSettings client component (digest toggle, alerts toggle, threshold slider, optimistic updates, 2s Saved ✓ indicator). settings/page.tsx: Toggle sub-component removed, 3 derived vars removed, section replaced with component call. CLAUDE.md components table updated.
 Previous Day 25: Onboarding polish. StepFirstAnalysis auto-triggers /api/ideas/generate when ideas table is empty (full pipeline: insights + ideas in one call). Mobile responsive: all buttons w-full sm:w-auto, StepConfirmChannel buttons flex-col sm:flex-row with py-3 tap targets, gap score text-5xl sm:text-7xl, idea title break-words. page.tsx searchParams sync effect fixes browser back/forward. Skip flow verified correct (no changes). Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
