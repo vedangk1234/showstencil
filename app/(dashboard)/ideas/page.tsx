@@ -1,7 +1,7 @@
 import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase'
-import { getRecentIdeasBatch } from '@/lib/db'
+import { getRecentIdeasBatch, getIdeasRefreshAvailable } from '@/lib/db'
 import { getIdeaLimit, canGenerateThumbnail } from '@/lib/access'
 import { IdeasClient } from '@/components/ideas/IdeasClient'
 import type { PlanType } from '@/types'
@@ -35,8 +35,8 @@ export default async function IdeasPage() {
   const userId = session.user.id
   const supabase = createServiceClient()
 
-  // Load plan info, niche, recent ideas, and thumbnail quota in parallel
-  const [userRow, ideas, ideaLimit, thumbnailQuota] = await Promise.all([
+  // Load plan info, niche, recent ideas, thumbnail quota, and refresh flag in parallel
+  const [userRow, ideas, ideaLimit, thumbnailQuota, ideasRefreshAvailable] = await Promise.all([
     supabase
       .from('users')
       .select('subscription_status, subscription_plan, trial_ends_at, niche_id')
@@ -46,6 +46,7 @@ export default async function IdeasPage() {
     getRecentIdeasBatch(userId),
     getIdeaLimit(userId),
     canGenerateThumbnail(userId),
+    getIdeasRefreshAvailable(userId),
   ])
 
   const plan = resolvePlan(userRow)
@@ -70,7 +71,6 @@ export default async function IdeasPage() {
       initialIdeas={ideas}
       isFresh={isFresh}
       plan={plan}
-      mostRecentGeneratedAt={mostRecentGeneratedAt}
       ideaLimit={ideaLimit}
       nicheId={nicheId}
       imageSeed={imageSeed}
@@ -79,6 +79,7 @@ export default async function IdeasPage() {
       quotaLimit={thumbnailQuota.quotaLimit}
       quotaResetAt={thumbnailQuota.quotaResetAt}
       googleProfilePhotoUrl={googleProfilePhotoUrl}
+      ideasRefreshAvailable={ideasRefreshAvailable}
     />
   )
 }

@@ -188,7 +188,6 @@ interface IdeasClientProps {
   initialIdeas: Idea[]
   isFresh: boolean
   plan: 'free' | 'starter' | 'pro'
-  mostRecentGeneratedAt: string | null
   ideaLimit: number
   nicheId: string
   imageSeed: number
@@ -197,13 +196,13 @@ interface IdeasClientProps {
   quotaLimit: number
   quotaResetAt: Date | null
   googleProfilePhotoUrl: string | null
+  ideasRefreshAvailable: boolean
 }
 
 export function IdeasClient({
   initialIdeas,
   isFresh,
   plan,
-  mostRecentGeneratedAt,
   ideaLimit,
   nicheId,
   imageSeed,
@@ -211,6 +210,7 @@ export function IdeasClient({
   quotaUsed,
   quotaLimit,
   googleProfilePhotoUrl,
+  ideasRefreshAvailable,
 }: IdeasClientProps) {
   const [ideas, setIdeas] = useState<Idea[]>(initialIdeas)
   const [isGenerating, setIsGenerating] = useState(!isFresh && initialIdeas.length === 0)
@@ -219,6 +219,7 @@ export function IdeasClient({
   const [doneExpanded, setDoneExpanded] = useState(false)
   const [thumbnailModalIdeaId, setThumbnailModalIdeaId] = useState<string | null>(null)
   const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false)
+  const [localRefreshAvailable, setLocalRefreshAvailable] = useState(ideasRefreshAvailable)
 
   // Trigger generation on mount when no fresh ideas
   useEffect(() => {
@@ -242,6 +243,8 @@ export function IdeasClient({
         return
       }
       setIdeas(data.ideas ?? [])
+      // Disable button locally — server already set ideas_refresh_available = false
+      setLocalRefreshAvailable(false)
     } catch {
       setError('Network error — please check your connection and try again.')
     } finally {
@@ -296,30 +299,10 @@ export function IdeasClient({
     setThumbnailModalIdeaId(null)
   }
 
-  // ── Lock state ───────────────────────────────────────────────────────────
-  let canRegenerate = true
-  let nextAvailableDate: string | null = null
-
-  if (mostRecentGeneratedAt) {
-    const generatedDate = new Date(mostRecentGeneratedAt)
-    const now = new Date()
-
-    if (plan === 'starter') {
-      const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-      if (generatedDate >= startOfMonth) {
-        canRegenerate = false
-        const y = now.getUTCMonth() === 11 ? now.getUTCFullYear() + 1 : now.getUTCFullYear()
-        const m = (now.getUTCMonth() + 1) % 12
-        nextAvailableDate = new Date(Date.UTC(y, m, 1)).toISOString()
-      }
-    } else if (plan === 'pro') {
-      const unlockAt = new Date(generatedDate.getTime() + 7 * 24 * 60 * 60 * 1000)
-      if (unlockAt > now) {
-        canRegenerate = false
-        nextAvailableDate = unlockAt.toISOString()
-      }
-    }
-  }
+  // ── Lock state — controlled by weekly cache-clear cron (Monday 3am UTC) ──
+  // ideas_refresh_available is set to false after generation and reset to true
+  // every Monday when the cache-cleanup cron runs.
+  const canRegenerate = localRefreshAvailable
 
   const latestGeneratedAt = ideas.length > 0 ? ideas[0].generated_at : null
   const activeIdeas = ideas.filter((i) => !i.made_at)
@@ -382,7 +365,6 @@ export function IdeasClient({
         <Header
           latestGeneratedAt={null}
           canRegenerate={true}
-          nextAvailableDate={null}
           plan={plan}
           onRegenerate={() => { setIsGenerating(true); void generate() }}
           isRegenerating={false}
@@ -421,7 +403,6 @@ export function IdeasClient({
       <Header
         latestGeneratedAt={latestGeneratedAt}
         canRegenerate={canRegenerate}
-        nextAvailableDate={nextAvailableDate}
         plan={plan}
         onRegenerate={() => void handleRegenerate()}
         isRegenerating={isRegenerating}
@@ -721,7 +702,6 @@ export function IdeasClient({
 function Header({
   latestGeneratedAt,
   canRegenerate,
-  nextAvailableDate,
   plan,
   onRegenerate,
   isRegenerating,
@@ -730,7 +710,6 @@ function Header({
 }: {
   latestGeneratedAt: string | null
   canRegenerate: boolean
-  nextAvailableDate: string | null
   plan: 'free' | 'starter' | 'pro'
   onRegenerate: () => void
   isRegenerating: boolean
@@ -756,27 +735,32 @@ function Header({
 
         <div style={{ flexShrink: 0, marginLeft: 16, textAlign: 'right' }}>
           {canRegenerate ? (
-            <button
-              onClick={onRegenerate}
-              disabled={isRegenerating}
-              style={{
-                fontSize: 13, fontWeight: 600,
-                color: isRegenerating ? '#333333' : '#000000',
-                background: isRegenerating ? '#111111' : '#4ade80',
-                border: 'none', borderRadius: 6, padding: '8px 16px',
-                cursor: isRegenerating ? 'default' : 'pointer', whiteSpace: 'nowrap',
-              }}
-            >
-              {isRegenerating ? 'Generating…' : 'Regenerate ideas'}
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={onRegenerate}
+                disabled={isRegenerating}
+                style={{
+                  fontSize: 13, fontWeight: 600,
+                  color: isRegenerating ? '#333333' : '#000000',
+                  background: isRegenerating ? '#111111' : '#4ade80',
+                  border: 'none', borderRadius: 6, padding: '8px 16px',
+                  cursor: isRegenerating ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                {isRegenerating ? 'Generating…' : 'Regenerate ideas'}
+              </button>
+              <p style={{ color: '#555555', fontSize: 11, margin: 0, fontFamily: 'monospace' }}>
+                Fresh competitor data available — generate new ideas
+              </p>
+            </div>
           ) : (
             <div>
               <p style={{ color: '#555555', fontSize: 12, margin: 0, fontFamily: 'monospace' }}>
-                Next refresh available {nextAvailableDate ? formatDate(nextAvailableDate) : ''}
+                New ideas available every Monday when competitor data refreshes
               </p>
               {plan === 'starter' && (
                 <p style={{ color: '#444444', fontSize: 11, margin: '4px 0 0', fontFamily: 'monospace' }}>
-                  Pro users refresh weekly.{' '}
+                  Pro users get 10 ideas.{' '}
                   <a href="/pricing" style={{ color: '#60a5fa', textDecoration: 'none' }}>Upgrade to Pro</a>
                 </p>
               )}
