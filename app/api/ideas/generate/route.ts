@@ -100,39 +100,26 @@ export async function POST(_req: Request) {
       return NextResponse.json({ error: 'upgrade_required' }, { status: 403 })
     }
 
-    // ── 2. Plan regeneration limit ─────────────────────────────────────────
-    const { data: lastIdeaRow } = await supabase
-      .from('ideas')
-      .select('generated_at')
+    // ── 2. Check ideas_refresh_available flag ─────────────────────────────
+    // Controlled by user_settings.ideas_refresh_available
+    // Set to false after generation, reset to true every Monday by cache-cleanup cron
+    const { data: userSettings } = await supabase
+      .from('user_settings')
+      .select('ideas_refresh_available')
       .eq('user_id', userId)
-      .not('opportunity_score', 'is', null)
-      .order('generated_at', { ascending: false })
-      .limit(1)
       .maybeSingle()
 
-    if (lastIdeaRow) {
-      const lastAt = new Date(lastIdeaRow.generated_at)
-      const now = new Date()
+    const canGenerate = userSettings?.ideas_refresh_available ?? true
+    // Default true if no settings row — new users can always generate
 
-      if (plan === 'starter') {
-        const sameMonth =
-          lastAt.getUTCMonth() === now.getUTCMonth() &&
-          lastAt.getUTCFullYear() === now.getUTCFullYear()
-        if (sameMonth) {
-          const nextYear = now.getUTCMonth() === 11 ? now.getUTCFullYear() + 1 : now.getUTCFullYear()
-          const nextMonth = (now.getUTCMonth() + 1) % 12
-          const nextAvailable = new Date(Date.UTC(nextYear, nextMonth, 1)).toISOString()
-          return NextResponse.json({ error: 'monthly_limit_reached', nextAvailable }, { status: 429 })
-        }
-      }
-
-      if (plan === 'pro') {
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-        if (lastAt > sevenDaysAgo) {
-          const nextAvailable = new Date(lastAt.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-          return NextResponse.json({ error: 'weekly_limit_reached', nextAvailable }, { status: 429 })
-        }
-      }
+    if (!canGenerate) {
+      return NextResponse.json(
+        {
+          error: 'ideas_not_available',
+          message: 'New ideas are available every Monday when competitor data refreshes.',
+        },
+        { status: 429 }
+      )
     }
 
     // ── 2b. Delete existing thumbnails before generating new ideas ────────────
