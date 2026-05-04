@@ -781,6 +781,22 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 3 — Day 27 (2026-05-04)
+
+**Ideas generation: parallel insight auto-generation + onboarding Step 5 fix**
+
+*app/api/ideas/generate/route.ts — MODIFIED*
+* Missing-insights filter extended: now catches `insights = []` (empty array) in addition to `insights = null` and `insights_generated_at = null`. Previously an empty array would pass the filter and the prompt would include an empty insights section.
+* Sequential `for` loop replaced with `Promise.allSettled` parallel execution. Previously generating insights for 3 competitors took 3 × 10-20s = 30-60s in series before Claude was even called — frequently hitting Vercel's 60s function timeout. Now all competitors' insights generate simultaneously; total time is bounded by the slowest single competitor (~15-20s) rather than the sum.
+
+*components/onboarding/StepFirstAnalysis.tsx — MODIFIED*
+* `LOADING_STAGES` updated from 5 stages totalling 20s to 5 stages totalling 27s (3 + 6 + 5 + 10 + 3). Stage labels updated to match actual pipeline: "Connecting to your YouTube channel...", "Analysing your competitors...", "Calculating your gap scores...", "Generating your personalised video ideas...", "Almost ready...". Previously `fetchResults` fired after 20s, called `/api/ideas/generate` which itself needed 40-60s — the generation would still be running when the user expected results.
+* Added 1s settle delay (`await new Promise(r => setTimeout(r, 1000))`) after `genRes.ok` before the second `/api/ideas/latest` fetch, preventing a race where the DB write hasn't completed before the read.
+
+*components/ideas/IdeasClient.tsx — MODIFIED*
+* `STAGES` labels updated from generic "Gathering competitor intelligence / Analysing your top performing videos / Generating ideas" to "Analysing competitor insights... / Matching your top videos to proven topics... / Generating your personalised ideas..." — accurately reflects the parallel insights → Claude pipeline.
+* LoadingState subtext updated from "This takes about 30 seconds" to "This takes about 40 seconds" to set accurate expectations.
+
 ### Week 3 — Day 26 (2026-05-04)
 
 **Interactive notification settings — toggles and threshold slider wired to API**
@@ -1963,7 +1979,7 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-04 — Day 26: Interactive notification settings. NotificationSettings client component (digest toggle, alerts toggle, threshold slider, optimistic updates, 2s Saved ✓ indicator). settings/page.tsx: Toggle sub-component removed, 3 derived vars removed, section replaced with component call. CLAUDE.md components table updated.
+*Last updated: 2026-05-04 — Day 27: Ideas parallel insight generation fix. /api/ideas/generate: sequential for-loop → Promise.allSettled (prevents 60s Vercel timeout on 3+ competitors), empty-array insights check added. StepFirstAnalysis: LOADING_STAGES extended 20s→27s, 1s settle delay after generation. IdeasClient: stage labels updated to match actual pipeline. Previous Day 26: Interactive notification settings. NotificationSettings client component (digest toggle, alerts toggle, threshold slider, optimistic updates, 2s Saved ✓ indicator). settings/page.tsx: Toggle sub-component removed, 3 derived vars removed, section replaced with component call. CLAUDE.md components table updated.
 Previous Day 25: Onboarding polish. StepFirstAnalysis auto-triggers /api/ideas/generate when ideas table is empty (full pipeline: insights + ideas in one call). Mobile responsive: all buttons w-full sm:w-auto, StepConfirmChannel buttons flex-col sm:flex-row with py-3 tap targets, gap score text-5xl sm:text-7xl, idea title break-words. page.tsx searchParams sync effect fixes browser back/forward. Skip flow verified correct (no changes). Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
 Previous Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
 Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
