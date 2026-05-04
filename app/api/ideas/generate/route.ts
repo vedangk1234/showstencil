@@ -436,17 +436,6 @@ Respond in this exact JSON structure with no text before or after:
     const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString()
     await supabase.from('ideas').delete().eq('user_id', userId).lt('generated_at', fourWeeksAgo)
 
-    // ── 11. Compute regenerateAvailableAt ─────────────────────────────────
-    let regenerateAvailableAt: string | null = null
-    if (plan === 'starter') {
-      const now = new Date()
-      const nextYear = now.getUTCMonth() === 11 ? now.getUTCFullYear() + 1 : now.getUTCFullYear()
-      const nextMonth = (now.getUTCMonth() + 1) % 12
-      regenerateAvailableAt = new Date(Date.UTC(nextYear, nextMonth, 1)).toISOString()
-    } else if (plan === 'pro') {
-      regenerateAvailableAt = new Date(new Date(generatedAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-    }
-
     const ideas = (savedRows ?? []).map((row) => ({
       id: row.id,
       user_id: row.user_id,
@@ -469,7 +458,7 @@ Respond in this exact JSON structure with no text before or after:
       thumbnail_source_type: null,
     })) as Idea[]
 
-    return NextResponse.json({ ideas, generatedAt, regenerateAvailableAt })
+    return NextResponse.json({ ideas, generatedAt })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Generation failed'
     console.error('[ideas/generate]', error)
