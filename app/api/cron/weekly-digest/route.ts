@@ -12,7 +12,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { generateDigest } from '@/lib/digest-generator'
-import { generateVideoIdeas } from '@/lib/idea-generator'
 
 export async function GET(request: Request) {
   // ── Auth check ─────────────────────────────────────────────────────────────
@@ -44,12 +43,9 @@ export async function GET(request: Request) {
 
   for (const user of userList) {
     try {
-      await Promise.all([
-        generateDigest(user.id),
-        generateVideoIdeas(user.id),
-      ])
+      await generateDigest(user.id)
       succeeded++
-      console.log(`[cron/weekly-digest] Digest + ideas generated for user ${user.id}`)
+      console.log(`[cron/weekly-digest] Digest generated for user ${user.id}`)
     } catch (err) {
       failed++
       console.error(`[cron/weekly-digest] Failed for user ${user.id}:`, err)
