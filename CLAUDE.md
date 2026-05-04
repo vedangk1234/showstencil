@@ -782,6 +782,106 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 3 — Day 30 (2026-05-04)
+
+**Ideas system diagnostic — 7 of 8 fixes applied (Fix A blocked by active import)**
+
+*Fix A — lib/idea-generator.ts: NOT deleted*
+* Grep confirmed `app/api/cron/weekly-digest/route.ts` line 15 imports `generateVideoIdeas` from this file. The file is in active use by the Monday cron. Not deleted. Reported and skipped per instructions.
+
+*Fix B — types/index.ts — MODIFIED*
+* `ideas_refresh_available: boolean | null` added to `UserSettings` interface after `timezone`. The field exists in the DB (`user_settings.ideas_refresh_available`) but was missing from the TypeScript type, causing implicit `any` drift when reading settings rows.
+
+*Fix C — components/ideas/IdeasClient.tsx — MODIFIED (Header indicator bar)*
+* Starter plan indicator bar: replaced `"{ideasCount} of {ideaLimit} monthly ideas generated. Pro users get 10 ideas, refreshed weekly. Upgrade to Pro →"` with `"{ideasCount} of {ideaLimit} ideas generated this week. Refreshes every Monday."` — both plans refresh every Monday now; "monthly" was wrong, and the upsell belonged elsewhere.
+
+*Fix D — components/ideas/IdeasClient.tsx — MODIFIED (empty state)*
+* Empty state `<Header>` had `canRegenerate={true}` hardcoded — bypassing the `localRefreshAvailable` flag. A user with `ideas_refresh_available=false` and no ideas would see an enabled button that always returned 429. Changed to `canRegenerate={localRefreshAvailable}`.
+* The "Generate ideas" button in the empty state body also always rendered as enabled. Wrapped in conditional: when `localRefreshAvailable` is true shows the green button; when false shows `"New ideas available every Monday when competitor data refreshes."` in zinc-500 monospace text.
+* Empty state error display extended to include `<a href="/pricing">View pricing →</a>` when the error string contains "Upgrade" (same pattern as the main error display).
+
+*Fix E — components/ideas/IdeasClient.tsx — MODIFIED (generate callback + error display)*
+* `generate()` callback restructured: 403 is now caught before reading the response body — shows human-readable `"Video ideas are available on Starter and Pro plans. Upgrade to start generating ideas for your channel."` instead of the raw `"upgrade_required"` error key. 429 reloads the page (same as before). Other non-ok responses read the body and show `errData.error ?? 'Generation failed. Please try again.'`
+* Main-view error display extended: added `{error.includes('Upgrade') && <a href="/pricing">View pricing →</a>}` below the red error text.
+
+*Fix F — app/api/ideas/generate/route.ts — MODIFIED*
+* Removed the `regenerateAvailableAt` computation block (lines 439-448: plan-based first-of-next-month / now+7d calculation). Removed `regenerateAvailableAt` from the return JSON. The field was never read by IdeasClient (diagnostic confirmed). Button state is controlled entirely by the DB flag.
+
+*Fix G — lib/db.ts — MODIFIED*
+* Deleted `getRecentIdeas` function (42 lines). Grep confirmed zero external callers — only defined in db.ts, never imported. The function used the old JSONB ideas schema and mapped to `GeneratedVideoIdea` — a schema that no longer matches the DB. `GeneratedVideoIdea` type kept in types/index.ts because `lib/idea-generator.ts` still imports it.
+
+*Fix H — app/api/ideas/latest/route.ts — MODIFIED*
+* Previous implementation used `ORDER BY generated_at DESC LIMIT 3` — could return 3 ideas from 3 different generation runs if a user had generated multiple batches.
+* New implementation: (1) fetches the most recent `generated_at` timestamp for the user; returns `{ideas:[]}` immediately when none found. (2) computes `batchStart = latestIdea.generated_at - 60s`. (3) fetches all ideas `WHERE generated_at >= batchStart ORDER BY opportunity_score DESC LIMIT 10`. This matches the window used by `getRecentIdeasBatch` in lib/db.ts, ensuring onboarding Step 5 always shows ideas from the same generation run.
+
+*tsc --noEmit: zero errors after all changes.*
+
+---
+
+### Week 3 — Day 29 (2026-05-04)
+
+**Onboarding code audit — skip flow verification + mobile responsive fixes + TS fix**
+
+Full read-and-audit pass across all 8 onboarding files before touching any code.
+
+*Audit findings — skip flow: PASS*
+* `app/onboarding/page.tsx` line 88: `{step > 1 && (...)}` correctly hides the skip button on Step 1.
+* `skipOnboarding()` calls `await fetch('/api/onboarding/complete', { method: 'POST' })` then `router.push('/dashboard')` — correct order.
+* `app/api/onboarding/complete/route.ts` calls `.update({ onboarding_completed: true }).eq('id', session.user.id)` — correct.
+* `StepWelcome.tsx` return statement (lines 8-39) contains no skip button — correct.
+* `goToDashboard()` in `StepFirstAnalysis.tsx` calls `await fetch('/api/onboarding/complete', { method: 'POST' })` then `router.push('/dashboard')` — correct.
+
+*Audit findings — mobile (390px): 2 issues, both fixed*
+
+*app/onboarding/page.tsx — MODIFIED*
+* Outer div changed from `min-h-screen bg-[#0A0A0A] text-white flex flex-col` → `relative min-h-screen bg-[#0A0A0A] text-white flex flex-col`. The `absolute top-6 right-6` skip button was positioning relative to the viewport (no positioned ancestor) rather than its container. Adding `relative` anchors it correctly.
+
+*components/onboarding/OnboardingProgress.tsx — MODIFIED*
+* Step label div: added `text-center`. Previously the div had no text alignment set. The parent's `items-center` (flex) centres the div as a block, but text within the div would be left-aligned if it ever wrapped. `text-center` makes wrapping clean on all screen sizes.
+
+*app/api/cron/cache-cleanup/route.ts — TS fix*
+* Pre-existing TypeScript error (introduced in Day 28): `.select('*', { count: 'exact', head: true })` after `.update()` was passing two arguments to `.select()` — Supabase JS v2's `.select()` only accepts 0-1 arguments (the column string). The `count: 'exact'` option belongs in `.update(data, options)`. Fixed: removed `.select()` call entirely; moved `{ count: 'exact' }` into `.update({ ideas_refresh_available: true }, { count: 'exact' })`. `npx tsc --noEmit` confirms zero errors after fix.
+
+*All 21 checklist items confirmed PASS*
+* Skip flow: 5/5 PASS. Mobile: all steps — hero text ≤48px, all buttons w-full on mobile, flex-col sm:flex-row stacking, truncate on competitor names, shrink-0 on tier badges, text-5xl sm:text-7xl on gap score, break-words on idea title, progress dots centred, no horizontal overflow at 390px.
+
+---
+
+### Week 3 — Day 28 (2026-05-04)
+
+**Weekly insights cache rhythm + Generate Ideas button controlled by DB flag**
+
+*app/(dashboard)/ideas/page.tsx — MODIFIED*
+* Bug fix: `getIdeasRefreshAvailable(userId)` was missing from the `Promise.all` destructure (5 variables, 4 items — `ideasRefreshAvailable` was `undefined`). Added as the 5th item in the parallel fetch.
+* `ideasRefreshAvailable` passed to `IdeasClient` as a new prop (type `boolean`).
+* `mostRecentGeneratedAt` removed as a prop to `IdeasClient` — still computed server-side for `imageSeed` but no longer needed by the client.
+
+*components/ideas/IdeasClient.tsx — MODIFIED*
+* Added `ideasRefreshAvailable: boolean` prop.
+* Added `localRefreshAvailable` useState initialised from the prop — so the button disables immediately on successful generation without a page reload.
+* `setLocalRefreshAvailable(false)` called inside the generation success path before `setIdeas`.
+* `canRegenerate` simplified: was complex date math per plan → now just `localRefreshAvailable`.
+* Header message updated: when `localRefreshAvailable` is true shows "Fresh competitor data available — generate new ideas"; when false shows "New ideas available every Monday when competitor data refreshes". This removes the old plan-specific "regenerate once per month / once per 7 days" messaging which was confusing and inconsistent with the DB flag.
+
+*lib/db.ts — 2 new functions*
+* `setIdeasRefreshAvailable(userId, available)` — upserts `ideas_refresh_available` on `user_settings` with `{ onConflict: 'user_id' }`. Returns `true/false`. Called with `false` by `/api/ideas/generate` after ideas are saved.
+* `getIdeasRefreshAvailable(userId)` — reads `ideas_refresh_available` from `user_settings`. Returns `true` when no row exists (new users can generate immediately). Used by `ideas/page.tsx` server component.
+
+*app/api/ideas/generate/route.ts — MODIFIED*
+* After the DB insert confirming ideas saved (step 9), calls `await setIdeasRefreshAvailable(userId, false)` before the prune step. This disables the Generate Ideas button immediately after a successful generation — the flag is re-enabled every Monday at 2am UTC by the `cache-cleanup` Monday branch.
+
+*app/api/cron/cache-cleanup/route.ts — MODIFIED (Monday-only branch added)*
+* After the existing daily cleanup (expired cache rows, old search history, stale thumbnail jobs), added a `if (new Date().getUTCDay() === 1)` branch that runs only on Mondays.
+* Monday branch — step 1: counts competitors with cached insights, then runs `.update({ insights: null, insights_generated_at: null }).not('id', 'is', null)` to wipe insights for ALL competitors across ALL users. This forces fresh generation on next Ideas page visit or Insights tab open — giving users insights regenerated from the latest 7 days of competitor video data.
+* Monday branch — step 2: runs `.update({ ideas_refresh_available: true }, { count: 'exact' }).not('user_id', 'is', null)` to re-enable the Generate Ideas button for all users with an existing `user_settings` row.
+* Monday branch — step 3: finds users without a `user_settings` row (new users who have never generated ideas) and inserts rows with `ideas_refresh_available: true` so they can generate immediately.
+* Response JSON extended: when it's Monday, includes `insights_wiped` and `users_ideas_enabled` counts.
+
+*app/api/cron/refresh-data/route.ts — MODIFIED*
+* Removed the nightly insights wipe that previously ran after every competitor data sync (`Block 2`). The wipe was generating Claude API credit burns on every ideas generation — insights would be null after 24h, forcing re-generation on every open. Now the daily cron only updates competitor data; insights survive until the Monday cache-cleanup branch wipes them. Net effect: insights TTL changes from 24h to 7 days, aligned to the weekly data rhythm.
+
+---
+
 ### Week 3 — Day 27 (2026-05-04)
 
 **Ideas generation: parallel insight auto-generation + onboarding Step 5 fix**
@@ -1984,7 +2084,8 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-04 — Day 28: Weekly insights cache rhythm + Generate Ideas button flag. (1) page.tsx bug fixed: getIdeasRefreshAvailable(userId) was missing from Promise.all (5 variables, 4 items — ideasRefreshAvailable was undefined). Added as 5th item. (2) ideasRefreshAvailable passed to IdeasClient as a new prop. (3) IdeasClient: added ideasRefreshAvailable prop, localRefreshAvailable useState, setLocalRefreshAvailable(false) on successful generation, canRegenerate simplified to localRefreshAvailable (dropped plan-based date math), Header updated — when enabled shows "Fresh competitor data available — generate new ideas", when disabled shows "New ideas available every Monday when competitor data refreshes". (4) mostRecentGeneratedAt removed as a prop (still computed in page.tsx for imageSeed but no longer passed to client). (5) user_settings.ideas_refresh_available column documented in schema. (6) setIdeasRefreshAvailable + getIdeasRefreshAvailable documented in lib/db.ts section. Already done in prior session: daily cron insights wipe removed, cache-cleanup Monday branch wires insights wipe + flag reset, DB functions added, ideas/generate sets flag false after save. Previous Day 27: Ideas parallel insight generation fix. /api/ideas/generate: sequential for-loop → Promise.allSettled (prevents 60s Vercel timeout on 3+ competitors), empty-array insights check added. StepFirstAnalysis: LOADING_STAGES extended 20s→27s, 1s settle delay after generation. IdeasClient: stage labels updated to match actual pipeline. Previous Day 26: Interactive notification settings. NotificationSettings client component (digest toggle, alerts toggle, threshold slider, optimistic updates, 2s Saved ✓ indicator). settings/page.tsx: Toggle sub-component removed, 3 derived vars removed, section replaced with component call. CLAUDE.md components table updated.
+*Last updated: 2026-05-04 — Day 30: Ideas system diagnostic — 7 of 8 fixes applied. Fix A (idea-generator.ts) not deleted — active import in weekly-digest cron. Fix B: ideas_refresh_available added to UserSettings type. Fix C: "monthly" text replaced with "this week / Refreshes every Monday" in indicator bar. Fix D: empty state canRegenerate={true} → localRefreshAvailable, Generate Ideas button gated by flag, disabled message shown when false. Fix E: 403 handler shows human-readable upgrade message instead of raw error key, upgrade CTA link added to error display in both empty state and main view. Fix F: regenerateAvailableAt computation and return field removed from generate route. Fix G: getRecentIdeas deleted from lib/db.ts (zero external callers confirmed). Fix H: ideas/latest now uses ±1-minute batch window matching getRecentIdeasBatch. tsc --noEmit: zero errors.
+Previous Day 28: Weekly insights cache rhythm + Generate Ideas button flag. (1) page.tsx bug fixed: getIdeasRefreshAvailable(userId) was missing from Promise.all (5 variables, 4 items — ideasRefreshAvailable was undefined). Added as 5th item. (2) ideasRefreshAvailable passed to IdeasClient as a new prop. (3) IdeasClient: added ideasRefreshAvailable prop, localRefreshAvailable useState, setLocalRefreshAvailable(false) on successful generation, canRegenerate simplified to localRefreshAvailable (dropped plan-based date math), Header updated — when enabled shows "Fresh competitor data available — generate new ideas", when disabled shows "New ideas available every Monday when competitor data refreshes". (4) mostRecentGeneratedAt removed as a prop (still computed in page.tsx for imageSeed but no longer passed to client). (5) user_settings.ideas_refresh_available column documented in schema. (6) setIdeasRefreshAvailable + getIdeasRefreshAvailable documented in lib/db.ts section. Already done in prior session: daily cron insights wipe removed, cache-cleanup Monday branch wires insights wipe + flag reset, DB functions added, ideas/generate sets flag false after save. Previous Day 27: Ideas parallel insight generation fix. /api/ideas/generate: sequential for-loop → Promise.allSettled (prevents 60s Vercel timeout on 3+ competitors), empty-array insights check added. StepFirstAnalysis: LOADING_STAGES extended 20s→27s, 1s settle delay after generation. IdeasClient: stage labels updated to match actual pipeline. Previous Day 26: Interactive notification settings. NotificationSettings client component (digest toggle, alerts toggle, threshold slider, optimistic updates, 2s Saved ✓ indicator). settings/page.tsx: Toggle sub-component removed, 3 derived vars removed, section replaced with component call. CLAUDE.md components table updated.
 Previous Day 25: Onboarding polish. StepFirstAnalysis auto-triggers /api/ideas/generate when ideas table is empty (full pipeline: insights + ideas in one call). Mobile responsive: all buttons w-full sm:w-auto, StepConfirmChannel buttons flex-col sm:flex-row with py-3 tap targets, gap score text-5xl sm:text-7xl, idea title break-words. page.tsx searchParams sync effect fixes browser back/forward. Skip flow verified correct (no changes). Day 24: 5-step onboarding flow. app/onboarding/page.tsx (URL state, Suspense wrapper, background sync on Step 1, skip on Steps 2-5). 6 new components in components/onboarding/. 5 new API routes (user/profile GET+PATCH, competitors GET, gap-score/latest GET, ideas/latest GET, onboarding/complete POST). Dashboard layout now redirects onboarding_completed=false users to /onboarding instead of auto-flipping the flag.
 Previous Day 23: Landing page — full Next.js conversion. app/landing.css extracted, public/nagai-base.png added, app/page.tsx converted to Client Component with time-of-day sky system, dev scrubber removed, CTA buttons wired to auth, SessionProvider added to root layout. Day 22b: Sync refactor — lib/sync-logic.ts extracted, app/api/cron/user-sync added (daily 3am), refresh-data competitor-only, niche avg chart fixed (ReferenceLine from competitor_videos instead of broken snapshot join), insights truncation salvage (max_tokens 3500, backwards-walk JSON recovery). Day 22: Three-hook ideas feature (hook_2/hook_3 — Safe/Bolder/Most controversial), Gemini model rename (gemini-2.5-flash-image). Day 21: Thumbnail generation feature — Gemini gemini-2.5-flash-image, multi-step ThumbnailGenerationModal (camera/upload/Google profile/no-photo), monthly quota (starter 12/pro 40), deleteAllUserThumbnails on regeneration, lib/thumbnail-storage.ts for Supabase Storage, canGenerateThumbnail quota gate in lib/access.ts.
 Previous Day 20: Ideas page fully rebuilt. 4-signal generation pipeline: competitor AI insights (auto-regenerated if stale) + user top-5 videos + per-competitor winning videos (>30% above that channel's avg) + user avg duration. Ideas stored as individual DB rows with 11 new columns. Plan gating: Starter→3 ideas/month, Pro→10 ideas/week, Free→403. generateAndCacheInsightsForCompetitor added to lib/competitor-insights.ts as single source of truth; insights route is now a thin wrapper. IdeasClient.tsx handles loading stages, idea cards with 4 sections each, mark-as-planned/made, done section. Database migration required (see Day 20 notes above).
