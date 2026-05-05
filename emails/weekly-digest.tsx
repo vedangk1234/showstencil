@@ -248,6 +248,18 @@ export function WeeklyDigestEmail({
             >
               Unsubscribe
             </Link>
+            <Link
+              href="https://nixlytics-u6k1.vercel.app/privacy"
+              style={unsubscribeLinkStyle}
+            >
+              Privacy Policy
+            </Link>
+            <Link
+              href="https://nixlytics-u6k1.vercel.app/terms"
+              style={unsubscribeLinkStyle}
+            >
+              Terms of Use
+            </Link>
 
             <Text style={footerSmallStyle}>ShowStencil · Pune, India</Text>
           </Section>

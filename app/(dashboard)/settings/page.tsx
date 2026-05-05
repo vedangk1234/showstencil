@@ -169,6 +169,18 @@ export default async function SettingsPage() {
         </div>
       </Section>
 
+      {/* Legal */}
+      <Section title="Legal">
+        <div style={{ padding: '12px 16px', display: 'flex', gap: 24, borderBottom: 'none' }}>
+          <a href="/privacy" style={{ color: '#888888', fontSize: 13, textDecoration: 'none' }}>
+            Privacy Policy
+          </a>
+          <a href="/terms" style={{ color: '#888888', fontSize: 13, textDecoration: 'none' }}>
+            Terms of Use
+          </a>
+        </div>
+      </Section>
+
     </div>
   )
 }

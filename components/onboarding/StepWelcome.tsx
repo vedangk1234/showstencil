@@ -34,6 +34,17 @@ export default function StepWelcome({ onNext }: Props) {
       >
         Let&apos;s go →
       </button>
+
+      <p className="text-xs text-zinc-500 text-center mt-4">
+        By continuing, you agree to our{' '}
+        <a href="/terms" className="text-zinc-400 hover:text-zinc-200 transition-colors underline">
+          Terms of Use
+        </a>
+        {' '}and{' '}
+        <a href="/privacy" className="text-zinc-400 hover:text-zinc-200 transition-colors underline">
+          Privacy Policy
+        </a>.
+      </p>
     </div>
   )
 }

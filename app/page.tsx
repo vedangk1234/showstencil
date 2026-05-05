@@ -702,6 +702,19 @@ export default function LandingPage() {
           <span>© 2026 ShowStencil</span>
           <span>Built for creators · made with care</span>
         </div>
+        <div style={{
+          textAlign: 'center',
+          paddingTop: '12px',
+          paddingBottom: '8px',
+          fontFamily: 'var(--mono)',
+          fontSize: '11px',
+          color: 'var(--ink-3)',
+        } as React.CSSProperties}>
+          © 2026 ShowStencil. All rights reserved.&nbsp;·&nbsp;
+          <a href="/privacy" style={{ color: 'var(--ink-2)', textDecoration: 'none' }}>Privacy Policy</a>
+          &nbsp;·&nbsp;
+          <a href="/terms" style={{ color: 'var(--ink-2)', textDecoration: 'none' }}>Terms of Use</a>
+        </div>
       </footer>
     </>
   )

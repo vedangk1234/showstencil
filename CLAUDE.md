@@ -2194,7 +2194,19 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-04 — Day 34: A4 + A5 — empty states and error states across all dashboard pages. 8 fixes: dashboard empty-state CTA now calls POST /api/sync (Fix 1), chart empty copy explains timing (Fix 2), CompetitorsTable empty states per filter tab (Fix 3), OverviewTab/ContentTab/GrowthTab early returns when data missing (Fix 4), dismissable sync error banner in DashboardClient (Fix 5), regenError banner with useRef in IdeasClient (Fix 6), InsightsTab friendly error + Try again button (Fix 7), try/catch error screens on all 5 server pages (Fix 8). tsc --noEmit: zero errors.
+*Last updated: 2026-05-05 — Day 35: Legal links added to 4 surfaces (additive only, no existing content modified).
+
+*app/page.tsx (landing footer)*: Added a centered bar below `foot-bottom` with "© 2026 ShowStencil. All rights reserved. · Privacy Policy · Terms of Use" links pointing to `/privacy` and `/terms`. Inline styles using existing CSS variables (`--mono`, `--ink-2`, `--ink-3`).
+
+*components/onboarding/StepWelcome.tsx*: Added "By continuing, you agree to our Terms of Use and Privacy Policy." below the "Let's go →" button. `text-xs text-zinc-500`, links in `text-zinc-400` with underline and hover transition. Note: `app/(auth)/login/page.tsx` already had the same legal notice (added earlier) — no change needed there.
+
+*app/(dashboard)/settings/page.tsx*: Added Legal `<Section>` at the bottom of the settings page with Privacy Policy and Terms of Use plain-text links (`color: #888888`, `fontSize: 13`). Uses the existing `Section` sub-component.
+
+*emails/weekly-digest.tsx* and *emails/trend-alert.tsx*: Added two additional `<Link>` elements after the existing Unsubscribe link, styled with the same `unsubscribeLinkStyle`. URLs: `https://nixlytics-u6k1.vercel.app/privacy` and `https://nixlytics-u6k1.vercel.app/terms`. No other email content changed.
+
+*tsc --noEmit: zero errors.*
+
+Previous Day 34: A4 + A5 — empty states and error states across all dashboard pages. 8 fixes: dashboard empty-state CTA now calls POST /api/sync (Fix 1), chart empty copy explains timing (Fix 2), CompetitorsTable empty states per filter tab (Fix 3), OverviewTab/ContentTab/GrowthTab early returns when data missing (Fix 4), dismissable sync error banner in DashboardClient (Fix 5), regenError banner with useRef in IdeasClient (Fix 6), InsightsTab friendly error + Try again button (Fix 7), try/catch error screens on all 5 server pages (Fix 8). tsc --noEmit: zero errors.
 Previous Day 33: Infinite reload loop fix in IdeasClient — auto-trigger now guarded by `localRefreshAvailable`, 429 handler replaced `window.location.reload()` with friendly message + flag disable.
 Previous Day 32: lib/idea-generator.ts fully deleted. scripts/test-full-pipeline.ts deleted entirely (Day 6 artifact, tested old 7-step pipeline with dead JSONB ideas writer, no current value). scripts/test-everything.ts stripped of idea-generator import — test 3.7 changed to SKIP with note, IdeaResult removed from @/types import, 3.6+3.7 Promise.allSettled restructured to plain await on generateDigest alone. GeneratedVideoIdea and IdeaResult types deleted from types/index.ts (zero external references after deletions confirmed by grep). tsc --noEmit: zero errors. lib/idea-generator.ts is now fully gone from the codebase.
 Previous Day 31: Weekly digest cron cleanup. Removed zombie generateVideoIdeas call from weekly-digest cron (was calling old JSONB lib/idea-generator.ts, discarding result, burning Claude credits every Monday).
