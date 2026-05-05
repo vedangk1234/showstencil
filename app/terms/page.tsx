@@ -115,10 +115,10 @@ export default function TermsPage() {
       `}</style>
       <div className="max-w-3xl mx-auto px-6 py-16">
         <Link
-          href="/"
+          href="/settings"
           className="text-zinc-400 hover:text-white text-sm inline-block mb-8 transition-colors"
         >
-          ← Back to home
+          ← Back to settings
         </Link>
         <div
           id="terms-content"

@@ -38,10 +38,10 @@ export default function PrivacyPage() {
     <main style={{ background: '#0A0A0A', minHeight: '100vh', color: '#ffffff' }}>
       <div className="max-w-3xl mx-auto px-6 py-16">
         <Link
-          href="/"
+          href="/settings"
           className="text-zinc-400 hover:text-white text-sm inline-block mb-8 transition-colors"
         >
-          ← Back to home
+          ← Back to settings
         </Link>
         <div
           dangerouslySetInnerHTML={{ __html: termlyHtml }}
