@@ -710,7 +710,7 @@ const planLimits = {
 | `app/(dashboard)/digest/page.tsx` | ✅ | Weekly digest view: list of past digests with preview, gap score, status |
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, interactive notification toggles + threshold slider wired to API, account actions |
-| `app/(dashboard)/settings/notifications/page.tsx` | ✅ | Notifications UI embedded in settings/page.tsx via NotificationSettings component — dedicated sub-page not needed |
+| `app/(dashboard)/settings/notifications/page.tsx` | ✅ | Redirects to `/settings` — notifications UI lives in NotificationSettings component on the main settings page |
 | `app/onboarding/page.tsx` | ✅ | 5-step onboarding wizard — URL state (?step=1..5), background sync on Step 1, skip anywhere Step 2+, browser back/forward syncs step state |
 | `app/page.tsx` | ✅ | Full landing page — Nagai hero, time-of-day sky system, feature grid, CTA, footer |
 | `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
@@ -2194,7 +2194,9 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-05 — Day 35: Legal links added to 4 surfaces (additive only, no existing content modified).
+*Last updated: 2026-05-05 — Day 35 (A7): /settings/notifications now redirects to /settings. Gitkeep replaced with `redirect('/settings')` in app/(dashboard)/settings/notifications/page.tsx. tsc --noEmit: zero errors.
+
+Previous Day 35: Legal links added to 4 surfaces (additive only, no existing content modified).
 
 *app/page.tsx (landing footer)*: Added a centered bar below `foot-bottom` with "© 2026 ShowStencil. All rights reserved. · Privacy Policy · Terms of Use" links pointing to `/privacy` and `/terms`. Inline styles using existing CSS variables (`--mono`, `--ink-2`, `--ink-3`).
 
