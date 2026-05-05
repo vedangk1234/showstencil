@@ -2080,6 +2080,106 @@ ALTER TABLE users
 
 \---
 
+## Security Audit Log
+
+### Section 1: Secret & API Key Exposure — 2026-05-05
+
+**Scope:** .next/ build artifacts, source code, git history, .gitignore, NEXT_PUBLIC_ vars, createServiceClient usage, process.env references in lib/.
+
+**CRITICAL issues found:** None.
+
+**Fixes applied:**
+* `.gitignore` — added `.env` and `.env.production` entries. These were missing; `.env*.local` and `.env.local` were already present but bare `.env` and `.env.production` files could have been accidentally committed.
+* `.env.example` — removed stale Stripe vars (payment layer replaced by Lemon Squeezy in Day 8), added all missing vars: `LEMONSQUEEZY_API_KEY`, `LEMONSQUEEZY_STORE_ID`, `LEMONSQUEEZY_STARTER_VARIANT_ID`, `LEMONSQUEEZY_PRO_VARIANT_ID`, `LEMONSQUEEZY_WEBHOOK_SECRET`, `GEMINI_API_KEY`. Updated `RESEND_FROM_EMAIL` default to `digest@showstencil.com`.
+
+**Warnings (no action needed, documented for awareness):**
+* Supabase anon key (`NEXT_PUBLIC_SUPABASE_ANON_KEY`) appears as a compile-time value in `.next/` server chunks. This is expected — Next.js bakes NEXT_PUBLIC_ vars into bundles at build time. The anon key is designed to be public (`role: anon` in JWT payload, minimal permissions). The `.next/` folder is gitignored so the value is never committed.
+
+**Confirmed clean:**
+* No actual secret values in any .next/ build artifact (only variable name references from SDK code)
+* No hardcoded secrets in any source file
+* Git history contains zero real secret values (only empty .env.example entries and process.env.VAR_NAME references in code)
+* All `createServiceClient()` calls are in Server Components, API routes, lib/ files, and scripts — never in client components ('use client' files)
+* All NEXT_PUBLIC_ variables are legitimately public (app URL, Supabase URL, Supabase anon key)
+* SUPABASE_SERVICE_ROLE_KEY is never prefixed with NEXT_PUBLIC_ and never imported in client components
+* /.next/ is in .gitignore
+
+---
+
+### Section 2: Authentication & Authorization — 2026-05-05
+
+**Scope:** All 29 API routes audited (full route map below), middleware, dashboard layout, client-side auth guards, userId trust, health endpoint.
+
+**CRITICAL issue found and fixed:**
+
+* `app/api/competitors/insights/route.ts` — **IDOR (Insecure Direct Object Reference)**: The `getCachedInsights(competitor_id, 7)` cache lookup ran BEFORE the ownership check (`.eq('user_id', userId)`). Any authenticated user could call `POST /api/competitors/insights` with any `competitor_id` UUID and receive cached insights for a competitor belonging to another user. **Fix applied**: ownership check (`.eq('id', competitor_id).eq('user_id', userId)`) now runs first; cache lookup was moved to immediately after, with a comment explaining the correct ordering. The `getCachedInsights()` call is now safe because ownership is already confirmed.
+
+**Improvements applied (defense-in-depth):**
+
+* `app/api/ideas/[id]/plan/route.ts` and `app/api/ideas/[id]/made/route.ts` — Ownership was checked in application code after fetching `user_id` with only `.eq('id', id)` (no user filter in SQL). This is functionally correct but relies on JS-level ownership enforcement rather than DB-level. Fixed both: changed to `.eq('id', id).eq('user_id', session.user.id)` in the Supabase query, dropped the JS comparison, and changed `select('user_id')` to `select('id')` since user_id is no longer needed in the result.
+
+* `app/api/health/route.ts` — **Created** the missing health endpoint. Returns `{ status: 'ok', timestamp }` with no auth required and no sensitive internals.
+
+**Warnings (no fix required, documented for awareness):**
+
+* **No middleware.ts at project root**: All route protection relies on `(dashboard)/layout.tsx` server-side `auth()`. This is correct for current architecture but means any new route outside the `(dashboard)` group won't automatically inherit the session guard. New routes must add their own `auth()` call.
+* **`/onboarding` page: client-side-only guard**: `app/onboarding/page.tsx` uses `useSession()` → redirect on `status === 'unauthenticated'`. This means a logged-out user briefly sees the loading skeleton before being redirected. No sensitive data is rendered server-side on this page — all data access goes through auth-protected API routes — so this is an acceptable UX trade-off.
+* **`detect-sub-niche` cron bypass**: `app/api/users/detect-sub-niche/route.ts` reads `userId` from the `x-cron-user-id` header when the cron secret is valid. The userId is trusted from the header (not verified against a session). This is by design (the route is called internally from `/api/sync` as a fire-and-forget) and safe as long as `CRON_SECRET` is not compromised.
+* **Cron secret comparison is standard string equality, not constant-time**: All cron routes use `authHeader !== \`Bearer ${process.env.CRON_SECRET}\``. HTTP-level timing attacks are not practical in this deployment model (Vercel edge + TLS), but noted for completeness.
+
+**Routes audited — full map:**
+
+GROUP A — User routes (require session `auth()` — all PASS):
+* `POST /api/sync` — auth at top, userId from session ✅
+* `GET /api/competitors` — auth at top, `.eq('user_id', session.user.id)` ✅
+* `DELETE /api/competitors/[id]` — auth at top, ownership via `.eq('id', id).eq('user_id', session.user.id)` ✅
+* `POST /api/competitors/[id]/sync` — auth at top, ownership via `.eq('id', id).eq('user_id', session.user.id)` ✅
+* `POST /api/competitors/insights` — **FIXED**: ownership check now runs before cache lookup ✅
+* `POST /api/competitors/search` — auth at top, all DB queries use `session.user.id` ✅
+* `POST /api/competitors/track` — auth at top, all DB queries use `session.user.id` ✅
+* `POST /api/create-checkout-session` — auth at top, userId from session ✅
+* `GET /api/gap-score/latest` — auth at top, `.eq('user_id', session.user.id)` ✅
+* `POST /api/ideas/generate` — auth at top, userId from session ✅
+* `GET /api/ideas/latest` — auth at top, userId from session ✅
+* `POST /api/ideas/[id]/generate-thumbnail` — auth at top, ownership via `.eq('id', ideaId).eq('user_id', userId)` ✅
+* `POST /api/ideas/[id]/plan` — **IMPROVED**: ownership now enforced in DB WHERE clause ✅
+* `POST /api/ideas/[id]/made` — **IMPROVED**: ownership now enforced in DB WHERE clause ✅
+* `POST /api/onboarding/complete` — auth at top, userId from session ✅
+* `GET/POST /api/settings/notifications` — auth at top, userId from session ✅
+* `GET /api/thumbnail-jobs/[jobId]/status` — auth at top; `getThumbnailJob(jobId, userId)` includes userId in DB query ✅
+* `GET/PATCH /api/user/profile` — auth at top, all updates use `.eq('id', session.user.id)` ✅
+* `POST /api/users/detect-sub-niche` — dual auth: cron bypass (secret-gated) OR session; see Warning above ✅
+
+GROUP B — Cron routes (require `Authorization: Bearer <CRON_SECRET>` — all PASS):
+* `GET /api/cron/cache-cleanup` ✅
+* `GET /api/cron/dominator-refresh` ✅
+* `GET /api/cron/refresh-data` ✅
+* `GET /api/cron/sub-niche-detection` ✅
+* `GET /api/cron/trend-detection` ✅
+* `GET /api/cron/user-sync` ✅
+* `GET /api/cron/weekly-digest` ✅
+
+GROUP C — Webhook (require HMAC-SHA256 signature verification — PASS):
+* `POST /api/webhooks/lemonsqueezy` — raw body text captured before JSON parse; HMAC-SHA256 with `crypto.timingSafeEqual`; returns 401 on mismatch ✅
+
+GROUP D — Public (intentionally no auth):
+* `GET /api/auth/[...nextauth]` — NextAuth framework handler ✅
+* `GET /api/unsubscribe` — token-gated (UUID token in query param), intentionally no session ✅
+* `GET /api/health` — **CREATED**, returns `{ status, timestamp }` only ✅
+
+**Middleware & layout:**
+* No `middleware.ts` at project root — all protection via server-side layout `auth()` calls (see Warning above)
+* `app/(dashboard)/layout.tsx` — server-side `auth()`, redirects to `/login` on no session or missing user, redirects to `/onboarding` when `onboarding_completed=false` ✅
+
+**Client-side auth usage:**
+* `app/page.tsx` — `useSession()` used only to redirect logged-in users to dashboard (public page, no sensitive data) ✅
+* `app/onboarding/page.tsx` — `useSession()` used to redirect unauthenticated users; no sensitive data rendered server-side (see Warning above) ✅
+* No component uses `useSession()` as the sole guard for sensitive data fetches ✅
+
+**tsc --noEmit after fixes: zero errors.**
+
+---
+
 ## Known Issues
 
 > Update this section as issues are discovered
@@ -2194,7 +2294,22 @@ ALTER TABLE users
 
 \---
 
-*Last updated: 2026-05-05 — Day 35 (A7): /settings/notifications now redirects to /settings. Gitkeep replaced with `redirect('/settings')` in app/(dashboard)/settings/notifications/page.tsx. tsc --noEmit: zero errors.
+*Last updated: 2026-05-05 — Day 36 (A8): Technical debt cleanup — 3 deletions, 1 type cleanup, 1 test script fix. tsc --noEmit: zero errors.
+
+**Deleted:**
+* `app/api/cron/daily/route.ts` + `app/api/cron/daily/` folder — old Week 1 stub, fully superseded by the 5 dedicated cron routes. Confirmed zero source references before deletion (only .next/ build artifacts).
+* `app/api/cron/daily` stale entry removed from `.next/types/validator.ts` (generated file that tsconfig includes — stale entry caused TS error after source deletion).
+
+**Type cleanup:**
+* `topic_coverage_gap_score: 0` removed from `saveGapScore` INSERT in `lib/gap-scorer.ts` — stub always returned 0, never implemented. Option A applied (never displayed in UI — CLAUDE.md Day 9 confirmed it was removed from dashboard; `app/page.tsx` reference is marketing copy, not a rendered value).
+* `topic_coverage_gap_score: number` removed from `GapScore` interface in `types/index.ts`. DB column still exists; `scripts/update-gap-scores.ts` one-time script left unchanged (raw Supabase string queries, no type enforcement affected).
+
+**Test script fix:**
+* `scripts/test-all-endpoints.ts` — test 10.4 updated: `cronFetchWithUserId(baseUrl, '/api/sync')` → `cronFetch(baseUrl, '/api/cron/user-sync')`. Auth changed from `x-cron-user-id` header to standard bearer token (matching the actual endpoint). Response parsing updated from `{ success, videosSynced, channelSnapshot }` to `{ processed, succeeded, failed }`. Header comment updated to remove stale `/api/sync` reference.
+
+**Task 4 (pricing page back-button bug) — no fix applied:** Pricing page at `app/pricing/page.tsx` was inspected fully. The `useEffect` is benign (clears already-null loading state). No `router.push/replace` on mount. No server-side `redirect()`. No middleware. Root layout has no redirect logic. Cannot identify the back-button bug with confidence — reported to user without guessing.
+
+Previous Day 35 (A7): /settings/notifications now redirects to /settings. Gitkeep replaced with `redirect('/settings')` in app/(dashboard)/settings/notifications/page.tsx. tsc --noEmit: zero errors.
 
 Previous Day 35: Legal links added to 4 surfaces (additive only, no existing content modified).
 

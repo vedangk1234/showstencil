@@ -12,14 +12,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     const { id } = await params
     const supabase = createServiceClient()
 
-    // Ownership check
+    // Ownership check — user_id in WHERE enforces this at DB level
     const { data: idea } = await supabase
       .from('ideas')
-      .select('user_id')
+      .select('id')
       .eq('id', id)
+      .eq('user_id', session.user.id)
       .single()
 
-    if (!idea || idea.user_id !== session.user.id) {
+    if (!idea) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 

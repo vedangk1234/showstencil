@@ -16,18 +16,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'competitor_id required' }, { status: 400 })
     }
 
-    // Check on-row cache first (7-day TTL)
-    if (!force_regenerate) {
-      const cached = await getCachedInsights(competitor_id, 7)
-      if (cached && cached.length > 0) {
-        return NextResponse.json({ insights: cached, cached: true })
-      }
-    }
-
     const supabase = createServiceClient()
     const userId = session.user.id
 
-    // Verify ownership before generating
+    // Verify ownership BEFORE checking the cache — prevents IDOR where any
+    // authenticated user could read cached insights for a competitor they don't own.
     const { data: competitor } = await supabase
       .from('competitors')
       .select('id, channel_name, avg_views_per_video, subscriber_count, video_count')
@@ -37,6 +30,14 @@ export async function POST(request: Request) {
 
     if (!competitor) {
       return NextResponse.json({ error: 'Competitor not found' }, { status: 404 })
+    }
+
+    // Cache check — ownership is already confirmed above, so this is safe.
+    if (!force_regenerate) {
+      const cached = await getCachedInsights(competitor_id, 7)
+      if (cached && cached.length > 0) {
+        return NextResponse.json({ insights: cached, cached: true })
+      }
     }
 
     // Quick data completeness pre-check so we can return a retryable 422

@@ -158,7 +158,6 @@ export interface GapScore {
   ctr_gap_score: number;
   upload_frequency_gap_score: number;
   watch_time_gap_score: number;
-  topic_coverage_gap_score: number;
   estimated_revenue_gap: number; // monthly dollars left on table
   primary_bottleneck: string; // which gap costs the most money
 }

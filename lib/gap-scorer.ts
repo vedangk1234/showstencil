@@ -439,7 +439,6 @@ export async function saveGapScore(
     ctr_gap_score: Math.round(result.breakdown.ctrGap.score),
     watch_time_gap_score: Math.round(result.breakdown.watchTimeGap.score),
     upload_frequency_gap_score: Math.round(result.breakdown.uploadFrequencyGap.score),
-    topic_coverage_gap_score: 0, // calculated in a future milestone
     estimated_revenue_gap: result.revenueGap.gapMonthly,
     primary_bottleneck: result.primaryBottleneck,
   });

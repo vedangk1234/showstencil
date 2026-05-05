@@ -4,7 +4,7 @@
  *
  * For routes that require NextAuth session cookies, this script validates
  * data integrity by querying the DB directly instead of calling HTTP.
- * Cron routes and /api/sync are called via HTTP with cron-secret headers.
+ * Cron routes are called via HTTP with cron-secret headers.
  *
  * Run:
  *   npx tsx --env-file=.env.local scripts/test-all-endpoints.ts
@@ -852,26 +852,26 @@ async function testCronRoutes(baseUrl: string): Promise<void> {
       )
     }
 
-    // 10.4 /api/sync with cron user-id bypass
+    // 10.4 /api/cron/user-sync
     try {
-      const res = await cronFetchWithUserId(baseUrl, '/api/sync')
+      const res = await cronFetch(baseUrl, '/api/cron/user-sync')
       if (res.ok) {
         const data = (await res.json()) as {
-          success: boolean
-          videosSynced: number
-          channelSnapshot: unknown
+          processed: number
+          succeeded: number
+          failed: number
         }
         pass(
-          '10.4 /api/sync',
-          `success=${data.success} videos=${data.videosSynced} snapshot=${data.channelSnapshot != null}`,
+          '10.4 /api/cron/user-sync',
+          `processed=${data.processed} succeeded=${data.succeeded} failed=${data.failed}`,
         )
       } else {
         const body = await res.text()
-        fail('10.4 /api/sync', `HTTP ${res.status} — ${body.substring(0, 120)}`)
+        fail('10.4 /api/cron/user-sync', `HTTP ${res.status} — ${body.substring(0, 120)}`)
       }
     } catch (err) {
       fail(
-        '10.4 /api/sync',
+        '10.4 /api/cron/user-sync',
         `Fetch error: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
