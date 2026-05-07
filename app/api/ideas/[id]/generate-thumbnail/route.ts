@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase'
 import { canGenerateThumbnail } from '@/lib/access'
 import { createThumbnailJob, updateThumbnailJob } from '@/lib/db'
 import { generateThumbnail } from '@/lib/gemini-image'
-import { loadStickFigureBase64, uploadThumbnail } from '@/lib/thumbnail-storage'
+import { uploadThumbnail } from '@/lib/thumbnail-storage'
 
 type PhotoSource = 'camera' | 'upload' | 'google_profile' | 'no_photo'
 
@@ -120,11 +120,8 @@ export async function POST(
   // Run generation in background after response is sent (Fluid Compute — up to 60s)
   after(async () => {
     try {
-      const stickFigureBase64 = loadStickFigureBase64()
-
       const result = await generateThumbnail({
         userPhotoBase64: capturedPhotoBase64,
-        stickFigureBase64,
         thumbnailBrief,
         ideaTitle,
         photoIsDefault: capturedPhotoIsDefault,

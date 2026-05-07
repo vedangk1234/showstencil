@@ -1,11 +1,4 @@
-import fs from 'fs'
-import path from 'path'
 import { createServiceClient } from '@/lib/supabase'
-
-export function loadStickFigureBase64(): string {
-  const filePath = path.join(process.cwd(), 'public', 'stick-figure.png')
-  return fs.readFileSync(filePath).toString('base64')
-}
 
 export async function uploadThumbnail(params: {
   userId: string

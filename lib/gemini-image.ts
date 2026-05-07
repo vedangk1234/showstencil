@@ -2,7 +2,6 @@ import { GoogleGenAI, Modality } from '@google/genai'
 
 export interface GenerateThumbnailParams {
   userPhotoBase64: string | null
-  stickFigureBase64: string
   thumbnailBrief: string
   ideaTitle: string
   photoIsDefault: boolean
@@ -14,7 +13,7 @@ type Part = { text?: string; inlineData?: InlineData }
 export async function generateThumbnail(
   params: GenerateThumbnailParams,
 ): Promise<{ imageBase64: string } | { error: string }> {
-  const { userPhotoBase64, stickFigureBase64, thumbnailBrief, ideaTitle, photoIsDefault } = params
+  const { userPhotoBase64, thumbnailBrief, ideaTitle, photoIsDefault } = params
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return { error: 'Gemini API key not configured.' }
@@ -24,14 +23,13 @@ export async function generateThumbnail(
   const photoInstructions = useRealPhoto
     ? `Image 1: A photo of the creator. Place this person prominently in the thumbnail — typically the right or center third of the frame. Show their face clearly with a strong emotion (surprise, focus, excitement) appropriate to the topic and brief.
 Image 2: A stick figure illustration. IGNORE this image — only use it if the first image is unusable.`
-    : `Image 1: A stick figure illustration. This IS your character for the thumbnail — keep it as a stick figure. Do NOT replace it with a realistic human or AI-generated person. Do NOT make it photorealistic.
-Instead:
-- Keep the stick figure style exactly as shown
-- Give it a strong pose and facial expression that matches the video topic and brief (shocked, excited, pointing, thinking etc.)
-- Make it bold, large, and expressive — big eyes, clear emotion, dynamic pose
-- Place it prominently in the thumbnail composition
-- The stick figure should feel like a fun intentional design choice, not a placeholder
-- Style the rest of the thumbnail (background, text, colors, graphics) to complement the stick figure aesthetic`
+    : `No creator photo is being used for this thumbnail. Design a bold text-and-graphic only thumbnail with:
+- No people, no faces, no characters, no stick figures
+- Strong typography as the hero element
+- Bold background colors, shapes, icons, or graphic elements that match the video topic
+- High contrast, punchy, mobile-readable
+- Make it feel designed and intentional — like a professional motion graphics thumbnail
+- Examples of what works: large numbers, bold statements, split color backgrounds, icons, arrows, data visuals`
 
   const prompt = `You are designing a high-converting YouTube thumbnail.
 
@@ -42,7 +40,6 @@ VIDEO TITLE: "${ideaTitle}"
 THUMBNAIL DIRECTION FROM CONTENT STRATEGIST:
 ${thumbnailBrief}
 
-REFERENCE IMAGES PROVIDED:
 ${photoInstructions}
 
 DESIGN REQUIREMENTS:
@@ -60,9 +57,6 @@ OUTPUT: Generate one final YouTube thumbnail image matching the brief above.`
 
   if (useRealPhoto && userPhotoBase64) {
     parts.push({ inlineData: { mimeType: 'image/jpeg', data: userPhotoBase64 } })
-    parts.push({ inlineData: { mimeType: 'image/png', data: stickFigureBase64 } })
-  } else {
-    parts.push({ inlineData: { mimeType: 'image/png', data: stickFigureBase64 } })
   }
   parts.push({ text: prompt })
 

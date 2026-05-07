@@ -571,20 +571,6 @@ export function ThumbnailGenerationModal({
   }
 
   const renderNoPhoto = () => {
-    const handleGenerate = async () => {
-      const response = await fetch('/stick-figure.png')
-      const blob = await response.blob()
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const result = reader.result as string
-          resolve(result.split(',')[1])
-        }
-        reader.readAsDataURL(blob)
-      })
-      await startGeneration('no_photo', base64)
-    }
-
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div>
@@ -592,10 +578,10 @@ export function ThumbnailGenerationModal({
           <h2 className="text-2xl font-semibold text-white">Continue without a photo</h2>
         </div>
         <p className="text-sm text-zinc-400 leading-relaxed">
-          Gemini will use an illustrated character based on the thumbnail brief. The result won&apos;t include a real person.
+          Gemini will design a bold text-and-graphic thumbnail based on the video topic. No people or characters.
         </p>
         <button
-          onClick={() => void handleGenerate()}
+          onClick={() => void startGeneration('no_photo')}
           className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors self-start"
         >
           Generate thumbnail
