@@ -314,6 +314,23 @@ export function IdeasClient({
     setThumbnailModalIdeaId(idea.id)
   }
 
+  async function handleThumbnailDownload(url: string, id: string) {
+    try {
+      const response = await fetch(url)
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = `showstencil-thumbnail-${id}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(blobUrl)
+    } catch (error) {
+      console.error('Download failed:', error)
+    }
+  }
+
   function handleThumbnailSuccess(ideaId: string, thumbnailUrl: string) {
     setIdeas((prev) =>
       prev.map((i) =>
@@ -346,24 +363,22 @@ export function IdeasClient({
         <p className="text-xs uppercase tracking-widest text-zinc-500 mb-3">Thumbnail</p>
         {idea.thumbnail_image_url ? (
           <div className="space-y-3">
-            <img
-              src={idea.thumbnail_image_url}
-              alt="Generated thumbnail"
-              className="w-full aspect-video rounded-xl object-cover"
-            />
+            <div className="relative w-full aspect-video overflow-hidden rounded-xl bg-zinc-900">
+              <img
+                src={idea.thumbnail_image_url}
+                alt="Generated thumbnail"
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <p className="text-xs text-zinc-500 text-center">
+              Recommended: resize to 1280×720px before uploading to YouTube
+            </p>
             <div className="flex gap-3">
-              <a
-                href={idea.thumbnail_image_url}
-                download={`thumbnail-${idea.id}.png`}
+              <button
+                onClick={(e) => { e.stopPropagation(); void handleThumbnailDownload(idea.thumbnail_image_url!, idea.id) }}
                 className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
               >
                 Download
-              </a>
-              <button
-                onClick={(e) => { e.stopPropagation(); openThumbnailModal(idea) }}
-                className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
-              >
-                Regenerate
               </button>
             </div>
           </div>

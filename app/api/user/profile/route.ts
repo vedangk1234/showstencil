@@ -14,24 +14,28 @@ export async function GET() {
   }
 
   const supabase = createServiceClient()
-  const { data: user } = await supabase
-    .from('users')
-    .select('id, name, image, niche_id, sub_niche, youtube_channel_id, onboarding_completed')
-    .eq('id', session.user.id)
-    .single()
+  const uid = session.user.id
+
+  // user.id === session.user.id so both queries can run in parallel.
+  const [{ data: user }, { data: snapshot }] = await Promise.all([
+    supabase
+      .from('users')
+      .select('id, name, image, niche_id, sub_niche, youtube_channel_id, onboarding_completed')
+      .eq('id', uid)
+      .single(),
+    supabase
+      .from('channel_snapshots')
+      .select('subscriber_count')
+      .eq('user_id', uid)
+      .not('subscriber_count', 'is', null)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ])
 
   if (!user) {
     return NextResponse.json({ error: 'user_not_found' }, { status: 404 })
   }
-
-  const { data: snapshot } = await supabase
-    .from('channel_snapshots')
-    .select('subscriber_count')
-    .eq('user_id', user.id)
-    .not('subscriber_count', 'is', null)
-    .order('snapshot_date', { ascending: false })
-    .limit(1)
-    .maybeSingle()
 
   return NextResponse.json({
     niche_id: user.niche_id,
@@ -51,7 +55,12 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const body = await req.json() as { niche_id?: unknown }
+  let body: { niche_id?: unknown }
+  try {
+    body = await req.json() as { niche_id?: unknown }
+  } catch {
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
+  }
   const niche_id = body?.niche_id
 
   if (typeof niche_id !== 'string' || !VALID_NICHES.includes(niche_id)) {

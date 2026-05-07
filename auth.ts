@@ -109,7 +109,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       session.user.id = token.userId ?? ''
       session.user.subscriptionStatus = token.subscriptionStatus ?? 'free'
-      session.accessToken = token.accessToken
       return session
     },
   },

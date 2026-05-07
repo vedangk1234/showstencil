@@ -26,7 +26,9 @@ export async function generateThumbnail(
 Image 2: A stick figure illustration. IGNORE this image — only use it if the first image is unusable.`
     : `Image 1: A stick figure illustration. Use this stick figure as your character reference. Transform it freely according to the brief: change its pose, facial expression, size, clothing, and styling. The final character should NOT look like a stick figure — instead, render it as an illustrated character that fits the thumbnail's visual style. The stick figure is just a placeholder for where a person would go in the composition.`
 
-  const prompt = `You are designing a high-converting YouTube thumbnail in 16:9 aspect ratio (1280×720 pixels).
+  const prompt = `You are designing a high-converting YouTube thumbnail.
+
+ASPECT RATIO: 16:9 LANDSCAPE (widescreen). The output image MUST be wider than it is tall — like a widescreen TV or YouTube video frame. Do NOT generate a square image. Do NOT generate a portrait image.
 
 VIDEO TITLE: "${ideaTitle}"
 
@@ -37,7 +39,7 @@ REFERENCE IMAGES PROVIDED:
 ${photoInstructions}
 
 DESIGN REQUIREMENTS:
-- 16:9 aspect ratio, designed for YouTube
+- MUST be 16:9 landscape format (1280×720px) — wider than tall, never square
 - Bold, high-contrast colors that pop on a phone screen at thumbnail size
 - One clear focal point — the viewer's eye should immediately know where to look
 - Any text on the thumbnail should be 4-6 words maximum, large and bold, readable at 200×113px preview size

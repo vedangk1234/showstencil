@@ -16,8 +16,14 @@ export async function POST(request: Request) {
     }
 
     const { channel_id } = await request.json()
-    if (!channel_id) {
+    if (!channel_id || typeof channel_id !== 'string') {
       return NextResponse.json({ error: 'channel_id required' }, { status: 400 })
+    }
+    // YouTube channel IDs always start with "UC" and are exactly 24 characters.
+    // Reject early before any DB lookups so malformed input never reaches the
+    // 7 downstream queries that execute before the cache check.
+    if (!/^UC[a-zA-Z0-9_-]{22}$/.test(channel_id)) {
+      return NextResponse.json({ error: 'Invalid channel_id format' }, { status: 400 })
     }
 
     const supabase = createServiceClient()
@@ -131,11 +137,21 @@ export async function POST(request: Request) {
       }
     }
 
-    const { data: cached } = await supabase
-      .from('searched_channels_cache')
-      .select('*')
-      .eq('channel_id', channel_id)
-      .single()
+    // Cache lookup and subscriber snapshot are independent — run in parallel.
+    const [{ data: cached }, { data: userSnapshot }] = await Promise.all([
+      supabase
+        .from('searched_channels_cache')
+        .select('*')
+        .eq('channel_id', channel_id)
+        .single(),
+      supabase
+        .from('channel_snapshots')
+        .select('subscriber_count')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
 
     if (!cached) {
       return NextResponse.json(
@@ -145,14 +161,6 @@ export async function POST(request: Request) {
     }
 
     const channelData = cached.channel_data as Record<string, unknown>
-
-    const { data: userSnapshot } = await supabase
-      .from('channel_snapshots')
-      .select('subscriber_count')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
 
     const userSubs = userSnapshot?.subscriber_count || 0
     const tier = calculateTier(userSubs, (channelData.subscriber_count as number) || 0)
@@ -193,7 +201,8 @@ export async function POST(request: Request) {
       .single()
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error('[competitors/track] DB insert error:', error.message)
+      return NextResponse.json({ error: 'Failed to add competitor' }, { status: 500 })
     }
 
     // Mark search history entry as converted
@@ -303,8 +312,7 @@ export async function POST(request: Request) {
         : {}),
     })
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Failed to track channel'
-    console.error('[competitors/track]', error)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    console.error('[competitors/track] Unexpected error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

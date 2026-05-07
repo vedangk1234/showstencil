@@ -17,8 +17,8 @@ export async function createCheckoutSession(
         custom: { user_id: userId },
       },
       productOptions: {
-        redirectUrl: 'https://nixlytics-u6k1.vercel.app/dashboard?upgrade=success',
-        receiptLinkUrl: 'https://nixlytics-u6k1.vercel.app/dashboard',
+        redirectUrl: 'https://showstencil.com/dashboard?upgrade=success',
+        receiptLinkUrl: 'https://showstencil.com/dashboard',
         enabledVariants: [Number(variantId)],
       },
     }

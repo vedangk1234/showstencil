@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import * as Sentry from '@sentry/nextjs'
 import { createServiceClient } from '@/lib/supabase'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
 import { getCachedInsights } from '@/lib/db'
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
     }
 
     const { competitor_id, force_regenerate } = await request.json()
-    if (!competitor_id) {
+    if (!competitor_id || typeof competitor_id !== 'string') {
       return NextResponse.json({ error: 'competitor_id required' }, { status: 400 })
     }
 
@@ -23,13 +24,27 @@ export async function POST(request: Request) {
     // authenticated user could read cached insights for a competitor they don't own.
     const { data: competitor } = await supabase
       .from('competitors')
-      .select('id, channel_name, avg_views_per_video, subscriber_count, video_count')
+      .select('id, channel_name, avg_views_per_video, subscriber_count, video_count, insights_generated_at')
       .eq('id', competitor_id)
       .eq('user_id', userId)
       .single()
 
     if (!competitor) {
       return NextResponse.json({ error: 'Competitor not found' }, { status: 404 })
+    }
+
+    // Rate limit force_regenerate — each call bypasses the cache and costs real Claude API money.
+    // Block re-generation within 60 minutes of the last successful generation.
+    const REGEN_COOLDOWN_MS = 60 * 60 * 1000
+    if (force_regenerate && competitor.insights_generated_at) {
+      const msSinceLastRegen = Date.now() - new Date(competitor.insights_generated_at).getTime()
+      if (msSinceLastRegen < REGEN_COOLDOWN_MS) {
+        const retryAfterSec = Math.ceil((REGEN_COOLDOWN_MS - msSinceLastRegen) / 1000)
+        return NextResponse.json(
+          { error: 'Insights were recently generated. Please wait before regenerating.' },
+          { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+        )
+      }
     }
 
     // Cache check — ownership is already confirmed above, so this is safe.
@@ -85,6 +100,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ insights, cached: false })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Insights generation failed'
+    Sentry.captureException(error, {
+      tags: { route: 'competitors/insights' },
+    })
     console.error('[competitors/insights]', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

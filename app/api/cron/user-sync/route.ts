@@ -33,7 +33,7 @@ export async function GET(request: Request) {
   // ── Load eligible users ────────────────────────────────────────────────────
   const { data: users, error } = await supabase
     .from('users')
-    .select('id, youtube_access_token, youtube_refresh_token, token_expires_at')
+    .select('id')
     .eq('onboarding_completed', true)
     .in('subscription_status', ['on_trial', 'active', 'past_due'])
     .not('youtube_access_token', 'is', null)

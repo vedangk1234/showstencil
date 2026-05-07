@@ -89,7 +89,8 @@ export async function POST(
       .upsert(videos, { onConflict: 'youtube_video_id' })
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error('[competitors/[id]/sync] DB error:', error.message)
+      return NextResponse.json({ error: 'Failed to save videos' }, { status: 500 })
     }
 
     return NextResponse.json({
@@ -98,8 +99,7 @@ export async function POST(
       message: `Synced ${videos.length} videos for ${competitor.channel_name}`,
     })
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Sync failed'
-    console.error('[competitors/[id]/sync]', error)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    console.error('[competitors/[id]/sync] Unexpected error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

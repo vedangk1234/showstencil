@@ -13,6 +13,14 @@ DOMAIN AND URLS
 [ ] Verify showstencil.com domain in Resend dashboard
 [ ] Delete nixlytics-u6k1.vercel.app alias from Vercel after custom domain is live
 
+Thumbnail Feature — Deferred Improvements
+1. No regeneration allowed
+User gets one thumbnail per idea. No regenerate button. They use it or they don't. This is intentional to control Gemini API costs. If regeneration is added later, gate it behind a quota (e.g. 1 regeneration per idea max).
+2. Download button opens image instead of downloading
+Currently the download button opens the image in a new tab / full screen instead of saving to the user's local device. Fix: use an anchor tag with the download attribute or fetch the image as a blob and trigger a programmatic download. The file should save as showstencil-thumbnail-[idea-id].jpg to the user's Downloads folder.
+3. Wrong aspect ratio — image is square, not YouTube thumbnail size
+YouTube thumbnails must be 16:9 ratio (1280x720px). The current Gemini output is square (1:1). This means if a user puts it on YouTube it will be cropped or letterboxed. Fix: either prompt Gemini with explicit 1280x720 or 16:9 instructions, or post-process the image to crop/pad to 16:9 before showing it to the user. Until fixed, add a warning label under the thumbnail: "Note: resize to 1280×720 before uploading to YouTube."
+
 PAYMENTS
 [ ] Switch Lemon Squeezy from test mode to live mode
 [ ] Complete any remaining Lemon Squeezy account verification

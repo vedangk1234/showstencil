@@ -77,8 +77,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, ...result })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to detect sub-niche'
     console.error('[detect-sub-niche] Error:', error)
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

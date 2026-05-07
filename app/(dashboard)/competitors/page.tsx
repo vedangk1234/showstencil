@@ -11,42 +11,44 @@ export default async function CompetitorsPage() {
 
   try {
     const supabase = createServiceClient()
+    const uid = session.user.id
+    const now = new Date().toISOString()
 
-    const { data: user } = await supabase
-      .from('users')
-      .select('id, subscription_plan, sub_niche, niche_id')
-      .eq('id', session.user.id)
-      .single()
-
-    if (!user) redirect('/login')
-
-    const [{ data: competitors }, { data: lockedSearched }, { data: latestSnapshot }] =
+    // All four queries are independent — session.user.id is available before any DB call.
+    const [{ data: user }, { data: competitors }, { data: lockedSearched }, { data: latestSnapshot }] =
       await Promise.all([
+        supabase
+          .from('users')
+          .select('id, subscription_plan, sub_niche, niche_id')
+          .eq('id', uid)
+          .single(),
         supabase
           .from('competitors')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', uid)
           .eq('is_active', true)
           .order('subscriber_count', { ascending: false }),
         supabase
           .from('competitors')
           .select('channel_name, replacement_locked_until')
-          .eq('user_id', user.id)
+          .eq('user_id', uid)
           .eq('is_searched', true)
           .eq('is_active', true)
           .not('replacement_locked_until', 'is', null)
-          .gt('replacement_locked_until', new Date().toISOString())
+          .gt('replacement_locked_until', now)
           .limit(1)
           .maybeSingle(),
         supabase
           .from('channel_snapshots')
           .select('subscriber_count')
-          .eq('user_id', session.user.id)
+          .eq('user_id', uid)
           .not('subscriber_count', 'is', null)
           .order('snapshot_date', { ascending: false })
           .limit(1)
           .maybeSingle(),
       ])
+
+    if (!user) redirect('/login')
 
     const planLimits = getPlanLimits(user.subscription_plan)
 

@@ -8,6 +8,7 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
+import * as Sentry from '@sentry/nextjs'
 import {
   getUserByLSCustomerId,
   getUserByLSSubscriptionId,
@@ -210,6 +211,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({ received: true })
   } catch (err) {
+    Sentry.captureException(err, {
+      tags: { route: 'webhooks/lemonsqueezy' },
+    })
     console.error('[ls-webhook] Unhandled exception in webhook handler:', err)
     return NextResponse.json({ error: 'Bad request' }, { status: 400 })
   }

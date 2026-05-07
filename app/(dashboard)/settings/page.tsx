@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import { getUser, getUserSettings } from '@/lib/db'
@@ -123,6 +124,16 @@ export default async function SettingsPage() {
             </span>
           )}
         />
+        {user && (user.subscription_plan ?? 'free') !== 'pro' && (
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid #111111' }}>
+            <Link
+              href="/pricing"
+              className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
+            >
+              Upgrade Plan
+            </Link>
+          </div>
+        )}
         {user?.trial_ends_at && (
           <Row label="Trial ends" value={fmtDate(user.trial_ends_at)} />
         )}

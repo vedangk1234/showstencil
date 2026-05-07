@@ -30,12 +30,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       .eq('id', id)
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error('[ideas/plan] DB error:', error.message)
+      return NextResponse.json({ error: 'Failed to update idea' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed'
-    return NextResponse.json({ error: msg }, { status: 500 })
+    console.error('[ideas/plan] Unexpected error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

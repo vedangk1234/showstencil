@@ -26,7 +26,7 @@ import {
 } from '@react-email/components'
 import * as React from 'react'
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://nixlytics-u6k1.vercel.app'
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://showstencil.com'
 
 export interface WeeklyDigestEmailProps {
   channelName: string
@@ -249,13 +249,13 @@ export function WeeklyDigestEmail({
               Unsubscribe
             </Link>
             <Link
-              href="https://nixlytics-u6k1.vercel.app/privacy"
+              href="https://showstencil.com/privacy"
               style={unsubscribeLinkStyle}
             >
               Privacy Policy
             </Link>
             <Link
-              href="https://nixlytics-u6k1.vercel.app/terms"
+              href="https://showstencil.com/terms"
               style={unsubscribeLinkStyle}
             >
               Terms of Use

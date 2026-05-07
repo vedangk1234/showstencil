@@ -570,26 +570,42 @@ export function ThumbnailGenerationModal({
     )
   }
 
-  const renderNoPhoto = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div>
-        <p className="text-xs uppercase tracking-widest text-zinc-500 mb-1">No photo</p>
-        <h2 className="text-2xl font-semibold text-white">Continue without a photo</h2>
+  const renderNoPhoto = () => {
+    const handleGenerate = async () => {
+      const response = await fetch('/stick-figure.png')
+      const blob = await response.blob()
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const result = reader.result as string
+          resolve(result.split(',')[1])
+        }
+        reader.readAsDataURL(blob)
+      })
+      await startGeneration('no_photo', base64)
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div>
+          <p className="text-xs uppercase tracking-widest text-zinc-500 mb-1">No photo</p>
+          <h2 className="text-2xl font-semibold text-white">Continue without a photo</h2>
+        </div>
+        <p className="text-sm text-zinc-400 leading-relaxed">
+          Gemini will use an illustrated character based on the thumbnail brief. The result won&apos;t include a real person.
+        </p>
+        <button
+          onClick={() => void handleGenerate()}
+          className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors self-start"
+        >
+          Generate thumbnail
+        </button>
+        <button onClick={() => setStep('choose_source')} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors text-left">
+          ← Back
+        </button>
       </div>
-      <p className="text-sm text-zinc-400 leading-relaxed">
-        Gemini will use an illustrated character based on the thumbnail brief. The result won&apos;t include a real person.
-      </p>
-      <button
-        onClick={() => void startGeneration('no_photo')}
-        className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors self-start"
-      >
-        Generate thumbnail
-      </button>
-      <button onClick={() => setStep('choose_source')} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors text-left">
-        ← Back
-      </button>
-    </div>
-  )
+    )
+  }
 
   const renderGenerating = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center', textAlign: 'center' }}>
@@ -618,43 +634,67 @@ export function ThumbnailGenerationModal({
     </div>
   )
 
-  const renderCompleted = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div>
-        <p className="text-xs uppercase tracking-widest text-zinc-500 mb-1">Done</p>
-        <h2 className="text-2xl font-semibold text-white">Your thumbnail is ready</h2>
-      </div>
+  const renderCompleted = () => {
+    const handleDownload = async () => {
+      if (!generatedUrl) return
+      try {
+        const response = await fetch(generatedUrl)
+        const blob = await response.blob()
+        const blobUrl = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = blobUrl
+        link.download = `showstencil-thumbnail-${ideaId}.jpg`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(blobUrl)
+      } catch (error) {
+        console.error('Download failed:', error)
+      }
+    }
 
-      {generatedUrl && (
-        <img
-          src={generatedUrl}
-          alt="Generated thumbnail"
-          className="w-full rounded-xl object-cover"
-          style={{ aspectRatio: '16/9' }}
-        />
-      )}
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div>
+          <p className="text-xs uppercase tracking-widest text-zinc-500 mb-1">Done</p>
+          <h2 className="text-2xl font-semibold text-white">Your thumbnail is ready</h2>
+        </div>
 
-      <div style={{ display: 'flex', gap: 10 }}>
         {generatedUrl && (
-          <a
-            href={generatedUrl}
-            download={`thumbnail-${ideaId}.png`}
-            className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
-          >
-            Download as PNG
-          </a>
+          <div className="relative w-full aspect-video overflow-hidden rounded-xl bg-zinc-900">
+            <img
+              src={generatedUrl}
+              alt="Generated thumbnail"
+              className="w-full h-full object-cover"
+            />
+          </div>
         )}
-        <button
-          onClick={handleClose}
-          className="text-sm px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
-        >
-          Close
-        </button>
-      </div>
 
-      <p className="text-xs text-zinc-600">Generated using Google Gemini</p>
-    </div>
-  )
+        <p className="text-xs text-zinc-500 text-center">
+          Recommended: resize to 1280×720px before uploading to YouTube
+        </p>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          {generatedUrl && (
+            <button
+              onClick={() => void handleDownload()}
+              className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
+            >
+              Download as PNG
+            </button>
+          )}
+          <button
+            onClick={handleClose}
+            className="text-sm px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
+          >
+            Close
+          </button>
+        </div>
+
+        <p className="text-xs text-zinc-600">Generated using Google Gemini</p>
+      </div>
+    )
+  }
 
   const renderFailed = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

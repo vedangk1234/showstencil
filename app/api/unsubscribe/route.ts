@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://nixlytics-u6k1.vercel.app'
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://showstencil.com'
 
 function htmlPage(title: string, heading: string, body: string): NextResponse {
   const html = `<!DOCTYPE html>

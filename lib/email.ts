@@ -37,7 +37,7 @@ import type { DigestResult, ViralVideo } from '@/types'
 const resend = new Resend(process.env.RESEND_API_KEY)
 
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? 'https://nixlytics-u6k1.vercel.app'
+  process.env.NEXT_PUBLIC_APP_URL ?? 'https://showstencil.com'
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev'
 

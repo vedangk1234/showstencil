@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
+import * as Sentry from '@sentry/nextjs'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
 import { deleteAllUserThumbnails, setIdeasRefreshAvailable } from '@/lib/db'
 import type { Idea } from '@/types'
@@ -405,13 +406,13 @@ Respond in this exact JSON structure with no text before or after:
           user_id: userId,
           generated_at: generatedAt,
           title: String(idea.title ?? ''),
-          opportunity_score: Number(idea.opportunity_score ?? 0),
+          opportunity_score: Math.max(0, Math.min(100, Math.round(Number(idea.opportunity_score ?? 0)) || 0)),
           thumbnail_description: String(idea.thumbnail_description ?? ''),
           content_brief: String(idea.content_brief ?? ''),
           hook_2: hook2,
           hook_3: hook3,
-          suggested_duration_min: Number(idea.suggested_duration_min ?? 0),
-          suggested_duration_max: Number(idea.suggested_duration_max ?? 0),
+          suggested_duration_min: Math.max(0, Math.round(Number(idea.suggested_duration_min ?? 0)) || 0),
+          suggested_duration_max: Math.max(0, Math.round(Number(idea.suggested_duration_max ?? 0)) || 0),
           duration_reasoning: String(idea.duration_reasoning ?? ''),
           why_now: String(idea.why_now ?? ''),
           topic_source: idea.topic_source ? String(idea.topic_source) : null,
@@ -461,6 +462,9 @@ Respond in this exact JSON structure with no text before or after:
     return NextResponse.json({ ideas, generatedAt })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Generation failed'
+    Sentry.captureException(error, {
+      tags: { route: 'ideas/generate' },
+    })
     console.error('[ideas/generate]', error)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

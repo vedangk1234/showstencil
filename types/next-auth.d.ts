@@ -6,7 +6,6 @@ declare module 'next-auth' {
       id: string
       subscriptionStatus: string
     } & DefaultSession['user']
-    accessToken: string | undefined
   }
 }
 

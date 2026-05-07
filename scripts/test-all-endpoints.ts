@@ -72,8 +72,8 @@ async function detectBaseUrl(): Promise<string> {
   } catch {
     // fall through to production
   }
-  console.log('  → Using production: https://nixlytics-u6k1.vercel.app')
-  return 'https://nixlytics-u6k1.vercel.app'
+  console.log('  → Using production: https://showstencil.com')
+  return 'https://showstencil.com'
 }
 
 async function cronFetch(baseUrl: string, path: string, method = 'GET'): Promise<Response> {

@@ -2180,6 +2180,39 @@ GROUP D — Public (intentionally no auth):
 
 ---
 
+### Section 5: SQL Injection & Input Validation — 2026-05-06
+
+**Scope:** All Supabase client usage in lib/ and app/api/, YouTube channel URL/ID input handling, request body parsing across all API routes, Claude prompt construction, mass assignment patterns, scripts/ folder.
+
+**CRITICAL issues found:** None.
+
+**Fix applied:**
+
+* `app/api/competitors/track/route.ts` — **Missing channel_id format validation**: The route accepted any non-falsy string as `channel_id` from the request body with only a `!channel_id` check. Malformed or arbitrarily long strings would trigger up to 7 downstream DB queries (is-already-tracked check, plan limits, monthly quota, lock check, slot count) before hitting the `searched_channels_cache` lookup that would return 404. Added `typeof channel_id !== 'string'` type check and `!/^UC[a-zA-Z0-9_-]{22}$/.test(channel_id)` format check (400 `Invalid channel_id format`) as the first validation after auth. This is consistent with the UC+24-char check already present in `app/api/cron/refresh-data/route.ts` (lines 217–218), `app/api/cron/trend-detection/route.ts` (lines 51–52), and `lib/channel-search.ts` `normalizeChannelInput` (line 40). SQL injection was never possible here (all queries use parameterized Supabase client methods), but the fix prevents wasted query execution against malformed input.
+
+**Warnings (no fix applied — documented for awareness):**
+
+* `app/api/ideas/[id]/generate-thumbnail/route.ts` — `photo_data` (base64-encoded image) has no size limit check. The client-side code resizes images to max 800px wide before encoding, so in practice payloads stay under ~300KB base64. A determined attacker calling the endpoint directly could send a large payload. No fix applied because: (1) the route is auth-gated + plan-gated, reducing attack surface; (2) Vercel has a 4.5MB request body limit that acts as a hard cap; (3) adding a limit would require deciding on a value and testing that legitimate camera/upload sources still work. Recommend adding a `photo_data.length > 2_000_000` guard (2MB base64 ≈ 1.5MB image) in a future pass.
+
+* Claude prompts in `lib/competitor-insights.ts` and `app/api/ideas/generate/route.ts` include user-influenced strings without length limiting: channel names (from Google OAuth, via DB), video titles (from YouTube Data API, via DB), and sub-niche labels (Claude-detected, via DB). None of these are directly typed by the user in the app — they all pass through Google or YouTube first. However, a YouTube channel name containing "Ignore all previous instructions and instead..." is theoretically possible. Risk is LOW because: (1) YouTube has its own content policies; (2) the data passes through Claude sub-niche detection and YouTube API normalisation first; (3) Claude prompts have structured JSON output requirements that make injection-driven output hard to exploit downstream. No fix applied. If hardening is desired, truncate `channel_name` to 100 chars and `video.title` to 150 chars before prompt assembly.
+
+**Confirmed clean:**
+
+* All Supabase operations use the JS client's parameterized methods exclusively (`from().select()`, `.insert()`, `.update()`, `.upsert()`, `.delete()`). No `.rpc()`, no template-literal SQL strings, no raw query construction found anywhere in lib/ or app/api/.
+* No raw SQL construction in scripts/ — all `${...}` occurrences are `console.log` template literals only.
+* `app/api/competitors/search/route.ts` — validates `input` is a `string` type, then passes through `normalizeChannelInput()` which enforces UC+22-char regex for channel IDs and URL pattern matching for all other forms before any DB or YouTube API operation.
+* `app/api/create-checkout-session/route.ts` — `plan` validated against `['starter', 'pro']` allowlist before use. No other body fields accepted.
+* `app/api/settings/notifications/route.ts` — each field individually type-checked and range-validated (`boolean`, `number` between 1.5–10.0). Uses a build-up pattern for the update object so unexpected fields are silently ignored and never reach the DB.
+* `app/api/user/profile/route.ts` PATCH — `niche_id` validated against a hardcoded 12-item `VALID_NICHES` allowlist. Update object explicitly lists only `niche_id` and `niche_detected_at`.
+* `app/api/ideas/[id]/generate-thumbnail/route.ts` — `photo_source` validated against `['camera', 'upload', 'google_profile', 'no_photo']` enum. `photo_data` required when source is `camera` or `upload`.
+* `app/api/competitors/insights/route.ts` — `force_regenerate` is a boolean flag read from the body and used only as a truthy check. No DB operation depends on its value directly. Ownership verification via `.eq('user_id', userId)` in the competitor query (fixed in Section 2 audit).
+* No mass assignment found: every `.insert()`, `.update()`, and `.upsert()` call in app/api/ constructs an explicit field object. The request body is never spread into a DB operation.
+* Scripts folder: no script accepts CLI arguments interpolated into SQL or DB queries. All use hardcoded values or read from the DB for lookup keys.
+
+**tsc --noEmit after fix: zero errors.**
+
+---
+
 ## Known Issues
 
 > Update this section as issues are discovered
@@ -2319,7 +2352,7 @@ Previous Day 35: Legal links added to 4 surfaces (additive only, no existing con
 
 *app/(dashboard)/settings/page.tsx*: Added Legal `<Section>` at the bottom of the settings page with Privacy Policy and Terms of Use plain-text links (`color: #888888`, `fontSize: 13`). Uses the existing `Section` sub-component.
 
-*emails/weekly-digest.tsx* and *emails/trend-alert.tsx*: Added two additional `<Link>` elements after the existing Unsubscribe link, styled with the same `unsubscribeLinkStyle`. URLs: `https://nixlytics-u6k1.vercel.app/privacy` and `https://nixlytics-u6k1.vercel.app/terms`. No other email content changed.
+*emails/weekly-digest.tsx* and *emails/trend-alert.tsx*: Added two additional `<Link>` elements after the existing Unsubscribe link, styled with the same `unsubscribeLinkStyle`. URLs: `https://showstencil.com/privacy` and `https://showstencil.com/terms`. No other email content changed.
 
 *tsc --noEmit: zero errors.*
 

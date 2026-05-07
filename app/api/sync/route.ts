@@ -9,7 +9,11 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import * as Sentry from '@sentry/nextjs'
+import { createServiceClient } from '@/lib/supabase'
 import { syncUserChannel } from '@/lib/sync-logic'
+
+const SYNC_COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes — each sync burns 5 YouTube Analytics quota units
 
 export async function POST() {
   const start = Date.now()
@@ -20,7 +24,40 @@ export async function POST() {
   }
 
   const userId = session.user.id
-  const result = await syncUserChannel(userId)
+
+  // Rate limit: YouTube Analytics API quota is project-level (200 units/day shared across all users).
+  // Each sync costs 5 units. Prevent rapid re-syncing from burning the day's quota.
+  const supabase = createServiceClient()
+  const { data: recentSnapshots } = await supabase
+    .from('channel_snapshots')
+    .select('created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  const latestSnapshot = recentSnapshots?.[0]
+  if (latestSnapshot?.created_at) {
+    const msSinceLastSync = Date.now() - new Date(latestSnapshot.created_at).getTime()
+    if (msSinceLastSync < SYNC_COOLDOWN_MS) {
+      const retryAfterSec = Math.ceil((SYNC_COOLDOWN_MS - msSinceLastSync) / 1000)
+      return NextResponse.json(
+        { error: `Sync completed recently. Please wait ${Math.ceil(retryAfterSec / 60)} minute(s) before syncing again.` },
+        { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+      )
+    }
+  }
+
+  let result: Awaited<ReturnType<typeof syncUserChannel>>
+  try {
+    result = await syncUserChannel(userId)
+  } catch (error: unknown) {
+    Sentry.captureException(error, {
+      tags: { route: 'sync' },
+      user: { id: userId },
+    })
+    console.error('[sync]', error)
+    return NextResponse.json({ error: 'Sync failed unexpectedly' }, { status: 500 })
+  }
 
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: result.httpStatus ?? 500 })

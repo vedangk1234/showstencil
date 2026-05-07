@@ -16,21 +16,22 @@ export default async function CompetitorAnalysisPage({
   try {
     const supabase = createServiceClient()
 
-    const { data: user } = await supabase
-      .from('users')
-      .select('id, name, subscription_plan, sub_niche, sub_niche_keywords, niche_id')
-      .eq('id', session.user.id)
-      .single()
+    // user and competitor are independent — both key on session.user.id which we already have.
+    const [{ data: user }, { data: competitor }] = await Promise.all([
+      supabase
+        .from('users')
+        .select('id, name, subscription_plan, sub_niche, sub_niche_keywords, niche_id')
+        .eq('id', session.user.id)
+        .single(),
+      supabase
+        .from('competitors')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', session.user.id)
+        .single(),
+    ])
 
     if (!user) redirect('/login')
-
-    const { data: competitor } = await supabase
-      .from('competitors')
-      .select('*')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .single()
-
     if (!competitor) notFound()
 
     const [
