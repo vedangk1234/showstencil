@@ -6,6 +6,7 @@ import { canGenerateThumbnail } from '@/lib/access'
 import { createThumbnailJob, updateThumbnailJob } from '@/lib/db'
 import { generateThumbnail } from '@/lib/gemini-image'
 import { uploadThumbnail } from '@/lib/thumbnail-storage'
+import { padToSixteenNine } from '@/lib/image-utils'
 
 type PhotoSource = 'camera' | 'upload' | 'google_profile' | 'no_photo'
 
@@ -133,7 +134,10 @@ export async function POST(
         return
       }
 
-      const publicUrl = await uploadThumbnail({ userId, ideaId, imageBase64: result.imageBase64 })
+      const rawBuffer = Buffer.from(result.imageBase64, 'base64')
+      const paddedBuffer = await padToSixteenNine(rawBuffer)
+      const paddedBase64 = paddedBuffer.toString('base64')
+      const publicUrl = await uploadThumbnail({ userId, ideaId, imageBase64: paddedBase64 })
 
       if (!publicUrl) {
         await updateThumbnailJob(jobId, { status: 'failed', error_message: 'Failed to upload generated image.' })
