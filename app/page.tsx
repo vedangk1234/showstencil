@@ -2,6 +2,7 @@
 import { useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import './landing.css'
 
 export default function LandingPage() {
@@ -306,10 +307,13 @@ export default function LandingPage() {
     <>
       {/* ============ NAV ============ */}
       <nav className="top">
-        <a href="/" className="brand">
-          <span className="brand-mark">S</span>
-          <span className="brand-name">ShowStencil</span>
-        </a>
+        <Link href="/" style={{ textDecoration: 'none', cursor: 'pointer' }}>
+          <span style={{ fontFamily: 'var(--font-montserrat)', fontWeight: 700, fontSize: 16, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <span style={{ color: '#FFFFFF' }}>SHOW</span>
+            <span style={{ color: '#737373' }}>STENCIL</span>
+            <span style={{ color: '#FFFFFF' }}>.</span>
+          </span>
+        </Link>
         <div className="nav-links">
           <a href="#features">Features</a>
           <a href="/pricing">Pricing</a>
@@ -672,9 +676,14 @@ export default function LandingPage() {
       <footer>
         <div className="foot-grid">
           <div className="foot-brand">
-            <div className="brand">
-              <span className="brand-mark">S</span>
-              <span className="brand-name">ShowStencil</span>
+            <div>
+              <Link href="/" style={{ textDecoration: 'none', cursor: 'pointer' }}>
+                <span style={{ fontFamily: 'var(--font-montserrat)', fontWeight: 700, fontSize: 16, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  <span style={{ color: '#FFFFFF' }}>SHOW</span>
+                  <span style={{ color: '#737373' }}>STENCIL</span>
+                  <span style={{ color: '#FFFFFF' }}>.</span>
+                </span>
+              </Link>
             </div>
             <p className="foot-tag">YouTube competitor intelligence for creators who want to win.</p>
           </div>

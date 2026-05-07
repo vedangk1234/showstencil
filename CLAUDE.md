@@ -42,7 +42,7 @@ Pricing:
 |Auth|NextAuth.js v5|Google OAuth with YouTube scopes|
 |Charts|Recharts|Lightweight, React native|
 |Email|Resend + React Email|Clean API, generous free tier|
-|Payments|Stripe|Hosted checkout, webhook handling|
+|Payments|Lemon Squeezy|Hosted checkout + webhook handling (replaced Stripe)|
 |AI Digest|Anthropic Claude Sonnet 4.6 API|NOT Opus — cost control|
 |Hosting|Vercel|Auto-deploy from GitHub|
 |Monitoring|Sentry (errors) + UptimeRobot (uptime)|Free tiers|
@@ -649,9 +649,14 @@ const planLimits = {
 | `lib/idea-generator.ts` | 🗑️ deleted | Superseded by `app/api/ideas/generate/route.ts` (Day 20). Dead JSONB schema writer removed Day 32. |
 | `lib/revenue-benchmarks.ts` | ✅ | getNicheBenchmarks (12 niches), calculateRevenuePotential, getBenchmarkComparison, getSubscriberTier |
 | `lib/email.ts` | ✅ | sendWeeklyDigest, sendTrendAlert, checkAndSendAlerts, generateUnsubscribeToken |
-| `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — see webhook route |
+| `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — file deleted; use lib/lemonsqueezy.ts |
+| `lib/lemonsqueezy.ts` | ✅ | createCheckoutSession (LS JS SDK), getVariantId — replaces lib/stripe.ts |
 | `lib/access.ts` | ✅ | canAccess, getCompetitorLimit, getIdeaLimit, getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage |
-| `lib/utils.ts` | 🔲 | Shared formatting/date utilities — added as needed |
+| `lib/utils.ts` | ✅ | Shared formatting/date utilities — cn() Tailwind class merger (clsx + tailwind-merge) |
+| `lib/competitor-metrics.ts` | ✅ | calculateCompetitorMetrics — pure function, no DB calls; computes video_count, avg_views, avg_length, upload_frequency_30d, velocity_score_avg from a video row array |
+| `lib/image-utils.ts` | ✅ | padToSixteenNine (sharp) — server-side padding of any image to 16:9 by sampling edge pixel colour; used in thumbnail pipeline before Supabase upload |
+| `lib/niche-images.ts` | ✅ | getNicheImage + getShuffledNicheImages — maps niche_id to curated stock image filenames in public/niche-images/ with seeded Fisher-Yates shuffle; stable per generation seed |
+| `lib/env-validation.ts` | ✅ | validateEnv — checks 9 required env vars at startup; throws with clear list of missing keys |
 | `lib/sub-niche-detector.ts` | ✅ | detectSubNiche (Claude), calculateSubNicheSimilarity — granular sub-niche within a broad niche |
 | `lib/db.ts` (Day 13 additions) | ✅ | saveCompetitorSnapshot, getCompetitorSnapshots, getAllCompetitorSnapshotsForUser, updateCompetitorMetrics, saveCompetitorInsights, getCachedInsights |
 | `lib/dominator-finder.ts` | ✅ | findDominatorsForUser — niche-specific rules (sub_niche match for gaming/fitness/tech/education, broad for others) |
@@ -677,9 +682,12 @@ const planLimits = {
 | `app/api/cron/cache-cleanup/route.ts` | ✅ | Runs daily 2am UTC; purges expired searched_channels_cache + search_history >90 days |
 | `app/api/cron/sub-niche-detection/route.ts` | ✅ | Runs daily 5am UTC; refreshes sub_niche for users missing it or stale >30 days |
 | `app/api/cron/dominator-refresh/route.ts` | ✅ | Runs daily 4am UTC; finds + updates Dominator (Tier 3) competitor for all active users |
-| `app/api/cron/daily/route.ts` | 🚧 | Old stub — superseded by the 5 dedicated cron routes above |
+| `app/api/cron/daily/route.ts` | 🗑️ deleted | Old Week 1 stub — deleted Day 36; fully superseded by the 5 dedicated cron routes above |
 | `app/api/create-checkout-session/route.ts` | ✅ | Lemon Squeezy checkout redirect |
-| `app/api/webhooks/lemonsqueezy/route.ts` | ✅ | LS webhook: subscription_created/updated/cancelled/payment_failed |
+| `app/api/webhooks/lemonsqueezy/route.ts` | ✅ | LS webhook: subscription_created/updated/cancelled/payment_failed; HMAC-SHA256 signature verification |
+| `app/api/competitors/[id]/sync/route.ts` | ✅ | POST manually re-syncs videos for a single competitor — auth + ownership check, fetches last 10 YouTube videos, upserts to competitor_videos |
+| `app/api/thumbnail-jobs/[jobId]/status/route.ts` | ✅ | GET thumbnail job status — auth-gated; returns status/thumbnail_url/error_message/timestamps |
+| `app/api/health/route.ts` | ✅ | GET — public, no auth; returns { status: 'ok', timestamp } for uptime monitoring |
 | `app/api/unsubscribe/route.ts` | ✅ | Token-based one-click unsubscribe, no auth required, returns styled HTML |
 | `app/api/settings/notifications/route.ts` | ✅ | GET + POST notification prefs, auth required, validates multiplier range |
 | `app/api/competitors/[id]/route.ts` | ✅ | GET single competitor row (auth + ownership check) |
@@ -707,15 +715,16 @@ const planLimits = {
 | `app/(dashboard)/dashboard/page.tsx` | ✅ | Full dashboard: gap score panel, 5-metric strip, competitors table (Tier1+Tier2 only), trend radar, views chart, top ideas, "View all competitors →" link |
 | `app/(dashboard)/competitors/page.tsx` | ✅ | Rebuilt: filter tabs (All/Tier1/Tier2/Dominator), CompetitorsTable, UpgradeBanner, PlanLimitIndicator |
 | `app/(dashboard)/competitors/[id]/page.tsx` | ✅ | Per-competitor deep analysis: loads competitor + videos + user snapshots, renders CompetitorAnalysis (5 tabs) |
-| `app/(dashboard)/digest/page.tsx` | ✅ | Weekly digest view: list of past digests with preview, gap score, status |
+| `app/(dashboard)/digest/page.tsx` | ✅ | Weekly digest list: past digests with preview, gap score, email-sent status |
+| `app/(dashboard)/digest/[id]/page.tsx` | ✅ | Digest detail view — parses markdown into sections, injects live competitor block from DB, removes ideas section (ideas live on /ideas), shows key metrics grid |
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, interactive notification toggles + threshold slider wired to API, account actions |
 | `app/(dashboard)/settings/notifications/page.tsx` | ✅ | Redirects to `/settings` — notifications UI lives in NotificationSettings component on the main settings page |
 | `app/onboarding/page.tsx` | ✅ | 5-step onboarding wizard — URL state (?step=1..5), background sync on Step 1, skip anywhere Step 2+, browser back/forward syncs step state |
 | `app/page.tsx` | ✅ | Full landing page — Nagai hero, time-of-day sky system, feature grid, CTA, footer |
 | `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
-| `app/privacy/page.tsx` | 🔲 | Legal — Week 3 |
-| `app/terms/page.tsx` | 🔲 | Legal — Week 3 |
+| `app/privacy/page.tsx` | ✅ | Privacy policy — Termly-generated HTML embedded in dark-themed Next.js page |
+| `app/terms/page.tsx` | ✅ | Terms of use — Termly-generated HTML embedded in dark-themed Next.js page |
 
 ### Components
 
@@ -746,8 +755,8 @@ const planLimits = {
 | `components/onboarding/StepMeetCompetitors.tsx` | ✅ | Polls for all 3 tiers (2s × 30), staggered reveal, tier badges, partial/timeout fallback |
 | `components/onboarding/StepFirstAnalysis.tsx` | ✅ | 20s progress bar + stage labels, fetches gap score + latest idea, reveal with fallback |
 | `components/settings/NotificationSettings.tsx` | ✅ | Client Component — digest toggle, alerts toggle, threshold slider, optimistic updates, 2s "Saved ✓" indicator, slider disabled when alerts off |
-| `components/ui/` | 🔲 | Reusable UI primitives — not yet extracted |
-| `components/charts/` | 🔲 | Recharts wrappers — not yet extracted |
+| `components/ui/expandable-card.tsx` | ✅ | Framer-motion expandable card primitive (title, image, description, children) — available but not yet wired to any dashboard feature |
+| `components/charts/SubscriberGrowthChart.tsx` | ✅ | Log-scale multi-line Recharts chart for subscriber growth over time (user + all competitors, colour-coded by tier) |
 | `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
 | `emails/trend-alert.tsx` | ✅ | React Email template: viral video alert with suggested angle |
 
@@ -774,12 +783,55 @@ const planLimits = {
 | `scripts/get-unsubscribe-token.ts` | ✅ | Prints unsubscribe token + test URL for the test user |
 | `scripts/re-enable-notifications.ts` | ✅ | Re-enables digest + alerts for test user after unsubscribe testing |
 | `scripts/update-gap-scores.ts` | ✅ | One-time script: sets watch_time=15, upload_freq=85, topic_coverage=NULL for test user |
+| `scripts/check-competitors.ts` | ✅ | Prints competitor rows + video counts for the test user — diagnostic |
+| `scripts/diagnose-sync.ts` | ✅ | End-to-end sync diagnostic: token validity, channel snapshot, video count, competitor counts |
+| `scripts/fix-competitor-tiers.ts` | ✅ | One-time script: recalculates and writes correct tier values from sub ratio |
+| `scripts/reset-inactive-competitors.ts` | ✅ | Deletes competitors with zero videos (FK order: snapshots → videos → row) — used to clean up inactive auto-detected channels |
+| `scripts/sync-competitor-videos.ts` | ✅ | One-time manual video sync for a specific competitor — used to backfill after track-route fix |
+| `scripts/test-all-endpoints.ts` | ✅ | Full API endpoint smoke-test suite — sends real HTTP requests to all 29 routes and checks status codes |
+| `scripts/test-api-key.ts` | ✅ | Validates Anthropic + YouTube API keys by making minimal live calls |
+| `scripts/test-cron.ts` | ✅ | Sends authenticated requests to all 7 cron routes and checks responses |
+| `scripts/test-insights-expanded.ts` | ✅ | Validates expanded insights output (9 checks: both channel names, specific metrics, gap scores, viral patterns) |
+| `scripts/test-send-digest-email.ts` | ✅ | Sends a real weekly digest email to the test inbox and verifies Resend message ID |
+| `scripts/test-sync.ts` | ✅ | Calls POST /api/sync for the test user and logs timing + snapshot results |
+| `scripts/test-token-refresh.ts` | ✅ | Tests OAuth token refresh flow — uses stored refresh token, writes new access token to DB |
+| `scripts/update-competitor-thumbnails.ts` | ✅ | One-time script: populates missing channel_thumbnail on competitors rows via YouTube Data API |
 
 ---
 
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 3 — Day 37 (2026-05-07)
+
+**CLAUDE.md full audit — documentation brought up to date with actual codebase**
+
+*No code changes. Documentation only.*
+
+Feature Build Status tables updated to reflect actual codebase state:
+* `lib/utils.ts` — changed from 🔲 to ✅
+* `app/privacy/page.tsx` and `app/terms/page.tsx` — changed from 🔲 to ✅ (Termly-generated legal pages)
+* `app/api/cron/daily/route.ts` — changed from 🚧 to 🗑️ deleted (deleted Day 36)
+* `components/ui/` and `components/charts/` — expanded entries with actual filenames and statuses
+
+New entries added (files that existed but were undocumented):
+* `lib/lemonsqueezy.ts` — Lemon Squeezy JS SDK wrapper (createCheckoutSession, getVariantId)
+* `lib/competitor-metrics.ts` — pure computation for competitor video metrics
+* `lib/image-utils.ts` — sharp-based server-side 16:9 padding for thumbnails
+* `lib/niche-images.ts` — curated niche stock images with seeded shuffle
+* `lib/env-validation.ts` — required env var check at startup
+* `app/(dashboard)/digest/[id]/page.tsx` — digest detail view
+* `app/api/competitors/[id]/sync/route.ts` — manual competitor video re-sync
+* `app/api/thumbnail-jobs/[jobId]/status/route.ts` — thumbnail job polling
+* `app/api/health/route.ts` — uptime monitoring endpoint
+* 14 dev scripts added to the Scripts table (check-competitors, diagnose-sync, fix-competitor-tiers, reset-inactive-competitors, sync-competitor-videos, test-all-endpoints, test-api-key, test-cron, test-insights-expanded, test-send-digest-email, test-sync, test-token-refresh, update-competitor-thumbnails)
+
+New section added: **Planned But Not Yet Built** — documents 8 features gated in access.ts or implied by the product roadmap but not yet implemented (Revenue Forecast, Whitespace Map, Collaboration Finder, re-subscribe flow, topic coverage, pricing wiring, auth callback placeholder, stripe webhook stub).
+
+Tech stack table corrected: Payments updated from "Stripe" to "Lemon Squeezy".
+
+---
 
 ### Week 3 — Day 34 (2026-05-04)
 
@@ -2261,6 +2313,24 @@ GROUP D — Public (intentionally no auth):
 
 \---
 
+## Planned But Not Yet Built
+
+> These features are referenced in pricing/access.ts but have no page, API route, or lib function yet.
+> Build order: Revenue Forecast → Whitespace Map → Collaboration Finder.
+
+| Feature | Plan Gate | What It Does | Notes |
+|---|---|---|---|
+| Revenue Forecast page | Pro only | Projects the creator's monthly/annual revenue 3–6 months out based on current trajectory vs niche benchmarks; shows the "what if you fixed your CTR" scenario | `lib/revenue-benchmarks.ts` has the pure computation layer. Needs a `/revenue` page + API route + chart component |
+| Whitespace Map | Pro only | Visualises topic clusters in the niche (covered vs uncovered by the user), highlights high-search / low-competition gaps | Requires `findUncoveredTopics` from `lib/trend-detector.ts` + a visual map component (Recharts tree map or force graph) |
+| Collaboration Finder | Pro only | Identifies Tier 1 and Tier 2 competitors in the same sub-niche that would benefit from a collaboration; scores by audience overlap and growth velocity | New Claude prompt needed; requires sub-niche similarity scoring from `lib/sub-niche-detector.ts` |
+| Digest email re-subscribe flow | All plans | If a user unsubscribes via the one-click link, they have no way to re-subscribe from email — they must go to /settings. A "re-subscribe" link in the unsubscribe confirmation page is missing | `app/api/unsubscribe/route.ts` handles the unsubscribe; needs a `/api/resubscribe?token=X` counterpart |
+| Topic coverage gap score | All plans | `topic_coverage_gap_score` is a stub returning 0 in `lib/gap-scorer.ts`; the dashboard strip hides it | Needs `findUncoveredTopics` result piped into the scorer; removed from dashboard until built (Day 9 decision) |
+| Pricing page checkout wiring | All plans | `app/pricing/page.tsx` shows the plan comparison table but the CTA buttons link to `/api/create-checkout-session` which uses `lib/lemonsqueezy.ts` — needs to verify the variant IDs are correctly wired end-to-end in production | `LEMONSQUEEZY_STARTER_VARIANT_ID` / `LEMONSQUEEZY_PRO_VARIANT_ID` must be set in Vercel env vars |
+| `app/(auth)/callback/page.tsx` | — | OAuth callback page — not needed; NextAuth handles the callback automatically at `/api/auth/callback/google` | Directory placeholder exists as `.gitkeep`; no code needed |
+| `app/api/webhooks/stripe/` | — | Stripe webhook handler directory — empty `.gitkeep`; Stripe replaced by Lemon Squeezy | Can be deleted in cleanup |
+
+---
+
 ## Key Decisions Made
 
 > Record every major decision here with the reason
@@ -2327,7 +2397,7 @@ GROUP D — Public (intentionally no auth):
 
 \---
 
-*Last updated: 2026-05-05 — Day 36 (A8): Technical debt cleanup — 3 deletions, 1 type cleanup, 1 test script fix. tsc --noEmit: zero errors.
+*Last updated: 2026-05-07 — Day 37: CLAUDE.md full audit. Updated Feature Build Status to match actual codebase: lib/utils.ts, privacy/terms pages, digest/[id] page marked ✅; cron/daily marked 🗑️ deleted. Added 14 undocumented files: lib/lemonsqueezy.ts, lib/competitor-metrics.ts, lib/image-utils.ts, lib/niche-images.ts, lib/env-validation.ts; API routes competitors/[id]/sync, thumbnail-jobs/[jobId]/status, health; 14 new scripts. Added "Planned But Not Yet Built" section with Revenue Forecast, Whitespace Map, Collaboration Finder, and 4 smaller gaps. Tech stack Payments updated from Stripe → Lemon Squeezy.*
 
 **Deleted:**
 * `app/api/cron/daily/route.ts` + `app/api/cron/daily/` folder — old Week 1 stub, fully superseded by the 5 dedicated cron routes. Confirmed zero source references before deletion (only .next/ build artifacts).

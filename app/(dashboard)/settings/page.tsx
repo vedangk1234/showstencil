@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getUser, getUserSettings } from '@/lib/db'
 import type { User } from '@/types'
 import NotificationSettings from '@/components/settings/NotificationSettings'
+import CancelSubscription from '@/components/settings/CancelSubscription'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -124,16 +125,21 @@ export default async function SettingsPage() {
             </span>
           )}
         />
-        {user && (user.subscription_plan ?? 'free') !== 'pro' && (
-          <div style={{ padding: '10px 16px', borderBottom: '1px solid #111111' }}>
-            <Link
-              href="/pricing"
-              className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
-            >
-              Upgrade Plan
-            </Link>
+        {(user && (user.subscription_plan ?? 'free') !== 'pro') || (user && user.subscription_status === 'active' && (user.subscription_plan === 'starter' || user.subscription_plan === 'pro')) ? (
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid #111111', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {user && (user.subscription_plan ?? 'free') !== 'pro' && (
+              <Link
+                href="/pricing"
+                className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
+              >
+                Upgrade Plan
+              </Link>
+            )}
+            {user && user.subscription_status === 'active' && (user.subscription_plan === 'starter' || user.subscription_plan === 'pro') && (
+              <CancelSubscription currentPeriodEnd={user.current_period_end} />
+            )}
           </div>
-        )}
+        ) : null}
         {user?.trial_ends_at && (
           <Row label="Trial ends" value={fmtDate(user.trial_ends_at)} />
         )}

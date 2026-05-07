@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import Image from 'next/image'
@@ -27,26 +28,17 @@ export default async function DashboardLayout({
       <aside className="w-60 shrink-0 flex flex-col bg-stencil-bg border-r border-stencil-line px-[14px] py-[18px] gap-[18px]">
 
         {/* Brand */}
-        <div className="flex items-center gap-[10px] pt-[2px] px-[6px] pb-[14px] border-b border-dashed border-stencil-line">
-          <div className="size-6 bg-stencil-ink text-stencil-bg grid place-items-center font-mono font-semibold text-[11px] relative">
-            S
-            <span className="absolute inset-[3px] border border-stencil-bg" />
-          </div>
-          <span className="font-serif text-xl italic tracking-[-0.01em]">
-            ShowStencil
-          </span>
-          <span className="ml-auto font-mono text-[9.5px] text-stencil-ink3 border border-stencil-line px-[5px] py-[2px]">
+        <div className="flex items-center justify-between pt-[2px] px-[6px] pb-[14px] border-b border-dashed border-stencil-line">
+          <Link href="/dashboard" style={{ textDecoration: 'none', cursor: 'pointer' }}>
+            <span style={{ fontFamily: 'var(--font-montserrat)', fontWeight: 700, fontSize: 15, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              <span style={{ color: '#FFFFFF' }}>SHOW</span>
+              <span style={{ color: '#737373' }}>STENCIL</span>
+              <span style={{ color: '#FFFFFF' }}>.</span>
+            </span>
+          </Link>
+          <span className="font-mono text-[9.5px] text-stencil-ink3 border border-stencil-line px-[5px] py-[2px]">
             {user?.subscription_plan ?? 'free'}
           </span>
-        </div>
-
-        {/* Search hint */}
-        <div className="flex items-center gap-2 px-[10px] py-[6px] border border-stencil-line font-mono text-[11px] text-stencil-ink3">
-          <span>⌘</span>
-          <span>Find...</span>
-          <kbd className="ml-auto font-mono text-[9.5px] border border-stencil-line px-1 py-px">
-            ⌘F
-          </kbd>
         </div>
 
         <SidebarNav />
