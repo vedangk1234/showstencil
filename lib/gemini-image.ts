@@ -33,7 +33,7 @@ Image 2: A stick figure illustration. IGNORE this image — only use it if the f
 
   const prompt = `You are designing a high-converting YouTube thumbnail.
 
-ASPECT RATIO: 16:9 LANDSCAPE (widescreen). The output image MUST be wider than it is tall — like a widescreen TV or YouTube video frame. Do NOT generate a square image. Do NOT generate a portrait image.
+ASPECT RATIO: 16:9 LANDSCAPE (widescreen, 1280×720px). CRITICAL — The output image MUST be wider than it is tall. Compose everything for a widescreen canvas. All text, faces, and key elements must sit within the center 80% of a 16:9 frame. Do NOT compose for a square canvas.
 
 VIDEO TITLE: "${ideaTitle}"
 
@@ -43,6 +43,8 @@ ${thumbnailBrief}
 ${photoInstructions}
 
 DESIGN REQUIREMENTS:
+- CRITICAL: This image will be cropped to 16:9 widescreen (1280×720px). Design for a 16:9 canvas. Place ALL important content — text, faces, numbers, key graphics — within the center 80% of the frame. Treat the outer 10% on all sides as bleed zone that may be cropped.
+- Mentally draw a 16:9 rectangle as your canvas before composing. Everything that matters must be inside it. The composition should look complete and intentional within a widescreen frame — not a square frame.
 - MUST be 16:9 landscape format (1280×720px) — wider than tall, never square
 - Bold, high-contrast colors that pop on a phone screen at thumbnail size
 - One clear focal point — the viewer's eye should immediately know where to look
