@@ -24,7 +24,14 @@ export async function generateThumbnail(
   const photoInstructions = useRealPhoto
     ? `Image 1: A photo of the creator. Place this person prominently in the thumbnail — typically the right or center third of the frame. Show their face clearly with a strong emotion (surprise, focus, excitement) appropriate to the topic and brief.
 Image 2: A stick figure illustration. IGNORE this image — only use it if the first image is unusable.`
-    : `Image 1: A stick figure illustration. Use this stick figure as your character reference. Transform it freely according to the brief: change its pose, facial expression, size, clothing, and styling. The final character should NOT look like a stick figure — instead, render it as an illustrated character that fits the thumbnail's visual style. The stick figure is just a placeholder for where a person would go in the composition.`
+    : `Image 1: A stick figure illustration. This IS your character for the thumbnail — keep it as a stick figure. Do NOT replace it with a realistic human or AI-generated person. Do NOT make it photorealistic.
+Instead:
+- Keep the stick figure style exactly as shown
+- Give it a strong pose and facial expression that matches the video topic and brief (shocked, excited, pointing, thinking etc.)
+- Make it bold, large, and expressive — big eyes, clear emotion, dynamic pose
+- Place it prominently in the thumbnail composition
+- The stick figure should feel like a fun intentional design choice, not a placeholder
+- Style the rest of the thumbnail (background, text, colors, graphics) to complement the stick figure aesthetic`
 
   const prompt = `You are designing a high-converting YouTube thumbnail.
 
