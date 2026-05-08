@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 interface InsightsTabProps {
   user: Record<string, unknown>
   competitor: Record<string, unknown>
+  plan?: 'free' | 'starter' | 'pro'
 }
 
 interface Insight {
@@ -23,7 +24,7 @@ const TYPE_STYLES: Record<string, { label: string; color: string; bg: string; bo
 
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 }
 
-export function InsightsTab({ competitor }: InsightsTabProps) {
+export function InsightsTab({ competitor, plan }: InsightsTabProps) {
   const [insights, setInsights] = useState<Insight[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -87,6 +88,49 @@ export function InsightsTab({ competitor }: InsightsTabProps) {
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryable, autoRetried])
+
+  // Free plan: show upgrade prompt instead of generating insights
+  if (plan === 'free') {
+    return (
+      <div style={{
+        padding: '56px 24px',
+        textAlign: 'center',
+        background: '#0a0a0a',
+        border: '1px dashed #1a1a1a',
+        borderRadius: 8,
+      }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: '50%',
+          background: '#111111', border: '1px solid #222222',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          margin: '0 auto 16px', fontSize: 18,
+        }}>
+          🔒
+        </div>
+        <p style={{ color: '#ffffff', fontSize: 15, fontWeight: 600, margin: '0 0 8px' }}>
+          AI Competitor Insights
+        </p>
+        <p style={{ color: '#555555', fontSize: 13, margin: '0 0 20px', lineHeight: 1.6, maxWidth: 340, marginLeft: 'auto', marginRight: 'auto' }}>
+          AI Competitor Insights are available on Starter and Pro plans.
+          Get deep analysis comparing your channel to each competitor.
+        </p>
+        <a
+          href="/pricing"
+          style={{
+            display: 'inline-block',
+            fontSize: 13, fontWeight: 600,
+            color: '#000000',
+            background: '#4ade80',
+            border: 'none', borderRadius: 6,
+            padding: '10px 22px',
+            textDecoration: 'none',
+          }}
+        >
+          Upgrade to unlock
+        </a>
+      </div>
+    )
+  }
 
   if (loading) {
     return (

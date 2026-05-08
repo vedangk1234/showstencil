@@ -15,8 +15,8 @@ export interface PlanLimits {
 
 export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
   free: {
-    totalCompetitors: 0,
-    tier1Count: 0,
+    totalCompetitors: 1, // 1 auto-tracked, 0 manual
+    tier1Count: 1,
     tier2Count: 0,
     dominatorCount: 0,
     searchedChannelsMax: 0,
@@ -25,9 +25,9 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     canReplaceSearched: false,
   },
   starter: {
-    totalCompetitors: 4, // 3 auto + 1 searched
-    tier1Count: 1,
-    tier2Count: 1,
+    totalCompetitors: 6, // 5 auto + 1 searched
+    tier1Count: 2,
+    tier2Count: 2,
     dominatorCount: 1,
     searchedChannelsMax: 1,
     searchesPerMonth: 1,

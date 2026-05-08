@@ -97,10 +97,6 @@ export async function POST(_req: Request) {
 
     const plan = resolvePlan(userData)
 
-    if (plan === 'free') {
-      return NextResponse.json({ error: 'upgrade_required' }, { status: 403 })
-    }
-
     // ── 2. Check ideas_refresh_available flag ─────────────────────────────
     // Controlled by user_settings.ideas_refresh_available
     // Set to false after generation, reset to true every Monday by cache-cleanup cron
@@ -257,7 +253,7 @@ export async function POST(_req: Request) {
     })
 
     // ── 6. Build prompt ────────────────────────────────────────────────────
-    const ideaCount = plan === 'pro' ? 10 : 3
+    const ideaCount = plan === 'pro' ? 10 : plan === 'starter' ? 3 : 1
     const channelName = userData?.name ?? 'Your Channel'
     const nicheId = userData?.niche_id ?? 'general'
     const subNiche = userData?.sub_niche ?? nicheId

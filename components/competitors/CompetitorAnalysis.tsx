@@ -57,6 +57,11 @@ export function CompetitorAnalysis({
 }: CompetitorAnalysisProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview')
 
+  // Resolve plan from stored subscription_plan — trials have plan set to 'starter'/'pro'
+  const rawPlan = (user.subscription_plan as string) || 'free'
+  const plan: 'free' | 'starter' | 'pro' =
+    rawPlan === 'starter' || rawPlan === 'pro' ? rawPlan : 'free'
+
   const matchScore = competitor.sub_niche_match_score as number | null
   const matchLabel =
     matchScore == null
@@ -231,7 +236,7 @@ export function CompetitorAnalysis({
           />
         )}
         {activeTab === 'videos' && <VideosTab competitorVideos={competitorVideos} />}
-        {activeTab === 'insights' && <InsightsTab user={user} competitor={competitor} />}
+        {activeTab === 'insights' && <InsightsTab user={user} competitor={competitor} plan={plan} />}
       </div>
     </div>
   )

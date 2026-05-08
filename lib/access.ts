@@ -61,9 +61,9 @@ async function getUserPlan(userId: string): Promise<PlanType> {
 // Features not in this map are available to all plans (including free).
 //
 const FEATURE_GATES: Record<string, PlanType> = {
-  'digest:weekly':  'starter',
   'alerts:daily':   'starter',
   'search:compare': 'pro',
+  'insights:ai':    'starter',
 }
 
 // ---------------------------------------------------------------------------
@@ -105,18 +105,20 @@ export async function canAccess(userId: string, feature: string): Promise<boolea
 // Limit helpers
 // ---------------------------------------------------------------------------
 
-/** Maximum number of competitors a user can track. */
+/** Maximum number of competitors a user can track (total slots including manual). */
 export async function getCompetitorLimit(userId: string): Promise<number> {
   const plan = await getUserPlan(userId)
-  return plan === 'pro' ? 10 : 3
+  if (plan === 'pro') return 13     // 10 auto + 3 manual
+  if (plan === 'starter') return 6  // 5 auto + 1 manual
+  return 1                          // 1 auto, 0 manual
 }
 
-/** Maximum number of video ideas generated per batch. Starter=3, Pro=10, Free=0. */
+/** Maximum number of video ideas generated per batch. Free=1, Starter=3, Pro=10. */
 export async function getIdeaLimit(userId: string): Promise<number> {
   const plan = await getUserPlan(userId)
   if (plan === 'pro') return 10
   if (plan === 'starter') return 3
-  return 0
+  return 1
 }
 
 /** Maximum number of viral videos shown. */
@@ -212,10 +214,10 @@ export function getUpgradeMessage(feature: string): string {
       'Unlock 5 uncovered topic suggestions with Pro. Upgrade to find more content gaps your competitors are missing.',
     'archive:12':
       'Access 12 weeks of history with Pro. Upgrade to spot long-term trends in your niche.',
-    'digest:weekly':
-      'Weekly digests are a Starter feature. Upgrade to get a personalised breakdown every Monday morning.',
     'alerts:daily':
       'Trend alerts are a Starter feature. Upgrade to get notified the same day a competitor video goes viral.',
+    'insights:ai':
+      'AI Competitor Insights are available on Starter and Pro plans. Upgrade to unlock deep AI-powered analysis comparing you to each competitor.',
   }
 
   return (

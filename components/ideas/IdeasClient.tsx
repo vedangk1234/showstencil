@@ -382,15 +382,22 @@ export function IdeasClient({
               </button>
             </div>
           </div>
+        ) : plan === 'free' ? (
+          <a
+            href="/pricing"
+            onClick={(e) => e.stopPropagation()}
+            title="Upgrade to Starter or Pro to generate thumbnails"
+            className="inline-block text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white transition-colors cursor-pointer"
+          >
+            Upgrade to generate thumbnails
+          </a>
         ) : (
           <button
             onClick={(e) => { e.stopPropagation(); openThumbnailModal(idea) }}
             disabled={!canGenerate}
             className="text-sm px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {plan === 'free'
-              ? 'Upgrade to generate'
-              : !canGenerate
+            {!canGenerate
               ? `Quota reached (${quotaUsed}/${quotaLimit} this month)`
               : 'Generate thumbnail'}
           </button>
@@ -542,31 +549,61 @@ export function IdeasClient({
                         Content brief
                       </p>
 
-                      {/* Hook — 3 variants */}
+                      {/* Hook — 3 variants (hook_2 and hook_3 locked for free plan) */}
                       <div className="mb-4">
                         <p className="text-white font-medium text-sm mb-2">Hook:</p>
                         <div className="flex flex-col gap-3">
-                          {(
-                            [
-                              { label: 'Safe',              color: 'text-zinc-500',  text: parseContentBullets(idea.content_brief)[0] },
-                              { label: 'Bolder',            color: 'text-amber-500', text: idea.hook_2 },
-                              { label: 'Most controversial', color: 'text-rose-500',  text: idea.hook_3 },
-                            ] as const
-                          ).map((hook, i) => (
-                            <div key={i} className="flex gap-2 text-sm items-start">
-                              <span className="font-mono text-zinc-600 shrink-0 w-4">{i + 1}.</span>
-                              {hook.text ? (
-                                <>
-                                  <span className={`text-xs uppercase tracking-widest ${hook.color} shrink-0 w-32`}>
-                                    {hook.label}
-                                  </span>
-                                  <span className="text-zinc-300">{hook.text}</span>
-                                </>
-                              ) : (
-                                <span className="text-zinc-700">—</span>
-                              )}
+                          {/* Hook 1 — Safe: always visible */}
+                          <div className="flex gap-2 text-sm items-start">
+                            <span className="font-mono text-zinc-600 shrink-0 w-4">1.</span>
+                            {parseContentBullets(idea.content_brief)[0] ? (
+                              <>
+                                <span className="text-xs uppercase tracking-widest text-zinc-500 shrink-0 w-32">Safe</span>
+                                <span className="text-zinc-300">{parseContentBullets(idea.content_brief)[0]}</span>
+                              </>
+                            ) : (
+                              <span className="text-zinc-700">—</span>
+                            )}
+                          </div>
+
+                          {plan === 'free' ? (
+                            /* Locked state for free users — hooks 2 and 3 combined */
+                            <div className="flex gap-2 text-sm items-start">
+                              <span className="font-mono text-zinc-600 shrink-0 w-4">2.</span>
+                              <div className="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-md px-3 py-2">
+                                <p className="text-zinc-500 text-xs mb-1">
+                                  Bolder and controversial hooks available on Starter and Pro
+                                </p>
+                                <a
+                                  href="/pricing"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                >
+                                  Upgrade to unlock →
+                                </a>
+                              </div>
                             </div>
-                          ))}
+                          ) : (
+                            /* Paid plan: show hooks 2 and 3 */
+                            ([
+                              { label: 'Bolder', color: 'text-amber-500', text: idea.hook_2 },
+                              { label: 'Most controversial', color: 'text-rose-500', text: idea.hook_3 },
+                            ] as const).map((hook, i) => (
+                              <div key={i} className="flex gap-2 text-sm items-start">
+                                <span className="font-mono text-zinc-600 shrink-0 w-4">{i + 2}.</span>
+                                {hook.text ? (
+                                  <>
+                                    <span className={`text-xs uppercase tracking-widest ${hook.color} shrink-0 w-32`}>
+                                      {hook.label}
+                                    </span>
+                                    <span className="text-zinc-300">{hook.text}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-zinc-700">—</span>
+                                )}
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
 
@@ -684,31 +721,48 @@ export function IdeasClient({
                             Content brief
                           </p>
 
-                          {/* Hook — 3 variants */}
+                          {/* Hook — 3 variants (hook_2/hook_3 locked for free) */}
                           <div className="mb-4">
                             <p className="text-white font-medium text-sm mb-2">Hook:</p>
                             <div className="flex flex-col gap-3">
-                              {(
-                                [
-                                  { label: 'Safe',              color: 'text-zinc-500',  text: parseContentBullets(idea.content_brief)[0] },
-                                  { label: 'Bolder',            color: 'text-amber-500', text: idea.hook_2 },
-                                  { label: 'Most controversial', color: 'text-rose-500',  text: idea.hook_3 },
-                                ] as const
-                              ).map((hook, i) => (
-                                <div key={i} className="flex gap-2 text-sm items-start">
-                                  <span className="font-mono text-zinc-600 shrink-0 w-4">{i + 1}.</span>
-                                  {hook.text ? (
-                                    <>
-                                      <span className={`text-xs uppercase tracking-widest ${hook.color} shrink-0 w-32`}>
-                                        {hook.label}
-                                      </span>
-                                      <span className="text-zinc-300">{hook.text}</span>
-                                    </>
-                                  ) : (
-                                    <span className="text-zinc-700">—</span>
-                                  )}
+                              <div className="flex gap-2 text-sm items-start">
+                                <span className="font-mono text-zinc-600 shrink-0 w-4">1.</span>
+                                {parseContentBullets(idea.content_brief)[0] ? (
+                                  <>
+                                    <span className="text-xs uppercase tracking-widest text-zinc-500 shrink-0 w-32">Safe</span>
+                                    <span className="text-zinc-300">{parseContentBullets(idea.content_brief)[0]}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-zinc-700">—</span>
+                                )}
+                              </div>
+                              {plan === 'free' ? (
+                                <div className="flex gap-2 text-sm items-start">
+                                  <span className="font-mono text-zinc-600 shrink-0 w-4">2.</span>
+                                  <div className="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-md px-3 py-2">
+                                    <p className="text-zinc-500 text-xs">Bolder and controversial hooks on Starter and Pro</p>
+                                  </div>
                                 </div>
-                              ))}
+                              ) : (
+                                ([
+                                  { label: 'Bolder', color: 'text-amber-500', text: idea.hook_2 },
+                                  { label: 'Most controversial', color: 'text-rose-500', text: idea.hook_3 },
+                                ] as const).map((hook, i) => (
+                                  <div key={i} className="flex gap-2 text-sm items-start">
+                                    <span className="font-mono text-zinc-600 shrink-0 w-4">{i + 2}.</span>
+                                    {hook.text ? (
+                                      <>
+                                        <span className={`text-xs uppercase tracking-widest ${hook.color} shrink-0 w-32`}>
+                                          {hook.label}
+                                        </span>
+                                        <span className="text-zinc-300">{hook.text}</span>
+                                      </>
+                                    ) : (
+                                      <span className="text-zinc-700">—</span>
+                                    )}
+                                  </div>
+                                ))
+                              )}
                             </div>
                           </div>
 
@@ -853,16 +907,21 @@ function Header({
         </div>
       </div>
 
-      {/* Starter plan indicator */}
-      {plan === 'starter' && ideaLimit > 0 && (
+      {/* Plan indicator for free and starter users */}
+      {(plan === 'free' || plan === 'starter') && ideaLimit > 0 && (
         <div style={{
           marginTop: 14, padding: '8px 12px', background: '#0a0a0a',
           border: '1px solid #1a1a1a', borderRadius: 6,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
           <p style={{ color: '#444444', fontSize: 12, margin: 0 }}>
-            {ideasCount} of {ideaLimit} ideas generated this week. Refreshes every Monday.
+            {ideasCount} of {ideaLimit} idea{ideaLimit !== 1 ? 's' : ''} generated this month. Refreshes every Monday.
           </p>
+          {plan === 'free' && (
+            <a href="/pricing" style={{ color: '#60a5fa', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap', textDecoration: 'none' }}>
+              Upgrade for more →
+            </a>
+          )}
         </div>
       )}
     </div>
