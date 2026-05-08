@@ -603,11 +603,17 @@ type Feature =
   | 'collaboration\_finder'     // pro only
   | 'idea\_briefs\_full'         // free: basic, starter+: full brief
 
+// Actual limits as of Day 39 (lib/access.ts + lib/plan-limits.ts):
+// getCompetitorLimit: free=1, starter=6 (5 auto + 1 manual), pro=13 (10 auto + 3 manual)
+// getIdeaLimit:       free=1, starter=3, pro=10
+// FEATURE_GATES:      'alerts:daily' → starter+, 'insights:ai' → starter+, 'search:compare' → pro only
+//                     digest:weekly gate removed — free users can view digests (monthly generation)
+
 const planLimits = {
-  free:    { competitors: 1, digestFrequency: 'monthly', alerts: false },
-  trial:   { competitors: 5, digestFrequency: 'weekly',  alerts: true  }, // same as starter
-  starter: { competitors: 5, digestFrequency: 'weekly',  alerts: true  },
-  pro:     { competitors: Infinity, digestFrequency: 'weekly', alerts: true },
+  free:    { competitors: 1, ideas: 1,  digestFrequency: 'monthly', alerts: false, insights: false },
+  trial:   { competitors: 6, ideas: 3,  digestFrequency: 'weekly',  alerts: true,  insights: true  }, // same as starter
+  starter: { competitors: 6, ideas: 3,  digestFrequency: 'weekly',  alerts: true,  insights: true  },
+  pro:     { competitors: 13, ideas: 10, digestFrequency: 'weekly',  alerts: true,  insights: true  },
 }
 ```
 
@@ -641,7 +647,7 @@ const planLimits = {
 | `lib/supabase.ts` | ✅ | createClient (anon) + createServiceClient (service role) |
 | `lib/youtube-analytics.ts` | ✅ | 5 authenticated functions, revenue 401 fix |
 | `lib/youtube-data.ts` | ✅ | 6 public Data API functions, velocity scoring |
-| `lib/niche-engine.ts` | ✅ | detectNiche (Claude), findCompetitors, saveDetectedNiche, detectAndAssignCompetitors (full auto-detection orchestrator) |
+| `lib/niche-engine.ts` | ✅ | detectNiche (Claude), findCompetitors, saveDetectedNiche, detectAndAssignCompetitors — now detects up to 2 Tier1 + 2 Tier2 + 1 Dominator (was 1+1+1); tier slot counts checked per-tier, not global |
 | `lib/gap-scorer.ts` | ✅ | calculateGapScore, buildCompetitorMetrics, estimateRevenue, saveGapScore |
 | `lib/db.ts` | ✅ | All snapshot/video/competitor CRUD + getCompetitorMetricsFromDB |
 | `lib/trend-detector.ts` | ✅ | detectViralVideos, findUncoveredTopics (Claude), getTrendingInNiche |
@@ -651,7 +657,7 @@ const planLimits = {
 | `lib/email.ts` | ✅ | sendWeeklyDigest, sendTrendAlert, checkAndSendAlerts, generateUnsubscribeToken |
 | `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — file deleted; use lib/lemonsqueezy.ts |
 | `lib/lemonsqueezy.ts` | ✅ | createCheckoutSession (LS JS SDK), getVariantId — replaces lib/stripe.ts |
-| `lib/access.ts` | ✅ | canAccess, getCompetitorLimit, getIdeaLimit, getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage |
+| `lib/access.ts` | ✅ | canAccess, getCompetitorLimit (free:1, starter:6, pro:13), getIdeaLimit (free:1, starter:3, pro:10), getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage; FEATURE_GATES: alerts:daily (starter+), insights:ai (starter+), search:compare (pro only) |
 | `lib/utils.ts` | ✅ | Shared formatting/date utilities — cn() Tailwind class merger (clsx + tailwind-merge) |
 | `lib/competitor-metrics.ts` | ✅ | calculateCompetitorMetrics — pure function, no DB calls; computes video_count, avg_views, avg_length, upload_frequency_30d, velocity_score_avg from a video row array |
 | `lib/image-utils.ts` | ✅ | padToSixteenNine (sharp) — server-side padding of any image to 16:9 by sampling edge pixel colour; used in thumbnail pipeline before Supabase upload |
@@ -660,12 +666,12 @@ const planLimits = {
 | `lib/sub-niche-detector.ts` | ✅ | detectSubNiche (Claude), calculateSubNicheSimilarity — granular sub-niche within a broad niche |
 | `lib/db.ts` (Day 13 additions) | ✅ | saveCompetitorSnapshot, getCompetitorSnapshots, getAllCompetitorSnapshotsForUser, updateCompetitorMetrics, saveCompetitorInsights, getCachedInsights |
 | `lib/dominator-finder.ts` | ✅ | findDominatorsForUser — niche-specific rules (sub_niche match for gaming/fitness/tech/education, broad for others) |
-| `lib/plan-limits.ts` | ✅ | PLAN_LIMITS config, getPlanLimits, canSearchThisMonth — Starter: 4 total/1 searched, Pro: 13/3 searched |
+| `lib/plan-limits.ts` | ✅ | PLAN_LIMITS config, getPlanLimits, canSearchThisMonth — Free: 1 total (1 auto Tier1), Starter: 6 total (2 T1 + 2 T2 + 1 Dom auto + 1 searched), Pro: 13 total (10 auto + 3 searched) |
 | `lib/competitor-matcher.ts` | ✅ | calculateTier, CompetitorMatch — tier from sub ratio, sub-niche enrichment |
 | `lib/channel-search.ts` | ✅ | normalizeChannelInput (URL/handle/channelId), getChannelData, cache read/write — 7-day TTL |
 | `lib/competitor-insights.ts` | ✅ | generateCompetitorInsights (Claude) — 6-8 typed insights; expanded with best/worst videos, revenue+RPM, gap scores, viral videos, subscriber growth trend; max_tokens 1800 |
-| `lib/gemini-image.ts` | ✅ | generateThumbnail — calls Gemini gemini-2.5-flash-image with creator photo (or stick figure fallback) + thumbnail brief + title; returns base64 PNG; handles real-photo vs illustrated-character mode |
-| `lib/thumbnail-storage.ts` | ✅ | uploadThumbnail (stores to Supabase Storage, returns public URL), deleteThumbnailFromStorage, loadStickFigureBase64 (reads public/stick-figure.png) |
+| `lib/gemini-image.ts` | ✅ | generateThumbnail — calls Gemini gemini-2.5-flash-image with creator photo + thumbnail brief + title; 16:9 safe-zone and widescreen framing enforced in prompt; no-photo mode sends solid-colour background prompt (stick figure removed Day 36); returns base64 PNG |
+| `lib/thumbnail-storage.ts` | ✅ | uploadThumbnail (stores to Supabase Storage, returns public URL), deleteThumbnailFromStorage; loadStickFigureBase64 removed (stick figure eliminated from thumbnail pipeline) |
 | `lib/access.ts` (thumbnail additions) | ✅ | canGenerateThumbnail — checks plan + monthly quota (free: 0, starter: 12, pro: 40); auto-resets quota monthly; returns ThumbnailQuota with quotaUsed/quotaLimit/quotaResetAt |
 
 ### API routes
@@ -705,6 +711,7 @@ const planLimits = {
 | `app/api/ideas/latest/route.ts` | ✅ | GET top 3 most recent ideas with non-null opportunity_score, ordered by generated_at DESC |
 | `app/api/onboarding/complete/route.ts` | ✅ | POST sets onboarding_completed=true — called by Step 5 and skip link |
 | `app/api/account/delete/route.ts` | ✅ | POST deletes all user data in FK order, cancels LS subscription if active, signs user out |
+| `app/api/subscription/cancel/route.ts` | ✅ | POST cancels LS subscription via DELETE /v1/subscriptions/:id API call; writes subscription_status='cancelled', subscription_plan='free' to DB |
 
 ### App pages
 
@@ -721,9 +728,17 @@ const planLimits = {
 | `app/(dashboard)/ideas/page.tsx` | ✅ | Video idea suggestions: scored idea cards with 3-hook content brief, thumbnail generation, mark-as-planned/made, done section |
 | `app/(dashboard)/settings/page.tsx` | ✅ | Settings page: plan info, interactive notification toggles + threshold slider wired to API, account actions |
 | `app/(dashboard)/settings/notifications/page.tsx` | ✅ | Redirects to `/settings` — notifications UI lives in NotificationSettings component on the main settings page |
+| `app/(dashboard)/dashboard/loading.tsx` | ✅ | Skeleton loading UI for dashboard route |
+| `app/(dashboard)/competitors/loading.tsx` | ✅ | Skeleton loading UI for competitors list route |
+| `app/(dashboard)/digest/loading.tsx` | ✅ | Skeleton loading UI for digest route |
+| `app/(dashboard)/ideas/loading.tsx` | ✅ | Skeleton loading UI for ideas route |
+| `app/(dashboard)/settings/loading.tsx` | ✅ | Skeleton loading UI for settings route |
+| `app/global-error.tsx` | ✅ | Sentry-wired global error boundary — captures errors to Sentry, shows recovery UI |
+| `instrumentation.ts` | ✅ | Next.js instrumentation hook — initialises Sentry on server startup |
 | `app/onboarding/page.tsx` | ✅ | 5-step onboarding wizard — URL state (?step=1..5), background sync on Step 1, skip anywhere Step 2+, browser back/forward syncs step state |
 | `app/page.tsx` | ✅ | Full landing page — Nagai hero, time-of-day sky system, feature grid, CTA, footer |
-| `app/pricing/page.tsx` | ✅ | Pricing table: Free / Starter / Pro feature comparison + Lemon Squeezy checkout CTA |
+| `app/pricing/page.tsx` | ✅ | Thin server wrapper — passes session + plan to PricingClient.tsx |
+| `app/pricing/PricingClient.tsx` | ✅ | Full 3-card pricing page (Free / Starter / Pro) — rebuilt Day 39; feature comparison rows, CTA buttons wired to LS checkout; highlights current plan; free tier card shows 1 competitor / 1 idea limits |
 | `app/privacy/page.tsx` | ✅ | Privacy policy — Termly-generated HTML embedded in dark-themed Next.js page |
 | `app/terms/page.tsx` | ✅ | Terms of use — Termly-generated HTML embedded in dark-themed Next.js page |
 
@@ -746,9 +761,9 @@ const planLimits = {
 | `components/competitors/tabs/ContentTab.tsx` | ✅ | Upload patterns, video formats, topic cluster analysis |
 | `components/competitors/tabs/GrowthTab.tsx` | ✅ | Growth velocity chart comparing user vs competitor snapshots |
 | `components/competitors/tabs/VideosTab.tsx` | ✅ | Recent competitor videos list with velocity score and viral flag |
-| `components/competitors/tabs/InsightsTab.tsx` | ✅ | Fetches Claude insights via /api/competitors/insights, renders typed insight cards |
-| `components/ideas/IdeasClient.tsx` | ✅ | Full ideas client — loading stages, 3-hook content brief (Safe/Bolder/Most controversial), thumbnail generation button/download/regenerate, mark-as-planned/made, done section, regenerate confirmation modal |
-| `components/ideas/ThumbnailGenerationModal.tsx` | ✅ | Multi-step modal — choose_source → camera/upload/google_profile/no_photo → generating → completed/failed; resizes images client-side before upload; framer-motion transitions |
+| `components/competitors/tabs/InsightsTab.tsx` | ✅ | Fetches Claude insights via /api/competitors/insights, renders typed insight cards; free plan shows locked upgrade prompt instead of generating |
+| `components/ideas/IdeasClient.tsx` | ✅ | Full ideas client — loading stages, 3-hook content brief (Safe/Bolder/Most controversial; hooks 2+3 locked for free plan), thumbnail generation (locked for free — shows upgrade link); mark-as-planned/made, done section, regenerate confirmation modal; regenerate button removed from individual cards (one thumbnail per idea) |
+| `components/ideas/ThumbnailGenerationModal.tsx` | ✅ | Multi-step modal — choose_source → camera/upload/google_profile/no_photo → generating → completed/failed; resizes images client-side before upload; framer-motion transitions; no-photo flow simplified (stick figure removed) |
 | `components/onboarding/OnboardingProgress.tsx` | ✅ | Animated dot progress bar — completed=green, current=wide white pill, future=zinc-700 |
 | `components/onboarding/StepWelcome.tsx` | ✅ | Hero step — Instrument Serif heading, italic amber accent, fires sync on "Let's go" |
 | `components/onboarding/StepConfirmChannel.tsx` | ✅ | Polls /api/user/profile, shows avatar/name/subs, "Wrong account" signout |
@@ -756,6 +771,7 @@ const planLimits = {
 | `components/onboarding/StepMeetCompetitors.tsx` | ✅ | Polls for all 3 tiers (2s × 30), staggered reveal, tier badges, partial/timeout fallback |
 | `components/onboarding/StepFirstAnalysis.tsx` | ✅ | 20s progress bar + stage labels, fetches gap score + latest idea, reveal with fallback |
 | `components/settings/NotificationSettings.tsx` | ✅ | Client Component — digest toggle, alerts toggle, threshold slider, optimistic updates, 2s "Saved ✓" indicator, slider disabled when alerts off |
+| `components/settings/CancelSubscription.tsx` | ✅ | Client Component — "Cancel Subscription" button + confirmation modal; calls POST /api/subscription/cancel; shown for 'active' and 'on_trial' users only |
 | `components/settings/DeleteAccount.tsx` | ✅ | Client Component — "Delete Account" button, confirmation modal requiring exact "CONFIRM" input, calls POST /api/account/delete, redirects to / on success |
 | `components/ui/expandable-card.tsx` | ✅ | Framer-motion expandable card primitive (title, image, description, children) — available but not yet wired to any dashboard feature |
 | `components/charts/SubscriberGrowthChart.tsx` | ✅ | Log-scale multi-line Recharts chart for subscriber growth over time (user + all competitors, colour-coded by tier) |
@@ -804,6 +820,104 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 4 — Day 39 (2026-05-08)
+
+**Sentry monitoring, loading skeletons, thumbnail overhaul, free tier gating, cancel subscription, pricing rebuild, 2T1+2T2 auto-detection**
+
+*Multiple sessions across Day 36–39. tsc --noEmit: zero errors after each session.*
+
+---
+
+**Session A — Sentry + loading skeletons + thumbnail fixes (commit 59b35c5)**
+
+*Sentry monitoring integrated:*
+* `sentry.client.config.ts` / `sentry.server.config.ts` / `sentry.edge.config.ts` — Sentry SDK initialisation for all three Next.js runtime contexts. DSN read from `SENTRY_DSN` env var.
+* `instrumentation.ts` — Next.js instrumentation hook, registers the Sentry server config on startup.
+* `app/global-error.tsx` — Global React error boundary wired to `Sentry.captureException`; shows a recovery UI and a "Reload page" button.
+* `next.config.ts` — wrapped with `withSentryConfig`; source maps enabled in production, tree-shaking for unused Sentry features.
+
+*Loading skeleton pages added for all 5 dashboard routes:*
+* `app/(dashboard)/dashboard/loading.tsx` — skeleton mimicking gap score panel + metric strip + two chart placeholders.
+* `app/(dashboard)/competitors/loading.tsx` — skeleton filter tabs + table rows.
+* `app/(dashboard)/digest/loading.tsx` — skeleton digest list cards.
+* `app/(dashboard)/ideas/loading.tsx` — skeleton idea grid.
+* `app/(dashboard)/settings/loading.tsx` — skeleton settings sections.
+All use inline `animate-pulse` Tailwind styles — no external component needed.
+
+*Thumbnail pipeline overhauled:*
+* `lib/gemini-image.ts` — stick figure removed from no-photo mode; no-photo now sends a solid-colour background prompt only. 16:9 safe-zone and widescreen framing enforced: explicit instruction to keep all key elements in the centred 80%×80% safe zone and fill the full 16:9 frame.
+* `lib/thumbnail-storage.ts` — `loadStickFigureBase64()` removed (no callers).
+* `app/api/ideas/[id]/generate-thumbnail/route.ts` — after `generateThumbnail` returns, calls `padToSixteenNine(buffer)` from `lib/image-utils.ts` before upload. Guarantees every stored thumbnail is exactly 16:9 regardless of Gemini's output aspect ratio.
+* `components/ideas/ThumbnailGenerationModal.tsx` — no-photo flow simplified: jumps directly to generating state, no stick figure preview step.
+* Regenerate thumbnail button removed from `IdeasClient.tsx` — one thumbnail per idea only. Existing thumbnails show Download button only. Eliminates quota drain from repeated regeneration.
+
+*Security hardening — see Security Audit Section 5.*
+
+---
+
+**Session B — Text-only logo + cancel subscription (commit 9a5f5ac)**
+
+*Text-only SHOWSTENCIL. logo:*
+* `app/layout.tsx` — Montserrat font (weight 700) added via `next/font/google`.
+* `app/(dashboard)/layout.tsx` — Sidebar logo replaced: was a boxed-S SVG icon, now plain `SHOWSTENCIL.` text in Montserrat 700, `text-sm tracking-widest uppercase text-white`.
+* `app/page.tsx` — Landing page nav + footer logo replaced with matching text treatment.
+* Sidebar search hint bar removed (the "⌘K — Search" shortcut hint that had no backing functionality).
+
+*Cancel subscription flow:*
+* `components/settings/CancelSubscription.tsx` — NEW Client Component. "Cancel Subscription" button opens a confirmation modal. Confirm calls `POST /api/subscription/cancel`, shows inline success/error, reloads on success.
+* `app/api/subscription/cancel/route.ts` — NEW. Auth-gated. Reads `lemon_squeezy_subscription_id` from DB. Calls LS `DELETE /v1/subscriptions/:id`. On success: writes `subscription_status='cancelled'`, `subscription_plan='free'` to users table. Returns `{ success: true }` or 502 with LS error body on failure.
+* `app/(dashboard)/settings/page.tsx` — `CancelSubscription` rendered in Subscription section when `subscription_status === 'active'`.
+
+---
+
+**Session C — Free tier gating + pricing rebuild (commit 0aeaf2e)**
+
+*`lib/access.ts` — plan limits updated:*
+* `getCompetitorLimit`: free → 1 (was effectively 0), starter → 6 (was 3), pro → 13 (unchanged).
+* `getIdeaLimit`: free → 1 (was 0 — blocked entirely), starter → 3, pro → 10.
+* `FEATURE_GATES`: removed `'digest:weekly': 'starter'`. Added `'insights:ai': 'starter'` — AI Competitor Insights require Starter or Pro.
+
+*`lib/plan-limits.ts` — PLAN_LIMITS config updated:*
+* `free`: `totalCompetitors: 1`, `tier1Count: 1` (was 0/0 — free users got no auto-detected competitors).
+* `starter`: `totalCompetitors: 6` (was 4), `tier1Count: 2` (was 1), `tier2Count: 2` (was 1).
+
+*`components/competitors/tabs/InsightsTab.tsx` — free plan gate:*
+* `plan?: 'free' | 'starter' | 'pro'` prop added. Free plan renders a locked state: lock icon, explanation, "Upgrade to unlock" CTA → `/pricing`. No API call made.
+
+*`components/ideas/IdeasClient.tsx` — hooks + thumbnail gating for free plan:*
+* Hooks 2 + 3 (Bolder / Most Controversial): free renders a single locked block in place of both, with upgrade link. Hook 1 (Safe) always visible.
+* Thumbnail button: free plan shows `<a href="/pricing">Upgrade to generate thumbnails</a>` instead of a disabled button.
+
+*`app/pricing/PricingClient.tsx` — NEW 3-card pricing page:*
+* Three cards: Free (grey), Starter ($29/mo, blue), Pro ($79/mo, gold). Feature comparison rows per card. CTA buttons call `/api/create-checkout-session`. Current plan highlighted.
+
+---
+
+**Session D — Delete account + extend cancel to trial users (commit 939c895)**
+
+*`app/(dashboard)/settings/page.tsx` — Cancel Subscription extended:*
+* `CancelSubscription` now renders when `subscription_status === 'active' || subscription_status === 'on_trial'` (previously active-only). Trial users can now self-cancel.
+* Danger Zone section added below Subscription: contains `DeleteAccount` component.
+
+*`components/settings/DeleteAccount.tsx` — NEW:*
+* "Delete Account" button opens a modal requiring the user to type `CONFIRM` exactly before proceeding.
+* Calls `POST /api/account/delete`. On success, calls `signOut({ callbackUrl: '/' })`.
+
+*`app/api/account/delete/route.ts` — NEW:*
+* Auth-gated. Cancels LS subscription if `lemon_squeezy_subscription_id` is set (best-effort, logs error but proceeds). Deletes all user data in FK order: `thumbnail_jobs → ideas → digests → trends → gap_scores → competitor_videos → competitor_snapshots → competitors → channel_snapshots → videos → user_settings → user_search_history → dominator_history → users`.
+
+---
+
+**Session E — 2 Tier1 + 2 Tier2 + 1 Dominator auto-detection (commit e84c312)**
+
+*`lib/niche-engine.ts` — `detectAndAssignCompetitors` rewritten:*
+* Old: 1 Tier1 + 1 Tier2 + 1 Dominator. Tier tracking: `Set<number>` — once any competitor in a tier existed, tier was never refilled.
+* New: up to 2 Tier1 + 2 Tier2 + 1 Dominator. Tier tracking: `Record<1|2|3, number>` counts; slots remaining = target − current. Only missing slots are assigned on each run, so re-running detection after a competitor is deleted correctly fills just the missing slot without touching filled tiers.
+* Quota: ~101 + up to 5 × 203 ≈ 1116 units per run (was ~710).
+* Log output: `"T1:N T2:N Dom:N — slots remaining = T1:N T2:N Dom:N"` before and after assignment for clear Vercel log diagnostics.
+
+---
 
 ### Week 3 — Day 37 (2026-05-07)
 
@@ -2345,7 +2459,7 @@ GROUP D — Public (intentionally no auth):
 * Three competitor tiers: Tier 1 (1x-3x user's subs), Tier 2 (3x-10x), Tier 3 = Dominator (>10x). findCompetitors searches 0.5x-3x range but gap scorer filters to larger-than-user only. Dominators are excluded from the dashboard strip — they appear only in /competitors with their own badge.
 * Vercel Hobby plan limits crons to once-per-day — trend detection downgraded from every 6 hours to daily at 6 AM UTC. Upgrade to Pro to restore 6-hour cadence.
 * Topic coverage removed from gap score display (Day 9): stub returns 0, showing it is misleading. Will be added back when topic analysis is implemented.
-* Competitor plan limits (Day 10): Starter = 4 total (3 auto + 1 searched), Pro = 13 total (10 auto + 3 searched). Free plan gets 0 competitors — must upgrade to see any.
+* Competitor plan limits (Day 10, updated Day 39): Free = 1 auto Tier1; Starter = 6 total (2 T1 + 2 T2 + 1 Dom auto + 1 searched); Pro = 13 total (10 auto + 3 searched). Free users now get exactly 1 auto-detected Tier1 competitor so they see real data without upgrading.
 * Dominator matching uses niche-specific rules (Day 10): gaming/fitness/tech/education require sub-niche similarity; finance/beauty/travel/business/entertainment/diy/vlog/cooking use broad niche match. Avoids assigning a gaming Dominator to a fitness creator.
 * Channel search cache (Day 11): searched_channels_cache TTL is 7 days. This avoids repeat YouTube API quota usage for popular channels searched by multiple users.
 * Competitor insights use InsightsTab lazy-load pattern (Day 11): Claude insights are generated on-demand when the user clicks the Insights tab, not at page load. This avoids burning Claude API credits for users who never view insights.
@@ -2382,6 +2496,12 @@ GROUP D — Public (intentionally no auth):
 * Sync fires on Step 1 "Let's go", not on page load (Day 24): POST /api/sync is called when the user clicks "Let's go" — not on onboarding page load. This prevents wasted sync calls if the user lands on /onboarding and immediately bounces. The `syncStarted` boolean guard in the page component ensures it fires exactly once per onboarding session regardless of re-renders.
 * Step 5 (FirstAnalysis) uses a fixed-schedule timer, not per-stage timers (Day 24): A single setInterval from mount drives the progress bar (elapsed / TOTAL_DURATION × 100). Stage label rotation uses a separate array of cumulative-offset setTimeouts built once on mount. This avoids the drift and restart issues that per-stage interval/timeout pairs cause when effects re-run.
 * onboarding_completed is set to true only at the end — never mid-flow (Day 24): Both "Take me to my dashboard" (Step 5) and "Skip onboarding →" (Steps 2-5) fire POST /api/onboarding/complete before redirecting. The dashboard layout checks this flag and redirects back to /onboarding if still false. This means partial onboarding completions are recoverable — the user returns to Step 1 (or whatever ?step= is in the URL) on next login.
+* Free tier gets 1 competitor + 1 idea, not 0 (Day 39): Previously free users got 0 auto-detected competitors and couldn't generate ideas — the product was completely unusable without upgrading. Changed to 1 Tier1 competitor (auto-detected) and 1 idea per generation. Free users see the core value loop but hit limits immediately, making the upgrade prompt meaningful rather than theoretical.
+* AI Insights gated to Starter+ not Free (Day 39): `insights:ai` added to FEATURE_GATES. The InsightsTab renders a locked upgrade card for free users instead of calling the Claude API. Avoids burning Claude credits on free users who may never convert. Same principle applies to hooks 2+3 and thumbnail generation — free users see the feature exists and hit a locked state rather than getting an opaque error.
+* Stick figure removed from thumbnail generation (Day 39): No-photo thumbnail mode previously passed a stick figure PNG to Gemini as a character reference to "transform". In practice this produced inconsistent illustrated characters that didn't feel like thumbnails. Removed entirely — no-photo mode now uses a solid-colour background prompt. The stick-figure code path (loadStickFigureBase64, conditional branch in gemini-image.ts, step in ThumbnailGenerationModal) was all deleted.
+* One thumbnail per idea — regenerate button removed (Day 39): Allowing regeneration per idea created a quota drain pattern (users would regenerate until they liked the result, burning 5-10 quota in one session). Removing the button limits each idea to one thumbnail. Users who want a different result must download the current one, then regenerate ideas (which deletes all thumbnails) — a meaningful friction barrier that preserves quota.
+* 2 Tier1 + 2 Tier2 + 1 Dominator target for Starter (Day 39): Single-competitor-per-tier detection was insufficient for the 5-competitor Starter slot count. With 2+2+1 = 5 auto-detected competitors the Starter limit is fully utilised. Detection tracks actual slot counts per tier (not just presence/absence) so partial fills (e.g. only 1 Tier1 found) are correctly retried on subsequent syncs.
+* Text-only logo avoids boxed icon at small sizes (Day 39): The previous boxed-S SVG looked like a generic icon at 14px sidebar width. Replaced with plain "SHOWSTENCIL." in Montserrat 700 — matches the brand name exactly, readable at all sizes, no icon-to-text ambiguity in narrow sidebars.
 
 \---
 
@@ -2398,6 +2518,8 @@ GROUP D — Public (intentionally no auth):
 * Anthropic API: https://docs.anthropic.com
 
 \---
+
+*Last updated: 2026-05-08 — Day 39: Sentry monitoring integrated (client/server/edge configs + instrumentation.ts + global-error.tsx). Loading skeleton pages for all 5 dashboard routes. Thumbnail pipeline overhauled: stick figure removed, 16:9 safe-zone prompt, server-side padToSixteenNine via sharp. Regenerate thumbnail button removed — one per idea. Text-only SHOWSTENCIL. logo (Montserrat 700). Cancel subscription flow: CancelSubscription.tsx + POST /api/subscription/cancel. Free tier now gets 1 competitor + 1 idea (was blocked). Insights:ai gated to Starter+ (free shows locked prompt). Bolder/controversial hooks locked for free. Thumbnail button locked for free. Pricing page rebuilt as PricingClient.tsx 3-card layout. Delete account Danger Zone extended: cancel button now shows for on_trial too. Auto-detection upgraded: 2 Tier1 + 2 Tier2 + 1 Dominator (was 1+1+1). plan-limits.ts: free={1 total}, starter={6 total, 2T1+2T2+1Dom}. tsc --noEmit: zero errors.*
 
 *Last updated: 2026-05-08 — Day 38: Cancel subscription button now shows for both 'active' and 'on_trial' users (was active-only). Added Danger Zone section to settings page with DeleteAccount component (modal requires exact "CONFIRM" input). Created POST /api/account/delete route — cancels LS subscription if active, deletes all user data in FK order (thumbnail_jobs → ideas → digests → trends → gap_scores → competitor_videos → competitor_snapshots → competitors → channel_snapshots → videos → user_settings → user_search_history → dominator_history → users), signs user out. tsc --noEmit: zero errors.*
 
@@ -2450,5 +2572,5 @@ Previous: 2026-04-28 — Day 15 (part 2): Weekly digest email fixed — sendWeek
 Previous: 2026-04-27 — Day 14 (part 2): Dashboard metric strip null-guard (filter to validSnapshots), saveChannelSnapshot null write guard, seed script competitor dedup fix (match by channel_name not youtube_channel_id), null snapshot cleanup step in seed, duplicate competitor rows removed from DB. Day 14 (part 1): Cron wiring (refresh-data writes competitor metrics + snapshots, wipes insights cache; dominator-refresh skip-if-exists), insights route fixed to use on-row cache, dashboard UI overhauled (SubscriberGrowthChart, niche avg line, gap unit labels, 1 top idea), competitor tabs rewritten (OverviewTab, ContentTab, VideosTab), manual add lock wired end-to-end (track route + ChannelSearchBar modal + competitors page lock query).
 Previous: 2026-04-26 — Day 13: Database foundation — competitor_snapshots table, 7 new columns on competitors, 6 new lib/db.ts functions, seed script fully rewritten to upsert mode with 31-day history for user + all 3 competitors, correct tier distribution (Tier1/Tier2/Dominator), 15 own videos.
 Previous: 2026-04-26 — Day 12: Cron sync fixed — wrong subscription_status filter + token expiry auto-refresh.
-Next update due: End of Week 3*
+Next update due: End of Week 4*
 
