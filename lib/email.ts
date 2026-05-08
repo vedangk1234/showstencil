@@ -38,12 +38,6 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? 'https://showstencil.com'
-const FROM_EMAIL =
-  process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev'
-
-if (!process.env.RESEND_FROM_EMAIL) {
-  console.warn('[email] RESEND_FROM_EMAIL not set — using Resend shared domain fallback')
-}
 
 // ---------------------------------------------------------------------------
 // generateUnsubscribeToken
@@ -216,7 +210,8 @@ export async function sendWeeklyDigest(
     const subject = `Your weekly analysis is ready, ${firstName}`
 
     const { data: sendData, error: sendError } = await resend.emails.send({
-      from: `ShowStencil <${FROM_EMAIL}>`,
+      from: 'ShowStencil <digest@showstencil.com>',
+      replyTo: 'vedangk2912@gmail.com',
       to: user.email,
       subject,
       html: emailHtml,
@@ -339,7 +334,8 @@ export async function sendTrendAlert(
     const subject = `Trend alert: "${viralVideo.title}" just hit ${formatViewCount(viralVideo.viewCount)} views in your niche`
 
     const { data: sendData, error: sendError } = await resend.emails.send({
-      from: `ShowStencil Alerts <${FROM_EMAIL}>`,
+      from: 'ShowStencil Alerts <trend@showstencil.com>',
+      replyTo: 'vedangk2912@gmail.com',
       to: user.email,
       subject,
       html: emailHtml,
