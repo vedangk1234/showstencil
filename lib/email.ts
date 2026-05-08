@@ -334,7 +334,7 @@ export async function sendTrendAlert(
     const subject = `Trend alert: "${viralVideo.title}" just hit ${formatViewCount(viralVideo.viewCount)} views in your niche`
 
     const { data: sendData, error: sendError } = await resend.emails.send({
-      from: 'ShowStencil Alerts <trend@showstencil.com>',
+      from: 'ShowStencil <digest@showstencil.com>',
       replyTo: 'vedangk2912@gmail.com',
       to: user.email,
       subject,
