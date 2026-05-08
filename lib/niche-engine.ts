@@ -708,18 +708,18 @@ async function assignCompetitor(
 // ---------------------------------------------------------------------------
 
 /**
- * One-time orchestrator: finds exactly 1 Tier 1, 1 Tier 2, and 1 Dominator
+ * One-time orchestrator: finds up to 2 Tier 1, 2 Tier 2, and 1 Dominator
  * competitor for a user, then inserts them with full video data.
  *
- * Called from /api/sync when the user has 0 active auto-detected competitors.
- * Never throws — partial results are saved and logged.
+ * Called from /api/sync when any tier has fewer than its target count of
+ * active auto-detected competitors. Never throws — partial results are saved.
  *
  * Tier definitions (ratio = competitorSubs / userSubs):
- *   Tier 1: 0.5x – 3x   (peer comparison)
- *   Tier 2: 3x – 10x    (aspirational)
- *   Tier 3 / Dominator: >10x (niche ceiling)
+ *   Tier 1: 0.5x – 3x   (peer comparison, target: 2 channels)
+ *   Tier 2: 3x – 10x    (aspirational, target: 2 channels)
+ *   Tier 3 / Dominator: >10x (niche ceiling, target: 1 channel)
  *
- * @quota ~101 (initial search) + up to 3 × 203 (full profile each) ≈ 710 units total
+ * @quota ~101 (initial search) + up to 5 × 203 (full profile each) ≈ 1116 units total
  */
 export async function detectAndAssignCompetitors(
   userId: string,
@@ -753,13 +753,21 @@ export async function detectAndAssignCompetitors(
     (existingRows ?? []).map((r) => r.youtube_channel_id as string),
   );
 
-  // Which tiers are already covered by active auto-detected competitors
-  const filledTiers = new Set(
-    (existingRows ?? [])
-      .filter((r) => r.is_auto_detected && r.is_active && r.tier != null)
-      .map((r) => r.tier as number),
+  // Count how many active auto-detected competitors already exist per tier
+  const tierCounts: Record<1 | 2 | 3, number> = { 1: 0, 2: 0, 3: 0 };
+  for (const r of existingRows ?? []) {
+    if (r.is_auto_detected && r.is_active && r.tier != null) {
+      const t = r.tier as 1 | 2 | 3;
+      if (t === 1 || t === 2 || t === 3) tierCounts[t]++;
+    }
+  }
+  // Slots remaining per tier (Starter targets: 2 Tier1, 2 Tier2, 1 Dominator)
+  const tier1Slots = Math.max(0, 2 - tierCounts[1]);
+  const tier2Slots = Math.max(0, 2 - tierCounts[2]);
+  const domSlots   = Math.max(0, 1 - tierCounts[3]);
+  console.log(
+    `[niche-engine] detectAndAssignCompetitors: existing per tier = T1:${tierCounts[1]} T2:${tierCounts[2]} Dom:${tierCounts[3]} — slots remaining = T1:${tier1Slots} T2:${tier2Slots} Dom:${domSlots}`,
   );
-  console.log(`[niche-engine] detectAndAssignCompetitors: filled tiers = [${[...filledTiers].join(',')}]`);
 
   console.log(
     `[niche-engine] detectAndAssignCompetitors: user ${userId}, niche "${nicheId}", userSubs ${userSubscriberCount}`,
@@ -793,50 +801,57 @@ export async function detectAndAssignCompetitors(
     (c) => c.subscriberCount / userSubscriberCount > 10,
   );
 
+  // Pick up to 2 active Tier 1 candidates (sorted by closeness to 2× user subs)
   const target1 = userSubscriberCount * 2;
   const sortedTier1 = [...tier1Pool].sort(
     (a, b) => Math.abs(a.subscriberCount - target1) - Math.abs(b.subscriberCount - target1),
   );
-  let bestTier1: CompetitorCandidate | null = null;
+  const activeTier1: CompetitorCandidate[] = [];
   for (const candidate of sortedTier1) {
+    if (activeTier1.length >= tier1Slots) break;
     const active = await meetsActivityThreshold(candidate.channelId);
-    if (active) { bestTier1 = candidate; break; }
+    if (active) activeTier1.push(candidate);
   }
 
+  // Pick up to 2 active Tier 2 candidates (sorted by closeness to 5× user subs)
   const target2 = userSubscriberCount * 5;
   const sortedTier2 = [...tier2Pool].sort(
     (a, b) => Math.abs(a.subscriberCount - target2) - Math.abs(b.subscriberCount - target2),
   );
-  let bestTier2: CompetitorCandidate | null = null;
+  const activeTier2: CompetitorCandidate[] = [];
   for (const candidate of sortedTier2) {
+    if (activeTier2.length >= tier2Slots) break;
     const active = await meetsActivityThreshold(candidate.channelId);
-    if (active) { bestTier2 = candidate; break; }
+    if (active) activeTier2.push(candidate);
   }
 
+  // Pick up to 1 active Dominator (largest sub count wins)
   const sortedDom = [...dominatorPool].sort((a, b) => b.subscriberCount - a.subscriberCount);
-  let bestDom: CompetitorCandidate | null = null;
+  const activeDom: CompetitorCandidate[] = [];
   for (const candidate of sortedDom) {
+    if (activeDom.length >= domSlots) break;
     const active = await meetsActivityThreshold(candidate.channelId);
-    if (active) { bestDom = candidate; break; }
+    if (active) activeDom.push(candidate);
   }
 
-  if (!bestTier1)
+  if (activeTier1.length < tier1Slots)
     console.warn(
-      `[niche-engine] detectAndAssignCompetitors: no active Tier 1 candidate (need ${Math.round(userSubscriberCount * 0.5)}–${Math.round(userSubscriberCount * 3)} subs, ≥3 videos/30d)`,
+      `[niche-engine] detectAndAssignCompetitors: only ${activeTier1.length}/${tier1Slots} Tier 1 candidates found (need ${Math.round(userSubscriberCount * 0.5)}–${Math.round(userSubscriberCount * 3)} subs, ≥3 videos/30d)`,
     );
-  if (!bestTier2)
+  if (activeTier2.length < tier2Slots)
     console.warn(
-      `[niche-engine] detectAndAssignCompetitors: no active Tier 2 candidate (need ${Math.round(userSubscriberCount * 3)}–${Math.round(userSubscriberCount * 10)} subs, ≥3 videos/30d)`,
+      `[niche-engine] detectAndAssignCompetitors: only ${activeTier2.length}/${tier2Slots} Tier 2 candidates found (need ${Math.round(userSubscriberCount * 3)}–${Math.round(userSubscriberCount * 10)} subs, ≥3 videos/30d)`,
     );
-  if (!bestDom)
+  if (activeDom.length < domSlots)
     console.warn(
       `[niche-engine] detectAndAssignCompetitors: no active Dominator candidate (need >${Math.round(userSubscriberCount * 10)} subs, ≥3 videos/30d)`,
     );
 
-  const toAssign: { candidate: CompetitorCandidate; tier: 1 | 2 | 3 }[] = [];
-  if (bestTier1 && !filledTiers.has(1)) toAssign.push({ candidate: bestTier1, tier: 1 });
-  if (bestTier2 && !filledTiers.has(2)) toAssign.push({ candidate: bestTier2, tier: 2 });
-  if (bestDom && !filledTiers.has(3)) toAssign.push({ candidate: bestDom, tier: 3 });
+  const toAssign: { candidate: CompetitorCandidate; tier: 1 | 2 | 3 }[] = [
+    ...activeTier1.map((candidate) => ({ candidate, tier: 1 as const })),
+    ...activeTier2.map((candidate) => ({ candidate, tier: 2 as const })),
+    ...activeDom.map((candidate)   => ({ candidate, tier: 3 as const })),
+  ];
 
   if (toAssign.length === 0) {
     console.warn(
