@@ -704,6 +704,7 @@ const planLimits = {
 | `app/api/gap-score/latest/route.ts` | ✅ | GET most recent gap_scores row (overall_score, primary_bottleneck, all per-metric scores) |
 | `app/api/ideas/latest/route.ts` | ✅ | GET top 3 most recent ideas with non-null opportunity_score, ordered by generated_at DESC |
 | `app/api/onboarding/complete/route.ts` | ✅ | POST sets onboarding_completed=true — called by Step 5 and skip link |
+| `app/api/account/delete/route.ts` | ✅ | POST deletes all user data in FK order, cancels LS subscription if active, signs user out |
 
 ### App pages
 
@@ -755,6 +756,7 @@ const planLimits = {
 | `components/onboarding/StepMeetCompetitors.tsx` | ✅ | Polls for all 3 tiers (2s × 30), staggered reveal, tier badges, partial/timeout fallback |
 | `components/onboarding/StepFirstAnalysis.tsx` | ✅ | 20s progress bar + stage labels, fetches gap score + latest idea, reveal with fallback |
 | `components/settings/NotificationSettings.tsx` | ✅ | Client Component — digest toggle, alerts toggle, threshold slider, optimistic updates, 2s "Saved ✓" indicator, slider disabled when alerts off |
+| `components/settings/DeleteAccount.tsx` | ✅ | Client Component — "Delete Account" button, confirmation modal requiring exact "CONFIRM" input, calls POST /api/account/delete, redirects to / on success |
 | `components/ui/expandable-card.tsx` | ✅ | Framer-motion expandable card primitive (title, image, description, children) — available but not yet wired to any dashboard feature |
 | `components/charts/SubscriberGrowthChart.tsx` | ✅ | Log-scale multi-line Recharts chart for subscriber growth over time (user + all competitors, colour-coded by tier) |
 | `emails/weekly-digest.tsx` | ✅ | React Email template: gap score badge, metrics, ideas, competitor moves, CTA |
@@ -2396,6 +2398,8 @@ GROUP D — Public (intentionally no auth):
 * Anthropic API: https://docs.anthropic.com
 
 \---
+
+*Last updated: 2026-05-08 — Day 38: Cancel subscription button now shows for both 'active' and 'on_trial' users (was active-only). Added Danger Zone section to settings page with DeleteAccount component (modal requires exact "CONFIRM" input). Created POST /api/account/delete route — cancels LS subscription if active, deletes all user data in FK order (thumbnail_jobs → ideas → digests → trends → gap_scores → competitor_videos → competitor_snapshots → competitors → channel_snapshots → videos → user_settings → user_search_history → dominator_history → users), signs user out. tsc --noEmit: zero errors.*
 
 *Last updated: 2026-05-07 — Day 37: CLAUDE.md full audit. Updated Feature Build Status to match actual codebase: lib/utils.ts, privacy/terms pages, digest/[id] page marked ✅; cron/daily marked 🗑️ deleted. Added 14 undocumented files: lib/lemonsqueezy.ts, lib/competitor-metrics.ts, lib/image-utils.ts, lib/niche-images.ts, lib/env-validation.ts; API routes competitors/[id]/sync, thumbnail-jobs/[jobId]/status, health; 14 new scripts. Added "Planned But Not Yet Built" section with Revenue Forecast, Whitespace Map, Collaboration Finder, and 4 smaller gaps. Tech stack Payments updated from Stripe → Lemon Squeezy.*
 

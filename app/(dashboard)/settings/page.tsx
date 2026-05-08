@@ -5,6 +5,7 @@ import { getUser, getUserSettings } from '@/lib/db'
 import type { User } from '@/types'
 import NotificationSettings from '@/components/settings/NotificationSettings'
 import CancelSubscription from '@/components/settings/CancelSubscription'
+import DeleteAccount from '@/components/settings/DeleteAccount'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ export default async function SettingsPage() {
                 Upgrade Plan
               </Link>
             )}
-            {user && user.subscription_status === 'active' && (user.subscription_plan === 'starter' || user.subscription_plan === 'pro') && (
+            {user && (user.subscription_status === 'active' || user.subscription_status === 'on_trial') && (user.subscription_plan === 'starter' || user.subscription_plan === 'pro' || user.subscription_status === 'on_trial') && (
               <CancelSubscription currentPeriodEnd={user.current_period_end} />
             )}
           </div>
@@ -197,6 +198,33 @@ export default async function SettingsPage() {
           </a>
         </div>
       </Section>
+
+      {/* Danger Zone */}
+      <div style={{ marginBottom: 24 }}>
+        <p style={{
+          color: '#7f1d1d',
+          fontSize: 11,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          margin: '0 0 10px',
+        }}>
+          Danger Zone
+        </p>
+        <div style={{
+          background: '#0a0a0a',
+          border: '1px solid #3a1a1a',
+          borderRadius: 8,
+          overflow: 'hidden',
+        }}>
+          <div style={{ padding: '16px' }}>
+            <p style={{ color: '#888888', fontSize: 13, margin: '0 0 12px', lineHeight: 1.6 }}>
+              Permanently delete your account and all associated data. This action cannot be undone.
+            </p>
+            <DeleteAccount />
+          </div>
+        </div>
+      </div>
 
     </div>
   )
