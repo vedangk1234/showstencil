@@ -186,12 +186,18 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
       .eq('is_auto_detected', true)
       .eq('is_active', true)
 
-    const assignedTiers = new Set((existingAutoRows ?? []).map((r: { tier: number | null }) => r.tier))
-    const missingTier = !assignedTiers.has(1) || !assignedTiers.has(2) || !assignedTiers.has(3)
+    const tierCounts: Record<1 | 2 | 3, number> = { 1: 0, 2: 0, 3: 0 }
+    for (const r of existingAutoRows ?? []) {
+      const t = r.tier as 1 | 2 | 3
+      if (t === 1 || t === 2 || t === 3) tierCounts[t]++
+    }
+    // Targets: 2 Tier 1, 2 Tier 2, 1 Dominator. Fire detection if any tier is below target.
+    console.log(`[sync DEBUG] checking competitor slots — existingAutoRows count: ${(existingAutoRows ?? []).length} (T1:${tierCounts[1]} T2:${tierCounts[2]} Dom:${tierCounts[3]})`)
+    const missingTier = tierCounts[1] < 2 || tierCounts[2] < 2 || tierCounts[3] < 1
 
     if (missingTier) {
       console.log(
-        `[sync] Missing competitor tiers ${[1, 2, 3].filter((t) => !assignedTiers.has(t)).join(',')} — running detection for user ${userId}`,
+        `[sync] Competitor slots below target (T1:${tierCounts[1]}/2 T2:${tierCounts[2]}/2 Dom:${tierCounts[3]}/1) — running detection for user ${userId}`,
       )
 
       const { data: latestSnapshot } = await supabase
