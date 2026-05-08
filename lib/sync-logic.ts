@@ -192,7 +192,6 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
       if (t === 1 || t === 2 || t === 3) tierCounts[t]++
     }
     // Targets: 2 Tier 1, 2 Tier 2, 1 Dominator. Fire detection if any tier is below target.
-    console.log(`[sync DEBUG] checking competitor slots — existingAutoRows count: ${(existingAutoRows ?? []).length} (T1:${tierCounts[1]} T2:${tierCounts[2]} Dom:${tierCounts[3]})`)
     const missingTier = tierCounts[1] < 2 || tierCounts[2] < 2 || tierCounts[3] < 1
 
     if (missingTier) {
