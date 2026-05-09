@@ -87,18 +87,34 @@ export default function LandingPage() {
     }
     if (starsEl) starsEl.innerHTML = starHTML
 
-    function etHours(){
-      const fmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York',
-        hour12: false,
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
-      })
-      const parts = Object.fromEntries(fmt.formatToParts(new Date()).map(p => [p.type, p.value]))
-      let h = parseInt(parts.hour, 10)
-      if (h === 24) h = 0
-      const m = parseInt(parts.minute, 10)
-      const s = parseInt(parts.second, 10)
-      return h + m/60 + s/3600
+    function etHours(): number {
+      try {
+        const now = new Date()
+        const fmt = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York',
+          hour12: false,
+          hour: '2-digit', minute: '2-digit', second: '2-digit'
+        })
+        const parts = Object.fromEntries(fmt.formatToParts(now).map(p => [p.type, p.value]))
+        let h = parseInt(parts.hour, 10)
+        if (h === 24) h = 0
+        const m = parseInt(parts.minute, 10)
+        const s = parseInt(parts.second, 10)
+        // Validate the timezone conversion actually produced a New York offset.
+        // ET is always UTC-4 (EDT, summer) or UTC-5 (EST, winter).
+        // If the browser silently fell back to the device's local timezone
+        // (e.g. old Android WebView, Reddit in-app browser), the computed
+        // offset will be wrong and we default to 19.0 (7 pm = sunset scene).
+        const utcDecimal = now.getUTCHours() + now.getUTCMinutes() / 60
+        const etDecimal  = h + m / 60 + s / 3600
+        let offset = etDecimal - utcDecimal
+        if (offset > 12)  offset -= 24   // normalise across midnight
+        if (offset < -12) offset += 24
+        if (offset < -6 || offset > -3) return 19.0  // not a valid ET offset
+        return etDecimal
+      } catch {
+        return 19.0
+      }
     }
 
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t
