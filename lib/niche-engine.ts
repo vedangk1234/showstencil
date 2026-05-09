@@ -218,9 +218,14 @@ Respond with ONLY a JSON object — no other text, no markdown fences:
       `[niche-engine] detectNiche: classified as "${nicheId}" (confidence: ${result.confidence})`,
     );
 
-    // Persist to DB if userId provided
-    if (userId) {
+    // Persist to DB only when we have a confident classification.
+    // confidence === 0 means Claude errored or returned garbage — do not corrupt the user's niche.
+    if (userId && result.confidence > 0) {
       await saveDetectedNiche(userId, nicheId);
+    } else if (userId) {
+      console.error(
+        `[niche-engine] detectNiche: confidence 0 for user ${userId} — skipping DB write to avoid corrupting niche data`,
+      );
     }
 
     return result;

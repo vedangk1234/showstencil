@@ -208,10 +208,13 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
         .limit(1)
         .maybeSingle()
 
-      const userSubscriberCount = latestSnapshot?.subscriber_count ?? 45000
-
-      await detectAndAssignCompetitors(userId, user.niche_id ?? null, userSubscriberCount)
-      console.log(`[sync] Competitor auto-detection completed for user ${userId}`)
+      const userSubscriberCount = latestSnapshot?.subscriber_count
+      if (userSubscriberCount == null) {
+        console.warn(`[sync] No subscriber count for user ${userId} — skipping auto-detection until a snapshot exists`)
+      } else {
+        await detectAndAssignCompetitors(userId, user.niche_id ?? null, userSubscriberCount)
+        console.log(`[sync] Competitor auto-detection completed for user ${userId}`)
+      }
     }
   } catch (err) {
     console.error(`[sync] Competitor auto-detection failed for user ${userId}:`, err)

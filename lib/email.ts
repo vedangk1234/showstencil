@@ -211,7 +211,7 @@ export async function sendWeeklyDigest(
 
     const { data: sendData, error: sendError } = await resend.emails.send({
       from: 'ShowStencil <digest@showstencil.com>',
-      replyTo: 'vedangk2912@gmail.com',
+      replyTo: process.env.SUPPORT_EMAIL ?? 'support@showstencil.com',
       to: user.email,
       subject,
       html: emailHtml,
@@ -335,7 +335,7 @@ export async function sendTrendAlert(
 
     const { data: sendData, error: sendError } = await resend.emails.send({
       from: 'ShowStencil <digest@showstencil.com>',
-      replyTo: 'vedangk2912@gmail.com',
+      replyTo: process.env.SUPPORT_EMAIL ?? 'support@showstencil.com',
       to: user.email,
       subject,
       html: emailHtml,

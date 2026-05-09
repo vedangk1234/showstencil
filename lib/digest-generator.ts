@@ -397,7 +397,7 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
     avgViewDurationSeconds: avgWatchSeconds,
     uploadsPerMonth: Math.round(uploadsPerMonth * 10) / 10,
     subscriberCount: latestSnapshot?.subscriber_count ?? 0,
-    nicheId: user.niche_id ?? 'entertainment',
+    nicheId: user.niche_id ?? 'general',
     recentVideoTitles: bestVideos
       .slice(0, 10)
       .map((v) => v.title)
