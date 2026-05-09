@@ -10,7 +10,7 @@
  */
 
 import { createServiceClient } from '@/lib/supabase'
-import type { ChannelOverview, VideoPerformanceItem } from '@/lib/youtube-analytics'
+import type { ChannelOverview, VideoPerformanceItem, AudienceDemographics, TrafficSourceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
 import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, CompetitorVideo, Insight, Idea, ThumbnailJob } from '@/types'
 import { deleteThumbnailFromStorage } from '@/lib/thumbnail-storage'
@@ -28,6 +28,10 @@ import { deleteThumbnailFromStorage } from '@/lib/thumbnail-storage'
 export async function saveChannelSnapshot(
   userId: string,
   data: ChannelOverview,
+  extras?: {
+    demographics: AudienceDemographics | null;
+    trafficSources: TrafficSourceItem[];
+  },
 ): Promise<boolean> {
   // Don't write a null row — if the Analytics API returned no real data at all,
   // skip the write entirely so the dashboard falls back to the last good snapshot.
@@ -81,11 +85,22 @@ export async function saveChannelSnapshot(
     total_views: data.totalViews,
     avg_view_duration_seconds: avgWatchSeconds,
     estimated_monthly_revenue: estimatedMonthlyRevenue,
+    // Demographics and traffic sources — null when unavailable, never blocks save
+    age_gender_breakdown: extras?.demographics?.ageGender ?? null,
+    top_countries: extras?.demographics?.topCountries ?? null,
+    traffic_sources: extras?.trafficSources?.length ? extras.trafficSources : null,
   })
 
   if (error) {
     console.error('[db] saveChannelSnapshot error:', error.message)
     return false
+  }
+
+  if (extras?.demographics) {
+    console.log(`[db] saveChannelSnapshot: saved demographics (${extras.demographics.ageGender.length} age/gender rows, ${extras.demographics.topCountries.length} countries) for user ${userId}`)
+  }
+  if (extras?.trafficSources?.length) {
+    console.log(`[db] saveChannelSnapshot: saved traffic sources (${extras.trafficSources.length} sources) for user ${userId}`)
   }
 
   return true

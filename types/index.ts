@@ -46,6 +46,9 @@ export interface ChannelSnapshot {
   estimated_monthly_revenue: number | null;
   rpm: number | null;
   momentum_score: number | null;
+  age_gender_breakdown: Array<{ ageGroup: string; gender: string; viewerPercentage: number }> | null;
+  top_countries: Array<{ country: string; views: number }> | null;
+  traffic_sources: Array<{ source: string; views: number; watchTimeMinutes: number; percentage: number }> | null;
   created_at: string;
 }
 

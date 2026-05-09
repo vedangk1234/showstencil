@@ -142,7 +142,10 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
   // ── 3. Save channel snapshot ───────────────────────────────────────────────
   let channelSnapshot = false
   if (overview) {
-    channelSnapshot = await saveChannelSnapshot(userId, overview)
+    channelSnapshot = await saveChannelSnapshot(userId, overview, {
+      demographics,
+      trafficSources,
+    })
   }
 
   // ── 4. Fetch public video details + save video data ────────────────────────
