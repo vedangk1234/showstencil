@@ -125,11 +125,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ---------------------------------------------------------------------------
   // subscription_cancelled
+  // Keep the user's paid plan — they retain access until ends_at.
+  // Access is revoked when subscription_expired fires (end of billing period).
   // ---------------------------------------------------------------------------
   else if (eventName === 'subscription_cancelled') {
     const attributes = data.attributes as Record<string, unknown>
     const subscriptionId = String(data.id)
     const customerId = String(attributes.customer_id)
+    // ends_at is the last day of the current billing period after cancellation
+    const endsAt = (attributes.ends_at as string | null) ?? null
 
     // Look up by subscription ID first, fall back to customer ID
     let user = await getUserByLSSubscriptionId(subscriptionId)
@@ -142,15 +146,48 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ received: true })
     }
 
+    // Do NOT set subscription_plan='free' here. The user keeps paid access until ends_at.
     const ok = await updateUserSubscription(user.id, {
       subscription_status: 'cancelled',
+      current_period_end: endsAt,
+    })
+
+    if (!ok) {
+      console.error(`[ls-webhook] Failed to update cancelled status for user ${user.id}`)
+    } else {
+      console.log(`[ls-webhook] subscription_cancelled: user ${user.id} access until ${endsAt ?? 'unknown'}`)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // subscription_expired
+  // Fires at the end of the billing period after cancellation.
+  // This is the correct point to drop the user to free.
+  // ---------------------------------------------------------------------------
+  else if (eventName === 'subscription_expired') {
+    const attributes = data.attributes as Record<string, unknown>
+    const subscriptionId = String(data.id)
+    const customerId = String(attributes.customer_id)
+
+    let user = await getUserByLSSubscriptionId(subscriptionId)
+    if (!user) {
+      user = await getUserByLSCustomerId(customerId)
+    }
+
+    if (!user) {
+      console.error(`[ls-webhook] subscription_expired: no user found for sub ${subscriptionId}`)
+      return NextResponse.json({ received: true })
+    }
+
+    const ok = await updateUserSubscription(user.id, {
+      subscription_status: 'expired',
       subscription_plan: 'free',
     })
 
     if (!ok) {
-      console.error(`[ls-webhook] Failed to cancel subscription for user ${user.id}`)
+      console.error(`[ls-webhook] Failed to expire subscription for user ${user.id}`)
     } else {
-      console.log(`[ls-webhook] subscription_cancelled: user ${user.id} downgraded to free`)
+      console.log(`[ls-webhook] subscription_expired: user ${user.id} downgraded to free`)
     }
   }
 

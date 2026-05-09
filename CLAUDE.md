@@ -603,11 +603,14 @@ type Feature =
   | 'collaboration\_finder'     // pro only
   | 'idea\_briefs\_full'         // free: basic, starter+: full brief
 
-// Actual limits as of Day 39 (lib/access.ts + lib/plan-limits.ts):
+// Actual limits as of Day 40 (lib/access.ts + lib/plan-limits.ts):
 // getCompetitorLimit: free=1, starter=6 (5 auto + 1 manual), pro=13 (10 auto + 3 manual)
 // getIdeaLimit:       free=1, starter=3, pro=10
 // FEATURE_GATES:      'alerts:daily' → starter+, 'insights:ai' → starter+, 'search:compare' → pro only
 //                     digest:weekly gate removed — free users can view digests (monthly generation)
+// getUserPlan cancelled logic: cancelled + current_period_end in future → stored plan (grace period)
+//                              cancelled + past period or null → free
+//                              expired → free (set by subscription_expired webhook)
 
 const planLimits = {
   free:    { competitors: 1, ideas: 1,  digestFrequency: 'monthly', alerts: false, insights: false },
@@ -657,7 +660,7 @@ const planLimits = {
 | `lib/email.ts` | ✅ | sendWeeklyDigest, sendTrendAlert, checkAndSendAlerts, generateUnsubscribeToken |
 | `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — file deleted; use lib/lemonsqueezy.ts |
 | `lib/lemonsqueezy.ts` | ✅ | createCheckoutSession (LS JS SDK), getVariantId — replaces lib/stripe.ts |
-| `lib/access.ts` | ✅ | canAccess, getCompetitorLimit (free:1, starter:6, pro:13), getIdeaLimit (free:1, starter:3, pro:10), getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage; FEATURE_GATES: alerts:daily (starter+), insights:ai (starter+), search:compare (pro only) |
+| `lib/access.ts` | ✅ | canAccess, getCompetitorLimit (free:1, starter:6, pro:13), getIdeaLimit (free:1, starter:3, pro:10), getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage, canGenerateThumbnail; FEATURE_GATES: alerts:daily (starter+), insights:ai (starter+), search:compare (pro only); getUserPlan: cancelled+future current_period_end → keeps stored plan, cancelled+past period or expired → free |
 | `lib/utils.ts` | ✅ | Shared formatting/date utilities — cn() Tailwind class merger (clsx + tailwind-merge) |
 | `lib/competitor-metrics.ts` | ✅ | calculateCompetitorMetrics — pure function, no DB calls; computes video_count, avg_views, avg_length, upload_frequency_30d, velocity_score_avg from a video row array |
 | `lib/image-utils.ts` | ✅ | padToSixteenNine (sharp) — server-side padding of any image to 16:9 by sampling edge pixel colour; used in thumbnail pipeline before Supabase upload |
@@ -690,7 +693,7 @@ const planLimits = {
 | `app/api/cron/dominator-refresh/route.ts` | ✅ | Runs daily 4am UTC; finds + updates Dominator (Tier 3) competitor for all active users |
 | `app/api/cron/daily/route.ts` | 🗑️ deleted | Old Week 1 stub — deleted Day 36; fully superseded by the 5 dedicated cron routes above |
 | `app/api/create-checkout-session/route.ts` | ✅ | Lemon Squeezy checkout redirect |
-| `app/api/webhooks/lemonsqueezy/route.ts` | ✅ | LS webhook: subscription_created/updated/cancelled/payment_failed; HMAC-SHA256 signature verification |
+| `app/api/webhooks/lemonsqueezy/route.ts` | ✅ | LS webhook: subscription_created/updated/cancelled/expired/payment_failed; HMAC-SHA256 signature verification; subscription_cancelled preserves plan + stores ends_at; subscription_expired downgrades to free |
 | `app/api/competitors/[id]/sync/route.ts` | ✅ | POST manually re-syncs videos for a single competitor — auth + ownership check, fetches last 10 YouTube videos, upserts to competitor_videos |
 | `app/api/thumbnail-jobs/[jobId]/status/route.ts` | ✅ | GET thumbnail job status — auth-gated; returns status/thumbnail_url/error_message/timestamps |
 | `app/api/health/route.ts` | ✅ | GET — public, no auth; returns { status: 'ok', timestamp } for uptime monitoring |
@@ -711,7 +714,7 @@ const planLimits = {
 | `app/api/ideas/latest/route.ts` | ✅ | GET top 3 most recent ideas with non-null opportunity_score, ordered by generated_at DESC |
 | `app/api/onboarding/complete/route.ts` | ✅ | POST sets onboarding_completed=true — called by Step 5 and skip link |
 | `app/api/account/delete/route.ts` | ✅ | POST deletes all user data in FK order, cancels LS subscription if active, signs user out |
-| `app/api/subscription/cancel/route.ts` | ✅ | POST cancels LS subscription via DELETE /v1/subscriptions/:id API call; writes subscription_status='cancelled', subscription_plan='free' to DB |
+| `app/api/subscription/cancel/route.ts` | ✅ | POST cancels LS subscription via DELETE /v1/subscriptions/:id API call; sets subscription_status='cancelled' and stores ends_at as current_period_end — does NOT drop subscription_plan to free immediately; user retains paid access until billing period ends |
 
 ### App pages
 
@@ -771,7 +774,7 @@ const planLimits = {
 | `components/onboarding/StepMeetCompetitors.tsx` | ✅ | Polls for all 3 tiers (2s × 30), staggered reveal, tier badges, partial/timeout fallback |
 | `components/onboarding/StepFirstAnalysis.tsx` | ✅ | 20s progress bar + stage labels, fetches gap score + latest idea, reveal with fallback |
 | `components/settings/NotificationSettings.tsx` | ✅ | Client Component — digest toggle, alerts toggle, threshold slider, optimistic updates, 2s "Saved ✓" indicator, slider disabled when alerts off |
-| `components/settings/CancelSubscription.tsx` | ✅ | Client Component — "Cancel Subscription" button + confirmation modal; calls POST /api/subscription/cancel; shown for 'active' and 'on_trial' users only |
+| `components/settings/CancelSubscription.tsx` | ✅ | Client Component — "Cancel Subscription" button + confirmation modal; calls POST /api/subscription/cancel; on success shows "access until [date]" confirmation state before refreshing page; shown for 'active' and 'on_trial' users only |
 | `components/settings/DeleteAccount.tsx` | ✅ | Client Component — "Delete Account" button, confirmation modal requiring exact "CONFIRM" input, calls POST /api/account/delete, redirects to / on success |
 | `components/ui/expandable-card.tsx` | ✅ | Framer-motion expandable card primitive (title, image, description, children) — available but not yet wired to any dashboard feature |
 | `components/charts/SubscriberGrowthChart.tsx` | ✅ | Log-scale multi-line Recharts chart for subscriber growth over time (user + all competitors, colour-coded by tier) |
@@ -821,6 +824,46 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 4 — Day 40 (2026-05-08)
+
+**Cancellation grace period — users retain paid access until billing period ends**
+
+*tsc --noEmit: zero errors.*
+
+---
+
+*Root cause:* `app/api/subscription/cancel/route.ts` and the `subscription_cancelled` webhook handler both previously wrote `subscription_plan='free'` on cancellation, immediately revoking paid access regardless of how much of the billing period remained. `lib/access.ts` resolved `cancelled` status directly to `free` with no period check. Users who cancelled mid-month lost all paid features instantly.
+
+*`app/api/subscription/cancel/route.ts` — MODIFIED*
+* No longer writes `subscription_plan='free'`.
+* Parses the LS `DELETE /v1/subscriptions/:id` response body and extracts `data.attributes.ends_at` — the end date of the current billing period.
+* Stores `ends_at` as `current_period_end` alongside `subscription_status='cancelled'`.
+* Returns `{ success: true, accessUntil: endsAt }` so the client can display the exact date.
+
+*`app/api/webhooks/lemonsqueezy/route.ts` — MODIFIED + new handler*
+* `subscription_cancelled` event: now stores `attributes.ends_at` as `current_period_end`, sets `subscription_status='cancelled'`, does NOT touch `subscription_plan`. Comment added explaining the separation of concerns.
+* New `subscription_expired` handler: fires when the billing period actually ends after cancellation. Sets `subscription_status='expired'` and `subscription_plan='free'`. This is the correct and only place a cancellation results in a free downgrade.
+
+*`lib/access.ts` — MODIFIED*
+* `getUserPlan` now selects `current_period_end` in addition to existing fields.
+* New branch after the `past_due` check: if `subscription_status === 'cancelled'` and `current_period_end` is in the future, returns `subscription_plan` (the stored paid plan). Falls through to `'free'` only if the period has expired or `current_period_end` is null.
+* `PlanRow` interface extended with `current_period_end: string | null`.
+
+*`types/index.ts` — MODIFIED*
+* `SubscriptionStatus` union type extended: added `'expired'`. The `subscription_expired` webhook writes this value; it was previously missing, causing a TypeScript type mismatch bug (discovered by audit). `'paused'` retained for completeness.
+
+*`components/settings/CancelSubscription.tsx` — MODIFIED*
+* Added `cancelled: boolean` and `accessUntil: string | null` states.
+* After a successful cancel API call, `accessUntil` is updated from the `accessUntil` field in the response (falls back to the `currentPeriodEnd` prop).
+* `setCancelled(true)` switches the modal to a confirmation view: "Subscription cancelled. You'll keep full access until [date], then your account will move to the Free plan."
+* `router.refresh()` moved into `handleClose()` — only fires when the user dismisses the confirmation, not immediately on API success. This prevents the page reloading under the open modal.
+
+*`app/(dashboard)/settings/page.tsx` — MODIFIED*
+* "Renews" row now hidden for cancelled users (was showing their end date under the wrong label).
+* New amber info row rendered when `subscription_status === 'cancelled' && current_period_end`: "Subscription cancelled — [Plan] access until [date]" in `color: #fbbf24`. Makes the access window explicit without burying it.
+
+---
+
 ### Week 4 — Day 39 (2026-05-08)
 
 **Sentry monitoring, loading skeletons, thumbnail overhaul, free tier gating, cancel subscription, pricing rebuild, 2T1+2T2 auto-detection**
@@ -864,10 +907,10 @@ All use inline `animate-pulse` Tailwind styles — no external component needed.
 * `app/page.tsx` — Landing page nav + footer logo replaced with matching text treatment.
 * Sidebar search hint bar removed (the "⌘K — Search" shortcut hint that had no backing functionality).
 
-*Cancel subscription flow:*
-* `components/settings/CancelSubscription.tsx` — NEW Client Component. "Cancel Subscription" button opens a confirmation modal. Confirm calls `POST /api/subscription/cancel`, shows inline success/error, reloads on success.
-* `app/api/subscription/cancel/route.ts` — NEW. Auth-gated. Reads `lemon_squeezy_subscription_id` from DB. Calls LS `DELETE /v1/subscriptions/:id`. On success: writes `subscription_status='cancelled'`, `subscription_plan='free'` to users table. Returns `{ success: true }` or 502 with LS error body on failure.
-* `app/(dashboard)/settings/page.tsx` — `CancelSubscription` rendered in Subscription section when `subscription_status === 'active'`.
+*Cancel subscription flow (as of Day 39 — corrected by Day 40 grace period fix):*
+* `components/settings/CancelSubscription.tsx` — NEW Client Component. "Cancel Subscription" button opens a confirmation modal. Confirm calls `POST /api/subscription/cancel`. On success shows a "Subscription cancelled — access until [date]" confirmation state before closing and triggering `router.refresh()`. Day 40: added `cancelled` + `accessUntil` states; `router.refresh()` moved to `handleClose()` so it only fires after the user dismisses the confirmation.
+* `app/api/subscription/cancel/route.ts` — NEW. Auth-gated. Reads `lemon_squeezy_subscription_id` from DB. Calls LS `DELETE /v1/subscriptions/:id`. Day 40 fix: parses `ends_at` from LS response, stores as `current_period_end`, does NOT write `subscription_plan='free'`. Returns `{ success: true, accessUntil }` or 502 on LS error.
+* `app/(dashboard)/settings/page.tsx` — `CancelSubscription` rendered in Subscription section when `subscription_status === 'active' || 'on_trial'`. Day 40: added amber "Subscription cancelled — [Plan] access until [date]" info row for cancelled users; "Renews" row suppressed for cancelled users.
 
 ---
 
@@ -1906,17 +1949,18 @@ ALTER TABLE ideas
 **app/api/webhooks/lemonsqueezy/route.ts** — Lemon Squeezy webhook handler
 
 * Verifies every inbound request via `X-Signature` header using `crypto.createHmac('sha256', LEMONSQUEEZY_WEBHOOK_SECRET)`. Returns 401 on mismatch or missing header.
-* Handles 4 events:
+* Handles 5 events:
   * `subscription_created` — extracts `user_id` from `meta.custom_data`, resolves plan from `variant_id` against `LEMONSQUEEZY_STARTER_VARIANT_ID` / `LEMONSQUEEZY_PRO_VARIANT_ID`, writes all subscription fields to users table.
   * `subscription_updated` — same logic as created; handles trial-to-paid conversion and plan changes.
-  * `subscription_cancelled` — looks up user by subscription ID (falls back to customer ID), sets `subscription_status = 'cancelled'`, `subscription_plan = 'free'`.
-  * `subscription_payment_failed` — looks up user by customer ID, sets `subscription_status = 'past_due'`.
+  * `subscription_cancelled` — looks up user by subscription ID (falls back to customer ID), sets `subscription_status = 'cancelled'`, stores `attributes.ends_at` as `current_period_end`. Does NOT set `subscription_plan = 'free'` — user retains paid access until billing period ends.
+  * `subscription_expired` — fires when the billing period ends after cancellation; sets `subscription_status = 'expired'`, `subscription_plan = 'free'`. This is the only event that downgrades the user to free.
+  * `subscription_payment_failed` — looks up user by customer ID, sets `subscription_status = 'past_due'`, sends a transactional email via Resend with a payment update link.
 * All other events are silently ignored with a log message.
 * Always returns `{ received: true }` to acknowledge delivery.
 
 **lib/access.ts** — plan gating
 
-* `canAccess(userId, feature)` — loads user's subscription_status + subscription_plan + trial_ends_at. Resolves effective plan: on_trial/active/past_due → stored plan (past_due gets 3-day grace), expired trial → free, cancelled/free → free. Guards binary features: `digest:weekly` (starter+), `alerts:daily` (starter+), `search:compare` (pro only). Limit-based features are not blocked here — use the limit helpers instead.
+* `canAccess(userId, feature)` — loads user's subscription_status + subscription_plan + trial_ends_at + current_period_end. Resolves effective plan: on_trial/active/past_due → stored plan (past_due gets 3-day grace), expired trial → free, cancelled + future current_period_end → stored plan (billing grace), cancelled + past period → free, expired → free. Guards binary features: `alerts:daily` (starter+), `insights:ai` (starter+), `search:compare` (pro only). `digest:weekly` gate removed. Limit-based features use the limit helpers instead.
 * `getCompetitorLimit(userId)` — free/starter → 3, pro → 10.
 * `getIdeaLimit(userId)` — free/starter → 3, pro → 6.
 * `getViralLimit(userId)` — free/starter → 3, pro → 10.
@@ -1933,7 +1977,7 @@ ALTER TABLE ideas
 **types/index.ts changes**
 
 * `PlanType` updated: removed `'trial'` (Lemon Squeezy uses `subscription_status = 'on_trial'` instead). Now `'free' | 'starter' | 'pro'`.
-* `SubscriptionStatus` updated: replaced `'trial'` and `'canceled'` with `'on_trial'` and `'cancelled'` to match Lemon Squeezy's actual status strings.
+* `SubscriptionStatus` updated: replaced `'trial'` and `'canceled'` with `'on_trial'` and `'cancelled'` to match Lemon Squeezy's actual status strings. Later extended to include `'expired'` (Day 40) — written by the `subscription_expired` webhook handler when the billing period ends after cancellation.
 * `User` interface: replaced `stripe_customer_id` / `stripe_subscription_id` with `lemon_squeezy_customer_id` / `lemon_squeezy_subscription_id`. Added `subscription_plan: PlanType` and `current_period_end: string | null`.
 
 **Database migration (run in Supabase SQL editor)**
@@ -2502,6 +2546,8 @@ GROUP D — Public (intentionally no auth):
 * One thumbnail per idea — regenerate button removed (Day 39): Allowing regeneration per idea created a quota drain pattern (users would regenerate until they liked the result, burning 5-10 quota in one session). Removing the button limits each idea to one thumbnail. Users who want a different result must download the current one, then regenerate ideas (which deletes all thumbnails) — a meaningful friction barrier that preserves quota.
 * 2 Tier1 + 2 Tier2 + 1 Dominator target for Starter (Day 39): Single-competitor-per-tier detection was insufficient for the 5-competitor Starter slot count. With 2+2+1 = 5 auto-detected competitors the Starter limit is fully utilised. Detection tracks actual slot counts per tier (not just presence/absence) so partial fills (e.g. only 1 Tier1 found) are correctly retried on subsequent syncs.
 * Text-only logo avoids boxed icon at small sizes (Day 39): The previous boxed-S SVG looked like a generic icon at 14px sidebar width. Replaced with plain "SHOWSTENCIL." in Montserrat 700 — matches the brand name exactly, readable at all sizes, no icon-to-text ambiguity in narrow sidebars.
+* Cancellation uses billing grace period, not immediate downgrade (Day 40): When a user cancels, setting `subscription_plan='free'` immediately is hostile — they've paid for the rest of the month. The cancel route now stores `ends_at` from LS as `current_period_end` and keeps `subscription_plan` unchanged. `lib/access.ts` grants full plan access while `current_period_end` is in the future. The actual free downgrade happens only when Lemon Squeezy fires `subscription_expired` at the true end of the billing period. This also means `subscription_expired` must be handled in the webhook — without it, cancelled users would retain paid access forever. Two-event model: `subscription_cancelled` = "they've decided to stop" → grace period begins; `subscription_expired` = "their time is up" → drop to free.
+* `SubscriptionStatus` type must include every value written to DB (Day 40): The `subscription_expired` webhook handler writes `'expired'` to the `subscription_status` column. The TypeScript type `SubscriptionStatus` was missing `'expired'` (it had `'paused'` instead). This was a silent type mismatch — code compiles, Supabase accepts any string, but TypeScript consumers of the type would not handle `'expired'` in exhaustive switch cases. Added `'expired'` to the union. Rule: whenever a new status string is introduced in a webhook handler, update the type in the same commit.
 
 \---
 
@@ -2518,6 +2564,8 @@ GROUP D — Public (intentionally no auth):
 * Anthropic API: https://docs.anthropic.com
 
 \---
+
+*Last updated: 2026-05-08 — Day 40: Cancellation grace period fix. cancel/route.ts: parses ends_at from LS response, stores as current_period_end, keeps subscription_plan unchanged. webhooks/lemonsqueezy: subscription_cancelled preserves plan + stores ends_at; new subscription_expired handler sets plan='free' (only place downgrade happens). lib/access.ts: getUserPlan now reads current_period_end; cancelled+future period → stored plan. types/index.ts: 'expired' added to SubscriptionStatus (was missing, causing type mismatch bug). CancelSubscription.tsx: success confirmation state shows "access until [date]" before router.refresh(). settings/page.tsx: "Renews" suppressed for cancelled users; amber "access until" info row added. tsc --noEmit: zero errors.*
 
 *Last updated: 2026-05-08 — Day 39: Sentry monitoring integrated (client/server/edge configs + instrumentation.ts + global-error.tsx). Loading skeleton pages for all 5 dashboard routes. Thumbnail pipeline overhauled: stick figure removed, 16:9 safe-zone prompt, server-side padToSixteenNine via sharp. Regenerate thumbnail button removed — one per idea. Text-only SHOWSTENCIL. logo (Montserrat 700). Cancel subscription flow: CancelSubscription.tsx + POST /api/subscription/cancel. Free tier now gets 1 competitor + 1 idea (was blocked). Insights:ai gated to Starter+ (free shows locked prompt). Bolder/controversial hooks locked for free. Thumbnail button locked for free. Pricing page rebuilt as PricingClient.tsx 3-card layout. Delete account Danger Zone extended: cancel button now shows for on_trial too. Auto-detection upgraded: 2 Tier1 + 2 Tier2 + 1 Dominator (was 1+1+1). plan-limits.ts: free={1 total}, starter={6 total, 2T1+2T2+1Dom}. tsc --noEmit: zero errors.*
 

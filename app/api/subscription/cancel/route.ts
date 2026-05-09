@@ -41,9 +41,21 @@ export async function POST() {
     return NextResponse.json({ error: 'Failed to cancel subscription. Please try again.' }, { status: 502 })
   }
 
+  // Extract ends_at from the LS response — this is the end of the current billing period
+  let endsAt: string | null = null
+  try {
+    const lsBody = await lsRes.json()
+    endsAt = lsBody?.data?.attributes?.ends_at ?? null
+  } catch {
+    console.warn('[cancel] Could not parse LS response body — ends_at will be null')
+  }
+
+  // Set status to cancelled but keep the existing subscription_plan.
+  // The user retains paid access until current_period_end.
   await updateUserSubscription(session.user.id, {
     subscription_status: 'cancelled',
+    current_period_end: endsAt,
   })
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, accessUntil: endsAt })
 }

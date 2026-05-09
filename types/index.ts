@@ -1,6 +1,6 @@
 // Plan types
 export type PlanType = 'free' | 'starter' | 'pro';
-export type SubscriptionStatus = 'free' | 'on_trial' | 'active' | 'past_due' | 'cancelled' | 'paused';
+export type SubscriptionStatus = 'free' | 'on_trial' | 'active' | 'past_due' | 'cancelled' | 'expired' | 'paused';
 
 // User
 export interface User {

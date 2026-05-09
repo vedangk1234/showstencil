@@ -144,8 +144,18 @@ export default async function SettingsPage() {
         {user?.trial_ends_at && (
           <Row label="Trial ends" value={fmtDate(user.trial_ends_at)} />
         )}
-        {user?.current_period_end && !user.trial_ends_at && (
+        {user?.current_period_end && !user.trial_ends_at && user?.subscription_status !== 'cancelled' && (
           <Row label="Renews" value={fmtDate(user.current_period_end)} />
+        )}
+        {user?.subscription_status === 'cancelled' && user?.current_period_end && (
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #111111', background: '#0d0d0d' }}>
+            <span style={{ color: '#888888', fontSize: 13 }}>
+              Subscription cancelled —{' '}
+              <span style={{ color: '#fbbf24' }}>
+                {(user.subscription_plan ?? 'free').charAt(0).toUpperCase() + (user.subscription_plan ?? 'free').slice(1)} access until {fmtDate(user.current_period_end)}
+              </span>
+            </span>
+          </div>
         )}
         <div style={{ padding: '12px 16px' }}>
           <span style={{ color: '#888888', fontSize: 13 }}>YouTube channel</span>

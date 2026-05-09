@@ -12,6 +12,8 @@ export default function CancelSubscription({ currentPeriodEnd }: Props) {
   const [showModal, setShowModal] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+  const [accessUntil, setAccessUntil] = useState<string | null>(currentPeriodEnd)
 
   function fmtDate(iso: string | null): string {
     if (!iso) return 'the end of your billing period'
@@ -29,12 +31,20 @@ export default function CancelSubscription({ currentPeriodEnd }: Props) {
         setLoading(false)
         return
       }
-      setShowModal(false)
-      router.refresh()
+      const data = await res.json().catch(() => ({}))
+      if (data.accessUntil) setAccessUntil(data.accessUntil)
+      setCancelled(true)
+      setLoading(false)
     } catch {
       setError('Network error. Please try again.')
       setLoading(false)
     }
+  }
+
+  function handleClose() {
+    setShowModal(false)
+    setError(null)
+    if (cancelled) router.refresh()
   }
 
   return (
@@ -72,7 +82,7 @@ export default function CancelSubscription({ currentPeriodEnd }: Props) {
             zIndex: 50,
             padding: '0 16px',
           }}
-          onClick={e => { if (e.target === e.currentTarget) setShowModal(false) }}
+          onClick={e => { if (e.target === e.currentTarget) handleClose() }}
         >
           <div style={{
             background: '#0a0a0a',
@@ -82,53 +92,87 @@ export default function CancelSubscription({ currentPeriodEnd }: Props) {
             maxWidth: 420,
             width: '100%',
           }}>
-            <h2 style={{ color: '#ffffff', fontSize: 16, fontWeight: 700, margin: '0 0 10px', letterSpacing: '-0.3px' }}>
-              Cancel your subscription?
-            </h2>
-            <p style={{ color: '#888888', fontSize: 13, margin: '0 0 20px', lineHeight: 1.6 }}>
-              You will keep access until <strong style={{ color: '#cccccc' }}>{fmtDate(currentPeriodEnd)}</strong>. After that you&apos;ll be downgraded to the Free plan and lose access to paid features.
-            </p>
+            {cancelled ? (
+              <>
+                <h2 style={{ color: '#ffffff', fontSize: 16, fontWeight: 700, margin: '0 0 10px', letterSpacing: '-0.3px' }}>
+                  Subscription cancelled
+                </h2>
+                <p style={{ color: '#888888', fontSize: 13, margin: '0 0 20px', lineHeight: 1.6 }}>
+                  Your subscription has been cancelled. You&apos;ll keep full{' '}
+                  <strong style={{ color: '#cccccc' }}>
+                    {accessUntil ? `access until ${fmtDate(accessUntil)}` : 'access until the end of your billing period'}
+                  </strong>
+                  , then your account will move to the Free plan.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={handleClose}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      border: '1px solid #333333',
+                      borderRadius: 6,
+                      background: 'transparent',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 style={{ color: '#ffffff', fontSize: 16, fontWeight: 700, margin: '0 0 10px', letterSpacing: '-0.3px' }}>
+                  Cancel your subscription?
+                </h2>
+                <p style={{ color: '#888888', fontSize: 13, margin: '0 0 20px', lineHeight: 1.6 }}>
+                  You will keep access until <strong style={{ color: '#cccccc' }}>{fmtDate(accessUntil)}</strong>. After that you&apos;ll be downgraded to the Free plan and lose access to paid features.
+                </p>
 
-            {error && (
-              <p style={{ color: '#f87171', fontSize: 12, margin: '0 0 16px' }}>{error}</p>
+                {error && (
+                  <p style={{ color: '#f87171', fontSize: 12, margin: '0 0 16px' }}>{error}</p>
+                )}
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={handleClose}
+                    disabled={loading}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      border: '1px solid #333333',
+                      borderRadius: 6,
+                      background: 'transparent',
+                      color: '#ffffff',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                      opacity: loading ? 0.5 : 1,
+                    }}
+                  >
+                    Keep Subscription
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    disabled={loading}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      border: '1px solid #7f1d1d',
+                      borderRadius: 6,
+                      background: loading ? '#1a0a0a' : 'transparent',
+                      color: '#f87171',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                      opacity: loading ? 0.7 : 1,
+                    }}
+                  >
+                    {loading ? 'Cancelling…' : 'Yes, Cancel'}
+                  </button>
+                </div>
+              </>
             )}
-
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setShowModal(false); setError(null) }}
-                disabled={loading}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  border: '1px solid #333333',
-                  borderRadius: 6,
-                  background: 'transparent',
-                  color: '#ffffff',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  opacity: loading ? 0.5 : 1,
-                }}
-              >
-                Keep Subscription
-              </button>
-              <button
-                onClick={handleCancel}
-                disabled={loading}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  border: '1px solid #7f1d1d',
-                  borderRadius: 6,
-                  background: loading ? '#1a0a0a' : 'transparent',
-                  color: '#f87171',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  opacity: loading ? 0.7 : 1,
-                }}
-              >
-                {loading ? 'Cancelling…' : 'Yes, Cancel'}
-              </button>
-            </div>
           </div>
         </div>
       )}

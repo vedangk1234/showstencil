@@ -19,6 +19,7 @@ interface PlanRow {
   subscription_status: SubscriptionStatus
   subscription_plan: PlanType
   trial_ends_at: string | null
+  current_period_end: string | null
 }
 
 async function getUserPlan(userId: string): Promise<PlanType> {
@@ -26,14 +27,14 @@ async function getUserPlan(userId: string): Promise<PlanType> {
 
   const { data, error } = await supabase
     .from('users')
-    .select('subscription_status, subscription_plan, trial_ends_at')
+    .select('subscription_status, subscription_plan, trial_ends_at, current_period_end')
     .eq('id', userId)
     .single()
 
   if (error || !data) return 'free'
 
   const row = data as PlanRow
-  const { subscription_status, subscription_plan, trial_ends_at } = row
+  const { subscription_status, subscription_plan, trial_ends_at, current_period_end } = row
 
   // Trial expired — treat as free
   if (subscription_status === 'on_trial' && trial_ends_at) {
@@ -49,7 +50,14 @@ async function getUserPlan(userId: string): Promise<PlanType> {
     return subscription_plan ?? 'free'
   }
 
-  // Cancelled, free, or anything else
+  // Cancelled but still within the paid billing period → keep stored plan
+  if (subscription_status === 'cancelled' && current_period_end) {
+    if (new Date(current_period_end) > new Date()) {
+      return subscription_plan ?? 'free'
+    }
+  }
+
+  // Expired, free, cancelled-past-period, or anything else
   return 'free'
 }
 
