@@ -35,6 +35,60 @@ export default async function DashboardPage() {
 
     const topIdea = recentIdeas.find((i) => !i.made_at) ?? null
 
+    if (!user?.youtube_channel_id) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: '#000',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '32px 24px',
+        }}>
+          <div style={{
+            maxWidth: 520,
+            width: '100%',
+            border: '1px solid #27272a',
+            borderRadius: 8,
+            padding: '40px 36px',
+            textAlign: 'center',
+          }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              background: '#18181b',
+              border: '1px solid #3f3f46',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px',
+              fontSize: 22,
+            }}>
+              📺
+            </div>
+            <h1 style={{ color: '#fff', fontSize: 20, fontWeight: 600, margin: '0 0 12px' }}>
+              No YouTube channel detected
+            </h1>
+            <p style={{ color: '#a1a1aa', fontSize: 14, lineHeight: 1.6, margin: '0 0 24px' }}>
+              We couldn&apos;t find a YouTube channel linked to your Google account.
+              ShowStencil requires a YouTube channel to analyse your performance and find competitors.
+            </p>
+            <p style={{ color: '#71717a', fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+              If you do have a YouTube channel and it&apos;s not being detected, please reach out —
+              we&apos;ll get it sorted.{' '}
+              <a
+                href="mailto:support@showstencil.com"
+                style={{ color: '#e4e4e7', textDecoration: 'underline' }}
+              >
+                support@showstencil.com
+              </a>
+            </p>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <DashboardClient
         user={user}

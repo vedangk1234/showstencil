@@ -46,13 +46,15 @@ export default function StepConfirmNiche({ onNext }: Props) {
           attempts++
           setTimeout(poll, 1500)
         } else {
-          setNiche('finance')
+          // Polling timed out — don't silently default to 'finance'.
+          // Leave niche blank so the user must make an explicit choice.
+          setNiche('')
           setOriginalNiche('')
           setLoading(false)
         }
       } catch {
         if (!cancelled) {
-          setNiche('finance')
+          setNiche('')
           setOriginalNiche('')
           setLoading(false)
         }
@@ -95,23 +97,30 @@ export default function StepConfirmNiche({ onNext }: Props) {
   }
 
   const currentLabel = NICHE_OPTIONS.find(n => n.id === niche)?.label ?? niche
+  const detected = niche !== '' && originalNiche !== ''
 
   return (
     <div className="flex flex-col items-center text-center">
       <div className="text-[11px] font-mono uppercase tracking-widest text-zinc-500 mb-4">
-        We detected your niche
+        {detected ? 'We detected your niche' : 'Select your niche'}
       </div>
 
       <h2
         className="text-4xl md:text-5xl mb-3 leading-tight"
         style={{ fontFamily: 'Instrument Serif, serif', fontWeight: 400 }}
       >
-        Based on your recent videos, you create{' '}
-        <em className="italic text-amber-200">{currentLabel}</em> content.
+        {detected ? (
+          <>
+            Based on your recent videos, you create{' '}
+            <em className="italic text-amber-200">{currentLabel}</em> content.
+          </>
+        ) : (
+          <>What type of content do you create?</>
+        )}
       </h2>
 
       <p className="text-zinc-400 text-base mb-10">
-        Is that right?
+        {detected ? 'Is that right?' : 'Pick the option that best describes your channel.'}
       </p>
 
       <div className="w-full max-w-sm mb-10">
@@ -120,6 +129,9 @@ export default function StepConfirmNiche({ onNext }: Props) {
           onChange={(e) => setNiche(e.target.value)}
           className="w-full bg-zinc-900 border border-zinc-700 text-white px-4 py-3 text-sm font-mono focus:outline-none focus:border-zinc-500 transition-colors"
         >
+          {!detected && niche === '' && (
+            <option value="" disabled>Select your niche…</option>
+          )}
           {NICHE_OPTIONS.map(opt => (
             <option key={opt.id} value={opt.id}>{opt.label}</option>
           ))}
@@ -136,7 +148,7 @@ export default function StepConfirmNiche({ onNext }: Props) {
         disabled={saving || niche === ''}
         className="w-full sm:w-auto bg-white text-black px-8 py-3 text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-60"
       >
-        {saving ? 'Saving...' : "That's right →"}
+        {saving ? 'Saving...' : detected ? "That's right →" : 'Confirm niche →'}
       </button>
     </div>
   )
