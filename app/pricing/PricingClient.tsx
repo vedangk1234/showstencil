@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import type { SubscriptionStatus } from '@/types'
 
 // ─── Feature list helpers ──────────────────────────────────────────────────────
 
@@ -67,13 +68,46 @@ function XIcon() {
 interface PricingClientProps {
   currentPlan: 'free' | 'starter' | 'pro' | null
   isLoggedIn: boolean
+  subscriptionStatus: SubscriptionStatus | null
+  currentPeriodEnd: string | null
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
+export function PricingClient({
+  currentPlan,
+  isLoggedIn,
+  subscriptionStatus,
+  currentPeriodEnd,
+}: PricingClientProps) {
   const router = useRouter()
   const [loadingPlan, setLoadingPlan] = useState<'starter' | 'pro' | null>(null)
+
+  // Cancel modal state
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelLoading, setCancelLoading] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+  const [accessUntil, setAccessUntil] = useState<string | null>(currentPeriodEnd)
+
+  // Downgrade modal state
+  const [showDowngradeModal, setShowDowngradeModal] = useState(false)
+  const [downgradeLoading, setDowngradeLoading] = useState(false)
+  const [downgradeError, setDowngradeError] = useState<string | null>(null)
+
+  // Determine effective plan — cancelled/expired/null all resolve to 'free'
+  const isPaidActive = ['active', 'on_trial', 'past_due'].includes(subscriptionStatus ?? '')
+  const effectivePlan: 'free' | 'starter' | 'pro' =
+    isPaidActive && currentPlan ? currentPlan : 'free'
+
+  function fmtDate(iso: string | null): string {
+    if (!iso) return 'the end of your billing period'
+    return new Date(iso).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    })
+  }
 
   async function handleCheckout(plan: 'starter' | 'pro') {
     if (!isLoggedIn) {
@@ -107,46 +141,84 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
     }
   }
 
-  const planOrder: Record<'free' | 'starter' | 'pro', number> = { free: 0, starter: 1, pro: 2 }
-  const currentOrder = currentPlan !== null ? planOrder[currentPlan] : -1
+  async function handleCancel() {
+    setCancelLoading(true)
+    setCancelError(null)
+    try {
+      const res = await fetch('/api/subscription/cancel', { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setCancelError(data.error ?? 'Something went wrong. Please try again.')
+        setCancelLoading(false)
+        return
+      }
+      const data = await res.json().catch(() => ({}))
+      if (data.accessUntil) setAccessUntil(data.accessUntil)
+      setCancelled(true)
+      setCancelLoading(false)
+    } catch {
+      setCancelError('Network error. Please try again.')
+      setCancelLoading(false)
+    }
+  }
+
+  async function handleDowngrade() {
+    setDowngradeLoading(true)
+    setDowngradeError(null)
+    try {
+      const res = await fetch('/api/subscription/downgrade', { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setDowngradeError(data.error ?? 'Something went wrong. Please try again.')
+        setDowngradeLoading(false)
+        return
+      }
+      const data = (await res.json()) as { approvalUrl?: string }
+      if (data.approvalUrl) {
+        window.location.href = data.approvalUrl
+      } else {
+        setDowngradeError('No approval URL received. Please try again.')
+        setDowngradeLoading(false)
+      }
+    } catch {
+      setDowngradeError('Network error. Please try again.')
+      setDowngradeLoading(false)
+    }
+  }
+
+  function closeCancelModal() {
+    setShowCancelModal(false)
+    setCancelError(null)
+    if (cancelled) router.refresh()
+  }
+
+  const baseClass =
+    'w-full py-3 px-6 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
 
   function renderButton(card: 'free' | 'starter' | 'pro', isPopular: boolean) {
-    const cardOrder = planOrder[card]
-    const isCurrent = currentPlan === card
-    const isUpgrade = cardOrder > currentOrder
-    const isLoading = loadingPlan === card
-
-    const baseClass = 'w-full py-3 px-6 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-
-    if (isCurrent) {
-      return (
-        <button disabled className={`${baseClass} bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-default`}>
-          Current Plan
-        </button>
-      )
-    }
-
+    // ── Free card ──────────────────────────────────────────────────────────────
     if (card === 'free') {
-      if (isLoggedIn) {
-        // Already on a paid plan — can't downgrade from UI
+      if (!isLoggedIn) {
         return (
-          <span className="block w-full py-3 text-center text-xs text-zinc-600 font-mono">
-            Manage subscription at PayPal
-          </span>
+          <a
+            href="/login"
+            className={`${baseClass} bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700 text-center inline-block`}
+          >
+            Get Started
+          </a>
         )
       }
-      return (
-        <a
-          href="/login"
-          className={`${baseClass} bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700 text-center inline-block`}
-        >
-          Get Started
-        </a>
-      )
-    }
-
-    if (!isUpgrade && isLoggedIn) {
-      // Downgrade path — don't offer in-app
+      if (effectivePlan === 'free') {
+        return (
+          <button
+            disabled
+            className={`${baseClass} bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-default`}
+          >
+            Current Plan
+          </button>
+        )
+      }
+      // On a paid plan — free card is informational only
       return (
         <span className="block w-full py-3 text-center text-xs text-zinc-600 font-mono">
           Manage subscription at PayPal
@@ -154,28 +226,150 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
       )
     }
 
-    // Upgrade path or not logged in
-    if (isPopular) {
+    // ── Starter card ───────────────────────────────────────────────────────────
+    if (card === 'starter') {
+      if (effectivePlan === 'starter') {
+        return (
+          <button
+            onClick={() => setShowCancelModal(true)}
+            className={baseClass}
+            style={{ background: 'transparent', border: '1px solid #7f1d1d', color: '#f87171' }}
+          >
+            Cancel Subscription
+          </button>
+        )
+      }
+      if (effectivePlan === 'pro') {
+        return (
+          <button
+            onClick={() => setShowDowngradeModal(true)}
+            className={`${baseClass} bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700`}
+          >
+            Downgrade to Starter
+          </button>
+        )
+      }
+      // free → upgrade
+      if (isPopular) {
+        return (
+          <button
+            onClick={() => void handleCheckout('starter')}
+            disabled={loadingPlan !== null}
+            className={`${baseClass} bg-emerald-500 hover:bg-emerald-400 text-black`}
+          >
+            {loadingPlan === 'starter' ? 'Redirecting…' : 'Start 7-day free trial'}
+          </button>
+        )
+      }
       return (
         <button
-          onClick={() => void handleCheckout(card as 'starter' | 'pro')}
-          disabled={isLoading || loadingPlan !== null}
-          className={`${baseClass} bg-emerald-500 hover:bg-emerald-400 text-black`}
+          onClick={() => void handleCheckout('starter')}
+          disabled={loadingPlan !== null}
+          className={`${baseClass} bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700`}
         >
-          {isLoading ? 'Redirecting…' : isLoggedIn ? 'Start 7-day free trial' : 'Start 7-day free trial'}
+          {loadingPlan === 'starter' ? 'Redirecting…' : 'Start 7-day free trial'}
         </button>
       )
     }
 
+    // ── Pro card ───────────────────────────────────────────────────────────────
+    if (effectivePlan === 'pro') {
+      return (
+        <button
+          onClick={() => setShowCancelModal(true)}
+          className={baseClass}
+          style={{ background: 'transparent', border: '1px solid #7f1d1d', color: '#f87171' }}
+        >
+          Cancel Subscription
+        </button>
+      )
+    }
+    // free or starter → upgrade to pro
     return (
       <button
-        onClick={() => void handleCheckout(card as 'starter' | 'pro')}
-        disabled={isLoading || loadingPlan !== null}
+        onClick={() => void handleCheckout('pro')}
+        disabled={loadingPlan !== null}
         className={`${baseClass} bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700`}
       >
-        {isLoading ? 'Redirecting…' : 'Start 7-day free trial'}
+        {loadingPlan === 'pro' ? 'Redirecting…' : 'Start 7-day free trial'}
       </button>
     )
+  }
+
+  // ─── Modal shared styles ───────────────────────────────────────────────────
+
+  const modalOverlay: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.75)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+    padding: '0 16px',
+  }
+
+  const modalCard: React.CSSProperties = {
+    background: '#0a0a0a',
+    border: '1px solid #1a1a1a',
+    borderRadius: 10,
+    padding: '24px',
+    maxWidth: 420,
+    width: '100%',
+  }
+
+  const modalTitle: React.CSSProperties = {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 700,
+    margin: '0 0 10px',
+    letterSpacing: '-0.3px',
+  }
+
+  const modalBody: React.CSSProperties = {
+    color: '#888888',
+    fontSize: 13,
+    margin: '0 0 20px',
+    lineHeight: 1.6,
+  }
+
+  const btnRow: React.CSSProperties = {
+    display: 'flex',
+    gap: 10,
+    justifyContent: 'flex-end',
+  }
+
+  const btnSecondary: React.CSSProperties = {
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 500,
+    border: '1px solid #333333',
+    borderRadius: 6,
+    background: 'transparent',
+    color: '#ffffff',
+    cursor: 'pointer',
+  }
+
+  const btnDestructive: React.CSSProperties = {
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 500,
+    border: '1px solid #7f1d1d',
+    borderRadius: 6,
+    background: 'transparent',
+    color: '#f87171',
+    cursor: 'pointer',
+  }
+
+  const btnMuted: React.CSSProperties = {
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 500,
+    border: '1px solid #333333',
+    borderRadius: 6,
+    background: '#18181b',
+    color: '#a1a1aa',
+    cursor: 'pointer',
   }
 
   return (
@@ -200,7 +394,7 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
           </p>
         </div>
 
-        {/* Cards grid — 3 columns on md+, 1 column on mobile */}
+        {/* Cards grid */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -361,6 +555,103 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
         </p>
 
       </div>
+
+      {/* ── Cancel Subscription Modal ─────────────────────────────────────────── */}
+      {showCancelModal && (
+        <div
+          style={modalOverlay}
+          onClick={(e) => { if (e.target === e.currentTarget) closeCancelModal() }}
+        >
+          <div style={modalCard}>
+            {cancelled ? (
+              <>
+                <h2 style={modalTitle}>Subscription cancelled</h2>
+                <p style={modalBody}>
+                  Your subscription has been cancelled. You&apos;ll keep full{' '}
+                  <strong style={{ color: '#cccccc' }}>
+                    {accessUntil
+                      ? `access until ${fmtDate(accessUntil)}`
+                      : 'access until the end of your billing period'}
+                  </strong>
+                  , then your account will move to the Free plan.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button onClick={closeCancelModal} style={btnSecondary}>
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 style={modalTitle}>Cancel your subscription?</h2>
+                <p style={modalBody}>
+                  Are you sure you want to cancel? You will keep access until{' '}
+                  <strong style={{ color: '#cccccc' }}>{fmtDate(accessUntil)}</strong>. After that
+                  your account will revert to the free plan.
+                </p>
+
+                {cancelError && (
+                  <p style={{ color: '#f87171', fontSize: 12, margin: '0 0 16px' }}>{cancelError}</p>
+                )}
+
+                <div style={btnRow}>
+                  <button
+                    onClick={closeCancelModal}
+                    disabled={cancelLoading}
+                    style={{ ...btnSecondary, opacity: cancelLoading ? 0.5 : 1, cursor: cancelLoading ? 'not-allowed' : 'pointer' }}
+                  >
+                    Keep my plan
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    disabled={cancelLoading}
+                    style={{ ...btnDestructive, opacity: cancelLoading ? 0.7 : 1, cursor: cancelLoading ? 'not-allowed' : 'pointer' }}
+                  >
+                    {cancelLoading ? 'Cancelling…' : 'Cancel subscription'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Downgrade to Starter Modal ────────────────────────────────────────── */}
+      {showDowngradeModal && (
+        <div
+          style={modalOverlay}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowDowngradeModal(false) }}
+        >
+          <div style={modalCard}>
+            <h2 style={modalTitle}>Downgrade to Starter?</h2>
+            <p style={modalBody}>
+              Downgrading to Starter will reduce your competitors from 10 to 5 and ideas from 10 to
+              3 per week. You will be redirected to PayPal to confirm the change.
+            </p>
+
+            {downgradeError && (
+              <p style={{ color: '#f87171', fontSize: 12, margin: '0 0 16px' }}>{downgradeError}</p>
+            )}
+
+            <div style={btnRow}>
+              <button
+                onClick={() => { setShowDowngradeModal(false); setDowngradeError(null) }}
+                disabled={downgradeLoading}
+                style={{ ...btnSecondary, opacity: downgradeLoading ? 0.5 : 1, cursor: downgradeLoading ? 'not-allowed' : 'pointer' }}
+              >
+                Keep Pro
+              </button>
+              <button
+                onClick={handleDowngrade}
+                disabled={downgradeLoading}
+                style={{ ...btnMuted, opacity: downgradeLoading ? 0.7 : 1, cursor: downgradeLoading ? 'not-allowed' : 'pointer' }}
+              >
+                {downgradeLoading ? 'Redirecting to PayPal…' : 'Downgrade to Starter'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

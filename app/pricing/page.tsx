@@ -26,20 +26,39 @@ export default async function PricingPage() {
   const session = await auth()
   const isLoggedIn = !!session?.user?.id
   let currentPlan: 'free' | 'starter' | 'pro' = 'free'
+  let subscriptionStatus: SubscriptionStatus | null = null
+  let currentPeriodEnd: string | null = null
 
   if (session?.user?.id) {
     try {
       const supabase = createServiceClient()
       const { data } = await supabase
         .from('users')
-        .select('subscription_status, subscription_plan, trial_ends_at')
+        .select('subscription_status, subscription_plan, trial_ends_at, current_period_end')
         .eq('id', session.user.id)
         .single()
-      currentPlan = resolvePlan(data as Parameters<typeof resolvePlan>[0])
+      if (data) {
+        const row = data as {
+          subscription_status: SubscriptionStatus | null
+          subscription_plan: PlanType | null
+          trial_ends_at: string | null
+          current_period_end: string | null
+        }
+        currentPlan = resolvePlan(row)
+        subscriptionStatus = row.subscription_status
+        currentPeriodEnd = row.current_period_end
+      }
     } catch {
       // Fall back to free if DB fetch fails
     }
   }
 
-  return <PricingClient currentPlan={currentPlan} isLoggedIn={isLoggedIn} />
+  return (
+    <PricingClient
+      currentPlan={currentPlan}
+      isLoggedIn={isLoggedIn}
+      subscriptionStatus={subscriptionStatus}
+      currentPeriodEnd={currentPeriodEnd}
+    />
+  )
 }

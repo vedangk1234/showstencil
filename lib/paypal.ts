@@ -5,10 +5,12 @@
  * All operations switch between sandbox and live based on PAYPAL_MODE env var.
  */
 
-const PAYPAL_BASE =
-  process.env.PAYPAL_MODE === 'live'
+// Read at request time so Vercel env var changes take effect without redeploy.
+function getBaseUrl(): string {
+  return process.env.PAYPAL_MODE === 'production'
     ? 'https://api-m.paypal.com'
     : 'https://api-m.sandbox.paypal.com'
+}
 
 // ---------------------------------------------------------------------------
 // OAuth token
@@ -17,8 +19,9 @@ const PAYPAL_BASE =
 export async function getAccessToken(): Promise<string> {
   const clientId = process.env.PAYPAL_CLIENT_ID
   const secret = process.env.PAYPAL_SECRET
+  const base = getBaseUrl()
 
-  console.log('[paypal/getAccessToken] base URL:', PAYPAL_BASE, '| clientId:', clientId ? `${clientId.slice(0, 8)}…` : 'MISSING', '| secret:', secret ? 'set' : 'MISSING')
+  console.log('[paypal/getAccessToken] PAYPAL_MODE:', process.env.PAYPAL_MODE ?? 'not set', '→ base URL:', base, '| clientId:', clientId ? `${clientId.slice(0, 8)}…` : 'MISSING', '| secret:', secret ? 'set' : 'MISSING')
 
   if (!clientId || !secret) {
     throw new Error('PayPal credentials not configured (PAYPAL_CLIENT_ID or PAYPAL_SECRET missing)')
@@ -26,7 +29,7 @@ export async function getAccessToken(): Promise<string> {
 
   const credentials = Buffer.from(`${clientId}:${secret}`).toString('base64')
 
-  const res = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, {
+  const res = await fetch(`${base}/v1/oauth2/token`, {
     method: 'POST',
     headers: {
       Authorization: `Basic ${credentials}`,
@@ -79,9 +82,9 @@ export async function createSubscription(
     },
   }
 
-  console.log('[paypal/createSubscription] POST', `${PAYPAL_BASE}/v1/billing/subscriptions`, JSON.stringify(requestBody))
+  console.log('[paypal/createSubscription] POST', `${getBaseUrl()}/v1/billing/subscriptions`, JSON.stringify(requestBody))
 
-  const res = await fetch(`${PAYPAL_BASE}/v1/billing/subscriptions`, {
+  const res = await fetch(`${getBaseUrl()}/v1/billing/subscriptions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -121,7 +124,7 @@ export async function cancelSubscription(
   const token = await getAccessToken()
 
   const res = await fetch(
-    `${PAYPAL_BASE}/v1/billing/subscriptions/${subscriptionId}/cancel`,
+    `${getBaseUrl()}/v1/billing/subscriptions/${subscriptionId}/cancel`,
     {
       method: 'POST',
       headers: {
@@ -164,7 +167,7 @@ export async function getSubscriptionDetails(
   const token = await getAccessToken()
 
   const res = await fetch(
-    `${PAYPAL_BASE}/v1/billing/subscriptions/${subscriptionId}`,
+    `${getBaseUrl()}/v1/billing/subscriptions/${subscriptionId}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     }
@@ -210,7 +213,7 @@ export async function verifyWebhookSignature(
     webhook_event: JSON.parse(body),
   }
 
-  console.log('[paypal/verify] Sending verification request to', `${PAYPAL_BASE}/v1/notifications/verify-webhook-signature`)
+  console.log('[paypal/verify] Sending verification request to', `${getBaseUrl()}/v1/notifications/verify-webhook-signature`)
   console.log('[paypal/verify] Headers received:', {
     'paypal-auth-algo': headers['paypal-auth-algo'],
     'paypal-cert-url': headers['paypal-cert-url'],
@@ -222,7 +225,7 @@ export async function verifyWebhookSignature(
 
   try {
     const res = await fetch(
-      `${PAYPAL_BASE}/v1/notifications/verify-webhook-signature`,
+      `${getBaseUrl()}/v1/notifications/verify-webhook-signature`,
       {
         method: 'POST',
         headers: {
