@@ -34,6 +34,17 @@ export async function POST(request: NextRequest) {
       ? process.env.PAYPAL_STARTER_PLAN_ID
       : process.env.PAYPAL_PRO_PLAN_ID
 
+  // Log env var presence (not values) to diagnose misconfiguration
+  console.log('[subscription/create] env check:', {
+    PAYPAL_MODE: process.env.PAYPAL_MODE ?? '(not set — defaults to sandbox)',
+    PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID ? 'set' : 'MISSING',
+    PAYPAL_SECRET: process.env.PAYPAL_SECRET ? 'set' : 'MISSING',
+    PAYPAL_STARTER_PLAN_ID: process.env.PAYPAL_STARTER_PLAN_ID ? 'set' : 'MISSING',
+    PAYPAL_PRO_PLAN_ID: process.env.PAYPAL_PRO_PLAN_ID ? 'set' : 'MISSING',
+    resolvedPlanId: planId ? `${planId.slice(0, 6)}…` : 'MISSING',
+    userEmail: user.email ? `${user.email.slice(0, 3)}…` : 'MISSING',
+  })
+
   if (!planId) {
     console.error(`[subscription/create] PAYPAL_${plan.toUpperCase()}_PLAN_ID not set`)
     return NextResponse.json(
@@ -50,7 +61,8 @@ export async function POST(request: NextRequest) {
     )
     return NextResponse.json({ approvalUrl })
   } catch (err) {
-    console.error('[subscription/create] PayPal error:', err)
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[subscription/create] PayPal error:', message)
     return NextResponse.json(
       { error: 'Failed to create subscription. Please try again.' },
       { status: 502 }

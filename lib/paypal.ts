@@ -15,9 +15,16 @@ const PAYPAL_BASE =
 // ---------------------------------------------------------------------------
 
 export async function getAccessToken(): Promise<string> {
-  const credentials = Buffer.from(
-    `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_SECRET}`
-  ).toString('base64')
+  const clientId = process.env.PAYPAL_CLIENT_ID
+  const secret = process.env.PAYPAL_SECRET
+
+  console.log('[paypal/getAccessToken] base URL:', PAYPAL_BASE, '| clientId:', clientId ? `${clientId.slice(0, 8)}…` : 'MISSING', '| secret:', secret ? 'set' : 'MISSING')
+
+  if (!clientId || !secret) {
+    throw new Error('PayPal credentials not configured (PAYPAL_CLIENT_ID or PAYPAL_SECRET missing)')
+  }
+
+  const credentials = Buffer.from(`${clientId}:${secret}`).toString('base64')
 
   const res = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, {
     method: 'POST',
@@ -34,6 +41,7 @@ export async function getAccessToken(): Promise<string> {
   }
 
   const data = (await res.json()) as { access_token: string }
+  console.log('[paypal/getAccessToken] token obtained successfully')
   return data.access_token
 }
 
@@ -57,6 +65,26 @@ export async function createSubscription(
   const returnUrl = `${appUrl}/dashboard?upgrade=success`
   const cancelUrl = `${appUrl}/pricing`
 
+  const requestBody = {
+    plan_id: planId,
+    custom_id: userId,
+    subscriber: {
+      email_address: userEmail,
+    },
+    application_context: {
+      brand_name: 'ShowStencil',
+      return_url: returnUrl,
+      cancel_url: cancelUrl,
+      user_action: 'SUBSCRIBE_NOW',
+      payment_method: {
+        payer_selected: 'PAYPAL',
+        payee_preferred: 'IMMEDIATE_PAYMENT_REQUIRED',
+      },
+    },
+  }
+
+  console.log('[paypal/createSubscription] POST', `${PAYPAL_BASE}/v1/billing/subscriptions`, JSON.stringify(requestBody))
+
   const res = await fetch(`${PAYPAL_BASE}/v1/billing/subscriptions`, {
     method: 'POST',
     headers: {
@@ -64,27 +92,12 @@ export async function createSubscription(
       'Content-Type': 'application/json',
       Prefer: 'return=representation',
     },
-    body: JSON.stringify({
-      plan_id: planId,
-      custom_id: userId,
-      subscriber: {
-        email_address: userEmail,
-      },
-      application_context: {
-        brand_name: 'ShowStencil',
-        return_url: returnUrl,
-        cancel_url: cancelUrl,
-        user_action: 'SUBSCRIBE_NOW',
-        payment_method: {
-          payer_selected: 'PAYPAL',
-          payee_preferred: 'IMMEDIATE_PAYMENT_REQUIRED',
-        },
-      },
-    }),
+    body: JSON.stringify(requestBody),
   })
 
   if (!res.ok) {
     const body = await res.text()
+    console.error('[paypal/createSubscription] failed:', res.status, body)
     throw new Error(`PayPal create subscription failed (${res.status}): ${body}`)
   }
 
