@@ -12,7 +12,7 @@ import {
   getUserByPayPalSubscriptionId,
   updateUserSubscription,
 } from '@/lib/db'
-import { verifyWebhookSignature, getPlanFromPayPalPlanId } from '@/lib/paypal'
+import { verifyWebhookSignature, getPlanFromPayPalPlanId, getSubscriptionDetails } from '@/lib/paypal'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -109,7 +109,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const subscriptionId = String(resource.id)
       const billingInfo = resource.billing_info as Record<string, unknown> | null
       // next_billing_time at the point of cancellation = end of current billing period
-      const nextBillingTime = (billingInfo?.next_billing_time as string | null) ?? null
+      let periodEnd = (billingInfo?.next_billing_time as string | null) ?? null
+
+      // PayPal does not guarantee next_billing_time in CANCELLED events.
+      // If missing, fetch the subscription directly to get the period end date.
+      if (!periodEnd) {
+        try {
+          const sub = await getSubscriptionDetails(subscriptionId)
+          periodEnd = sub.billing_info?.next_billing_time
+            ?? sub.billing_info?.last_payment?.time
+            ?? null
+          console.log('[paypal-webhook] CANCELLED fallback period end:', periodEnd)
+        } catch (err) {
+          console.error('[paypal-webhook] CANCELLED failed to fetch subscription details:', err)
+        }
+      }
 
       const user = await getUserByPayPalSubscriptionId(subscriptionId)
       if (!user) {
@@ -117,16 +131,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ received: true })
       }
 
-      // Do NOT set subscription_plan='free' here. The user keeps paid access until nextBillingTime.
+      // Do NOT set subscription_plan='free' here. The user keeps paid access until periodEnd.
       const ok = await updateUserSubscription(user.id, {
         subscription_status: 'cancelled',
-        current_period_end: nextBillingTime,
+        current_period_end: periodEnd,
       })
 
       if (!ok) {
         console.error(`[paypal-webhook] Failed to update cancelled status for user ${user.id}`)
       } else {
-        console.log(`[paypal-webhook] CANCELLED: user ${user.id} access until ${nextBillingTime ?? 'unknown'}`)
+        console.log(`[paypal-webhook] CANCELLED: user ${user.id} access until ${periodEnd ?? 'unknown'}`)
       }
     }
 
@@ -204,6 +218,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         console.log(`[paypal-webhook] Payment failed email sent to ${user.email}`)
       } catch (emailErr) {
         console.error(`[paypal-webhook] Failed to send payment failed email to ${user.email}:`, emailErr)
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // BILLING.SUBSCRIPTION.RE-ACTIVATED
+    // PayPal retried the failed payment and succeeded — restore active status.
+    // custom_id is the userId set at subscription creation (same as ACTIVATED).
+    // Plan and subscription ID are already set; only status needs updating.
+    // -------------------------------------------------------------------------
+    else if (eventType === 'BILLING.SUBSCRIPTION.RE-ACTIVATED') {
+      const customId = (resource.custom_id as string | null) ?? null
+
+      if (!customId) {
+        console.error('[paypal-webhook] RE-ACTIVATED: no custom_id (user_id) in resource')
+        return NextResponse.json({ received: true })
+      }
+
+      const ok = await updateUserSubscription(customId, {
+        subscription_status: 'active',
+      })
+
+      if (!ok) {
+        console.error(`[paypal-webhook] Failed to re-activate subscription for user ${customId}`)
+      } else {
+        console.log(`[paypal-webhook] RE-ACTIVATED: user ${customId}`)
       }
     }
 
