@@ -189,6 +189,9 @@ CREATE TABLE channel\_snapshots (
   estimated\_monthly\_revenue FLOAT,
   rpm FLOAT,
   momentum\_score INTEGER,
+  age\_gender\_breakdown JSONB,   -- [{ageGroup, gender, viewerPercentage}] from YouTube Analytics (Day 42)
+  top\_countries JSONB,           -- [{country, views}] top 10 countries (Day 42)
+  traffic\_sources JSONB,         -- [{source, views, watchTimeMinutes, percentage}] (Day 42)
   created\_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -667,7 +670,7 @@ const planLimits = {
 | `lib/niche-images.ts` | ✅ | getNicheImage + getShuffledNicheImages — maps niche_id to curated stock image filenames in public/niche-images/ with seeded Fisher-Yates shuffle; stable per generation seed |
 | `lib/env-validation.ts` | ✅ | validateEnv — checks 9 required env vars at startup; throws with clear list of missing keys |
 | `lib/sub-niche-detector.ts` | ✅ | detectSubNiche (Claude), calculateSubNicheSimilarity — granular sub-niche within a broad niche |
-| `lib/db.ts` (Day 13 additions) | ✅ | saveCompetitorSnapshot, getCompetitorSnapshots, getAllCompetitorSnapshotsForUser, updateCompetitorMetrics, saveCompetitorInsights, getCachedInsights |
+| `lib/db.ts` (Day 13 additions) | ✅ | saveCompetitorSnapshot, getCompetitorSnapshots, getAllCompetitorSnapshotsForUser, updateCompetitorMetrics, saveCompetitorInsights, getCachedInsights; saveChannelSnapshot extended with optional extras (demographics + trafficSources) written to three new JSONB columns (Day 42) |
 | `lib/dominator-finder.ts` | ✅ | findDominatorsForUser — niche-specific rules (sub_niche match for gaming/fitness/tech/education, broad for others) |
 | `lib/plan-limits.ts` | ✅ | PLAN_LIMITS config, getPlanLimits, canSearchThisMonth — Free: 1 total (1 auto Tier1), Starter: 6 total (2 T1 + 2 T2 + 1 Dom auto + 1 searched), Pro: 13 total (10 auto + 3 searched) |
 | `lib/competitor-matcher.ts` | ✅ | calculateTier, CompetitorMatch — tier from sub ratio, sub-niche enrichment |
@@ -785,7 +788,7 @@ const planLimits = {
 
 | File | Status | Notes |
 |---|---|---|
-| `types/index.ts` | ✅ | All interfaces + additions: User (sub_niche fields, paypal_subscription_id, thumbnail quota fields), Competitor (is_dominator, is_searched, sub_niche fields), Idea (thumbnail_image_url, thumbnail_generated_at, thumbnail_source_type, hook_2, hook_3), ThumbnailJob, PlanType, SubscriptionStatus (includes 'expired') |
+| `types/index.ts` | ✅ | All interfaces + additions: User (sub_niche fields, paypal_subscription_id, thumbnail quota fields), Competitor (is_dominator, is_searched, sub_niche fields), Idea (thumbnail_image_url, thumbnail_generated_at, thumbnail_source_type, hook_2, hook_3), ThumbnailJob, PlanType, SubscriptionStatus (includes 'expired'); ChannelSnapshot: added age_gender_breakdown, top_countries, traffic_sources nullable JSONB fields (Day 42) |
 | `types/next-auth.d.ts` | ✅ | NextAuth session type extensions |
 
 ### Scripts / Dev tooling
@@ -823,6 +826,66 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 4 — Day 42 (2026-05-12)
+
+**Bug fixes, audience data persistence, and observability improvements**
+
+*tsc --noEmit: zero errors across all changes.*
+
+---
+
+*`lib/paypal.ts` — MODIFIED (PayPal error logging):*
+* `getAccessToken()` — now validates `PAYPAL_CLIENT_ID` and `PAYPAL_SECRET` are present before constructing the credentials header; throws a clear error with the var names when missing. Added `console.log` logging the base URL and whether credentials are set (first 8 chars only, not the full secret). Logs success on token obtained.
+* `createSubscription()` — request body now constructed as a named local variable (`requestBody`) and logged via `console.log` before the `fetch` call. This makes the full subscription payload visible in Vercel logs when diagnosing 4xx failures from PayPal. No change to the request itself.
+
+*`app/api/subscription/create/route.ts` — MODIFIED:*
+* Added logging of resolved `planId` before calling `createSubscription()`.
+* Added full response body logging when PayPal returns a non-2xx status, surfacing PayPal's error message/name/description in Vercel logs.
+
+*`lib/db.ts` — MODIFIED (audience demographics persistence):*
+* `saveChannelSnapshot` signature extended with optional `extras?: { demographics: AudienceDemographics | null; trafficSources: TrafficSourceItem[] }`.
+* Three new JSONB columns written on every sync: `age_gender_breakdown` (from `AudienceDemographics.ageGender`), `top_countries` (from `AudienceDemographics.topCountries`), `traffic_sources` (from the `TrafficSourceItem[]` array). All nullable — absence of data never blocks the snapshot save.
+* Logs row counts for demographics and traffic sources when non-null.
+
+*`lib/sync-logic.ts` — MODIFIED:*
+* `syncUserChannel` now passes `{ demographics, trafficSources }` as `extras` to `saveChannelSnapshot`. Both were already being fetched from the YouTube Analytics API (`getAudienceDemographics`, `getTrafficSources`) but discarded. Now persisted silently.
+* Subscriber count fallback (`?? 45000`) removed from auto-detection call. When `latestSnapshot?.subscriber_count` is null, logs a warning and skips auto-detection entirely rather than using a fake subscriber count that produces meaningless tier buckets.
+
+*`lib/niche-engine.ts` — MODIFIED:*
+* `detectNiche`: when Claude returns `confidence === 0` (API failure, insufficient data), `saveDetectedNiche` is no longer called. Previously a failed detection would write `'entertainment'` (Claude's fallback niche string) to the users table, silently corrupting the user's niche. Now: no write on zero-confidence detections.
+
+*`lib/digest-generator.ts` — MODIFIED:*
+* Niche fallback on line ~400 changed from `'entertainment'` to `'general'` — consistent with the `'general'` fallback used elsewhere in the same file (lines ~472 and ~522).
+
+*`lib/email.ts` — MODIFIED (from address split + replyTo):*
+* Weekly digest emails: `from` hardcoded to `"ShowStencil <digest@showstencil.com>"`.
+* Trend alert emails: `from` hardcoded to `"ShowStencil <trend@showstencil.com>"`.
+* Both: `replyTo: process.env.SUPPORT_EMAIL` added so replies land in the support inbox, not a no-reply black hole.
+* Shared `FROM_EMAIL` env var constant removed — the two addresses are now different and hardcoded per type.
+* `SUPPORT_EMAIL` env var added to `.env.example`.
+
+*`app/(dashboard)/dashboard/page.tsx` — MODIFIED (no-channel guard):*
+* When `user.youtube_channel_id` is null (user authenticated with Google but never connected a YouTube channel, or the channel was disconnected), the page now renders a full-screen message explaining the situation with a support email link. `DashboardClient` is never rendered in this case — prevents a cascade of broken API calls for a user with no channel data.
+
+*`components/onboarding/StepConfirmNiche.tsx` — MODIFIED:*
+* Removed silent `'finance'` fallback on polling timeout. Previously, if niche detection didn't complete within 20 polling attempts (30 seconds), the component silently selected `'finance'` and wrote it to the DB — wrong for any non-finance creator who took longer to process. Now: on timeout, the component switches to an explicit manual selection mode where the user must choose their niche from the dropdown before continuing. No default is auto-selected.
+
+*`app/page.tsx` — MODIFIED (landing page timezone fix):*
+* `getHours()` call that drives the time-of-day sky system now wrapped in try/catch with range validation. `Intl.DateTimeFormat` silently falls back to the device's local timezone in certain browsers (Reddit in-app browser, old Android WebViews). The fix: if the computed New York offset is outside the valid range (UTC-4 to UTC-5), returns `19.0` (7pm ET = sunset scene) as a safe fallback instead of showing a random scene tied to the device clock.
+
+*`app/layout.tsx` + `package.json` — MODIFIED (Vercel Analytics):*
+* `@vercel/analytics` package installed. `<Analytics />` component added to root layout. Tracks page views and Web Vitals automatically with no additional configuration. Data visible in the Vercel dashboard under Analytics tab.
+
+*Database migration (run once in Supabase SQL editor):*
+```sql
+ALTER TABLE channel_snapshots
+  ADD COLUMN IF NOT EXISTS age_gender_breakdown JSONB,
+  ADD COLUMN IF NOT EXISTS top_countries JSONB,
+  ADD COLUMN IF NOT EXISTS traffic_sources JSONB;
+```
+
+---
 
 ### Week 4 — Day 41 (2026-05-12)
 
@@ -2622,6 +2685,12 @@ GROUP D — Public (intentionally no auth):
 * PayPal webhook verification is async (Day 41): Unlike Lemon Squeezy (HMAC-SHA256 local computation), PayPal verification requires an API call to `POST /v1/notifications/verify-webhook-signature`. This adds ~100-200ms to every webhook request but is PayPal's mandated approach. The `PAYPAL_WEBHOOK_ID` env var (from the PayPal dashboard) is required for this call. The webhook handler returns 401 immediately if verification fails, before any event processing.
 * PayPal plan IDs must be created before subscribing (Day 41): Unlike LS which uses a hosted checkout flow tied to product variants, PayPal requires billing plans to be pre-created via the API. `scripts/create-paypal-plans.ts` creates the Starter + Pro plans (each with 7-day trial cycle then infinite monthly billing). The resulting plan IDs are stored in `PAYPAL_STARTER_PLAN_ID` and `PAYPAL_PRO_PLAN_ID` env vars. These plans must be re-created for live mode (sandbox plan IDs don't work in live and vice versa).
 * Lemon Squeezy replaced because approval process was blocking go-live (Day 41): LS requires identity verification (1-3 business days) and store activation before accepting live payments. PayPal business accounts are immediately available for live transactions. Zero real paying users at migration time so no data migration was needed — only the `paypal_subscription_id` column was added; the two LS columns were dropped.
+* Audience demographics and traffic sources persisted silently on every sync (Day 42): Both data types were already being fetched from the YouTube Analytics API (`getAudienceDemographics`, `getTrafficSources`) in `sync-logic.ts` but the results were discarded. Rather than add new API calls, the existing data is now passed as optional `extras` to `saveChannelSnapshot` and stored in three new JSONB columns. Failure to fetch either never blocks the main snapshot write. Stored for future use (audience insights page, personalised digest targeting).
+* Auto-detection skips rather than guesses when no snapshot exists (Day 42): The `?? 45000` subscriber count fallback in sync-logic produced meaningless tier buckets for any creator who wasn't in the finance/mid-tier range. Fake data in tier calculation is worse than no data — it assigns competitors that are wrong for the user's actual size. The safe behaviour is to skip detection and retry next sync when the real subscriber count is available.
+* Niche detection never writes on zero-confidence results (Day 42): When Claude's `detectNiche` returns `confidence === 0` (API failure, empty video list, or ambiguous signal), writing the default fallback niche to the DB corrupts all downstream logic: competitor detection uses the wrong niche, digest prompts reference the wrong niche, insights are for the wrong audience. The fix is to write nothing — the user stays niche-less until detection succeeds, which is handled gracefully by all downstream consumers.
+* Dashboard blocks entirely on null `youtube_channel_id` (Day 42): A user can authenticate with Google (creating a users row) but have no YouTube channel linked — either because the Google account has no channel, or the channel was deauthorised. Without a channel ID, every API call downstream (sync, competitor fetch, gap score) would fail or return empty data. Rather than show a broken dashboard, the page renders a full-screen explanation with a support email link. `DashboardClient` is never mounted in this state.
+* Onboarding niche timeout requires explicit selection, no silent default (Day 42): The previous `'finance'` fallback on polling timeout would write a wrong niche for most users — only ~30% of creators are in finance. A wrong niche means wrong competitors, wrong digest, wrong ideas. The fix forces the user to make a conscious choice from the dropdown. There is no "best guess" when the guess is wrong 70% of the time.
+* Email from addresses are split by email type (Day 42): `digest@showstencil.com` for weekly digests, `trend@showstencil.com` for trend alerts. A single shared `FROM_EMAIL` env var was removed because the two addresses are permanently different — digest emails and alerts serve different purposes and should be distinguishable in the user's inbox. Both add `replyTo: SUPPORT_EMAIL` so replies route to the support inbox rather than bouncing.
 
 \---
 
@@ -2638,6 +2707,8 @@ GROUP D — Public (intentionally no auth):
 * Anthropic API: https://docs.anthropic.com
 
 \---
+
+*Last updated: 2026-05-12 — Day 42: PayPal error logging (getAccessToken validates credentials, createSubscription logs full request body). Audience demographics + traffic sources now persisted in channel_snapshots (age_gender_breakdown, top_countries, traffic_sources JSONB columns). Subscriber count ?? 45000 fallback removed from sync-logic — auto-detection skipped when no snapshot exists. Niche corruption fix: detectNiche no longer writes niche on confidence===0. Digest niche fallback aligned to 'general'. Email from addresses split: digest@showstencil.com for weekly digest, trend@showstencil.com for alerts; both add replyTo SUPPORT_EMAIL. Dashboard guards against null youtube_channel_id (no-channel error screen). StepConfirmNiche timeout now switches to manual selection instead of silently writing 'finance'. Landing page timezone fallback for broken browsers (try/catch + range check on ET offset). Vercel Analytics added (@vercel/analytics). tsc --noEmit: zero errors.*
 
 *Last updated: 2026-05-12 — Day 41: Payment system migrated from Lemon Squeezy to PayPal Subscriptions API. lib/lemonsqueezy.ts deleted; lib/paypal.ts created (getAccessToken, createSubscription, cancelSubscription, getSubscriptionDetails, verifyWebhookSignature, getPlanFromPayPalPlanId). scripts/create-paypal-plans.ts added. app/api/subscription/create/route.ts created. app/api/webhooks/paypal/route.ts created (ACTIVATED/CANCELLED/EXPIRED/SUSPENDED/PAYMENT.SALE.COMPLETED). webhooks/lemonsqueezy/ and create-checkout-session/ directories deleted. cancel/route.ts rewritten to use PayPal API. account/delete/route.ts rewritten to use paypal_subscription_id. types/index.ts: lemon_squeezy_* → paypal_subscription_id. lib/db.ts: getUserByLSCustomerId/SubscriptionId removed → getUserByPayPalSubscriptionId added. PricingClient.tsx: checkout + downgrade text updated. .env.example: LS vars removed, PayPal vars added. @lemonsqueezy/lemonsqueezy.js uninstalled. SQL migration: paypal_subscription_id column added, lemon_squeezy_* columns dropped. tsc --noEmit: zero errors.*
 
