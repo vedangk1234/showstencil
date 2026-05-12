@@ -97,6 +97,7 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
         alert('No checkout URL received. Please try again.')
         return
       }
+      console.log('[paypal] approve URL:', data.approvalUrl)
       window.location.href = data.approvalUrl
       setTimeout(() => setLoadingPlan(null), 3000)
     } catch {

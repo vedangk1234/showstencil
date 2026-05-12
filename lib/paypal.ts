@@ -76,10 +76,6 @@ export async function createSubscription(
       return_url: returnUrl,
       cancel_url: cancelUrl,
       user_action: 'SUBSCRIBE_NOW',
-      payment_method: {
-        payer_selected: 'PAYPAL',
-        payee_preferred: 'IMMEDIATE_PAYMENT_REQUIRED',
-      },
     },
   }
 

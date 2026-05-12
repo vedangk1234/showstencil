@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
       session.user.id,
       user.email
     )
+    console.log('[subscription/create] returning to frontend:', JSON.stringify({ approvalUrl }))
     return NextResponse.json({ approvalUrl })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
