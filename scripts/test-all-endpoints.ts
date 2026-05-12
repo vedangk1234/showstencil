@@ -1213,36 +1213,48 @@ async function testPlanGating(): Promise<void> {
 // ─── Section 15 — Payments ────────────────────────────────────────────────────
 
 async function testPayments(): Promise<void> {
-  await section('15. Payments (Lemon Squeezy)', async () => {
-    if (process.env.LEMONSQUEEZY_API_KEY) {
-      pass('15.1 LemonSqueezy API key', 'present')
+  await section('15. Payments (PayPal)', async () => {
+    if (process.env.PAYPAL_CLIENT_ID) {
+      pass('15.1 PayPal client ID', 'present')
     } else {
-      warn('15.1 LemonSqueezy API key', 'missing — checkout will not work')
+      warn('15.1 PayPal client ID', 'missing — checkout will not work')
     }
 
-    if (process.env.LEMONSQUEEZY_WEBHOOK_SECRET) {
-      pass('15.2 Webhook secret', 'present')
+    if (process.env.PAYPAL_SECRET) {
+      pass('15.2 PayPal secret', 'present')
     } else {
-      warn('15.2 Webhook secret', 'missing — webhooks will be rejected')
+      warn('15.2 PayPal secret', 'missing — checkout will not work')
     }
 
-    if (process.env.LEMONSQUEEZY_STORE_ID) {
-      pass('15.3 Store ID', process.env.LEMONSQUEEZY_STORE_ID)
+    if (process.env.PAYPAL_WEBHOOK_ID) {
+      pass('15.3 PayPal webhook ID', 'present')
     } else {
-      warn('15.3 Store ID', 'missing')
+      warn('15.3 PayPal webhook ID', 'missing — webhooks will be rejected')
+    }
+
+    if (process.env.PAYPAL_STARTER_PLAN_ID) {
+      pass('15.4 Starter plan ID', process.env.PAYPAL_STARTER_PLAN_ID)
+    } else {
+      warn('15.4 Starter plan ID', 'missing — run scripts/create-paypal-plans.ts')
+    }
+
+    if (process.env.PAYPAL_PRO_PLAN_ID) {
+      pass('15.5 Pro plan ID', process.env.PAYPAL_PRO_PLAN_ID)
+    } else {
+      warn('15.5 Pro plan ID', 'missing — run scripts/create-paypal-plans.ts')
     }
 
     const supabase = createServiceClient()
     const { data: user } = await supabase
       .from('users')
-      .select('lemon_squeezy_customer_id, lemon_squeezy_subscription_id')
+      .select('paypal_subscription_id')
       .eq('id', TEST_USER_ID)
       .single()
 
-    if (user?.lemon_squeezy_customer_id) {
-      pass('15.4 LS customer ID', user.lemon_squeezy_customer_id as string)
+    if (user?.paypal_subscription_id) {
+      pass('15.6 PayPal subscription ID', user.paypal_subscription_id as string)
     } else {
-      warn('15.4 LS customer ID', 'null — test user has not paid yet')
+      warn('15.6 PayPal subscription ID', 'null — test user has not subscribed yet')
     }
   })
 }
@@ -1268,11 +1280,12 @@ async function testEnvVars(): Promise<void> {
 
     const optional = [
       'RESEND_FROM_EMAIL',
-      'LEMONSQUEEZY_API_KEY',
-      'LEMONSQUEEZY_WEBHOOK_SECRET',
-      'LEMONSQUEEZY_STORE_ID',
-      'LEMONSQUEEZY_VARIANT_ID_STARTER',
-      'LEMONSQUEEZY_VARIANT_ID_PRO',
+      'PAYPAL_CLIENT_ID',
+      'PAYPAL_SECRET',
+      'PAYPAL_MODE',
+      'PAYPAL_WEBHOOK_ID',
+      'PAYPAL_STARTER_PLAN_ID',
+      'PAYPAL_PRO_PLAN_ID',
       'GEMINI_API_KEY',
       'GOOGLE_GEMINI_API_KEY',
       'SENTRY_DSN',

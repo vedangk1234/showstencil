@@ -8,7 +8,7 @@ DOMAIN AND URLS
 [ ] Update NEXTAUTH_URL to https://showstencil.com
 [ ] Update NEXT_PUBLIC_APP_URL to https://showstencil.com
 [ ] Update Google OAuth redirect URI to https://showstencil.com/api/auth/callback/google
-[ ] Update Lemon Squeezy webhook URL to https://showstencil.com/api/webhooks/lemonsqueezy
+[ ] Update PayPal webhook URL to https://showstencil.com/api/webhooks/paypal
 [ ] Update RESEND_FROM_EMAIL to digest@showstencil.com
 [ ] Verify showstencil.com domain in Resend dashboard
 [ ] Delete nixlytics-u6k1.vercel.app alias from Vercel after custom domain is live
@@ -22,21 +22,20 @@ Currently the download button opens the image in a new tab / full screen instead
 YouTube thumbnails must be 16:9 ratio (1280x720px). The current Gemini output is square (1:1). This means if a user puts it on YouTube it will be cropped or letterboxed. Fix: either prompt Gemini with explicit 1280x720 or 16:9 instructions, or post-process the image to crop/pad to 16:9 before showing it to the user. Until fixed, add a warning label under the thumbnail: "Note: resize to 1280×720 before uploading to YouTube."
 
 PAYMENTS
-[ ] Switch Lemon Squeezy from test mode to live mode
-[ ] Complete any remaining Lemon Squeezy account verification
-[ ] Do a real $1 test transaction with your own card to confirm payouts work
-LEMON SQUEEZY
-[ ] Wait for identity verification approval (1-3 business days)
-[ ] After approval — activate store for live payments
-[ ] After activation — update Email settings:
-    Company name: ShowStencil
-    Default sender name: ShowStencil
-    Add Pune address for CAN-SPAM compliance
-LEMON SQUEEZY — Before Go Live
-[ ] Record a 3-5 minute demo video of the full product flow
-[ ] Reply to Tanushree with website, demo video, pricing, social profiles
-[ ] Wait for identity verification approval
-[ ] Activate store after approval
+[ ] Switch PayPal from sandbox to live mode (set PAYPAL_MODE=live in Vercel)
+[ ] Complete PayPal business account verification if not done
+[ ] Run scripts/create-paypal-plans.ts against live PayPal to create real plan IDs
+[ ] Update PAYPAL_STARTER_PLAN_ID and PAYPAL_PRO_PLAN_ID in Vercel env vars
+[ ] Update PAYPAL_WEBHOOK_ID in Vercel env vars after registering live webhook
+[ ] Do a real $1 test transaction with your own PayPal account to confirm payouts work
+PAYPAL — Before Go Live
+[ ] Register webhook at developer.paypal.com → My Apps → Webhooks
+    URL: https://showstencil.com/api/webhooks/paypal
+    Events: BILLING.SUBSCRIPTION.ACTIVATED, BILLING.SUBSCRIPTION.CANCELLED,
+            BILLING.SUBSCRIPTION.EXPIRED, BILLING.SUBSCRIPTION.SUSPENDED,
+            PAYMENT.SALE.COMPLETED
+[ ] Copy the Webhook ID and add as PAYPAL_WEBHOOK_ID env var
+[ ] Confirm webhook verification works with a live test subscription
 
 MONITORING
 [ ] Add Sentry.io for error monitoring (free tier)
@@ -48,7 +47,7 @@ LEGAL
 [ ] Add Privacy Policy page to app at /privacy
 [ ] Add Terms of Service page to app at /terms
 [ ] Add links to both in the footer of every page
-[ ] Add links to both in the Lemon Squeezy checkout
+[ ] Add links to both in the PayPal subscription confirmation emails
 
 GOOGLE
 [ ] Wait for Google OAuth verification approval (2-4 weeks)
@@ -81,7 +80,7 @@ PERFORMANCE
 [ ] Any page taking over 3 seconds — fix before public launch
 
 SECURITY
-[ ] Run: grep -r 'ANTHROPIC\|LEMONSQUEEZY\|SUPABASE' .next/ and confirm zero results
+[ ] Run: grep -r 'ANTHROPIC\|PAYPAL_SECRET\|SUPABASE_SERVICE' .next/ and confirm zero results
 [ ] Add rate limiting to all API endpoints (max 60 requests per minute per user)
 [ ] Add input validation and sanitisation on all user inputs
 [ ] Confirm Supabase RLS — user A cannot see user B data
@@ -119,7 +118,7 @@ DOMAIN — Before Go Live
 [ ] Buy showstencil.com on BigRock (~₹1,130/year)
 [ ] Follow the 8-step domain connection checklist above
 [ ] Takes 30-40 minutes total
-[ ] Do this on Day 18 before switching Lemon Squeezy to live mode
+[ ] Do this before switching PAYPAL_MODE from sandbox to live
 
 POST LAUNCH
 [ ] Fix top issues from beta user feedback

@@ -42,7 +42,7 @@ Pricing:
 |Auth|NextAuth.js v5|Google OAuth with YouTube scopes|
 |Charts|Recharts|Lightweight, React native|
 |Email|Resend + React Email|Clean API, generous free tier|
-|Payments|Lemon Squeezy|Hosted checkout + webhook handling (replaced Stripe)|
+|Payments|PayPal Subscriptions API|Hosted checkout + webhook handling (replaced Lemon Squeezy)|
 |AI Digest|Anthropic Claude Sonnet 4.6 API|NOT Opus — cost control|
 |Hosting|Vercel|Auto-deploy from GitHub|
 |Monitoring|Sentry (errors) + UptimeRobot (uptime)|Free tiers|
@@ -102,7 +102,7 @@ showstencil/
 │   ├── trend-detector.ts             ← viral video detection
 │   ├── digest-generator.ts           ← Claude API integration
 │   ├── email.ts                      ← Resend email functions
-│   ├── stripe.ts                     ← replaced by Lemon Squeezy (stub)
+│   ├── stripe.ts                     ← replaced by PayPal (stub)
 │   ├── access.ts                     ← plan gating (canAccess function)
 │   ├── db.ts                         ← all Supabase database operations
 │   ├── utils.ts                      ← shared utilities
@@ -658,8 +658,8 @@ const planLimits = {
 | `lib/idea-generator.ts` | 🗑️ deleted | Superseded by `app/api/ideas/generate/route.ts` (Day 20). Dead JSONB schema writer removed Day 32. |
 | `lib/revenue-benchmarks.ts` | ✅ | getNicheBenchmarks (12 niches), calculateRevenuePotential, getBenchmarkComparison, getSubscriberTier |
 | `lib/email.ts` | ✅ | sendWeeklyDigest, sendTrendAlert, checkAndSendAlerts, generateUnsubscribeToken |
-| `lib/stripe.ts` | 🔲 | Replaced by Lemon Squeezy — file deleted; use lib/lemonsqueezy.ts |
-| `lib/lemonsqueezy.ts` | ✅ | createCheckoutSession (LS JS SDK), getVariantId — replaces lib/stripe.ts |
+| `lib/stripe.ts` | 🔲 | Replaced by PayPal — file deleted; use lib/paypal.ts |
+| `lib/paypal.ts` | ✅ | getAccessToken, createSubscription, cancelSubscription, getSubscriptionDetails, verifyWebhookSignature, getPlanFromPayPalPlanId — replaces lib/lemonsqueezy.ts (Day 41) |
 | `lib/access.ts` | ✅ | canAccess, getCompetitorLimit (free:1, starter:6, pro:13), getIdeaLimit (free:1, starter:3, pro:10), getViralLimit, getTopicLimit, getArchiveWeeks, getUpgradeMessage, canGenerateThumbnail; FEATURE_GATES: alerts:daily (starter+), insights:ai (starter+), search:compare (pro only); getUserPlan: cancelled+future current_period_end → keeps stored plan, cancelled+past period or expired → free |
 | `lib/utils.ts` | ✅ | Shared formatting/date utilities — cn() Tailwind class merger (clsx + tailwind-merge) |
 | `lib/competitor-metrics.ts` | ✅ | calculateCompetitorMetrics — pure function, no DB calls; computes video_count, avg_views, avg_length, upload_frequency_30d, velocity_score_avg from a video row array |
@@ -692,8 +692,8 @@ const planLimits = {
 | `app/api/cron/sub-niche-detection/route.ts` | ✅ | Runs daily 5am UTC; refreshes sub_niche for users missing it or stale >30 days |
 | `app/api/cron/dominator-refresh/route.ts` | ✅ | Runs daily 4am UTC; finds + updates Dominator (Tier 3) competitor for all active users |
 | `app/api/cron/daily/route.ts` | 🗑️ deleted | Old Week 1 stub — deleted Day 36; fully superseded by the 5 dedicated cron routes above |
-| `app/api/create-checkout-session/route.ts` | ✅ | Lemon Squeezy checkout redirect |
-| `app/api/webhooks/lemonsqueezy/route.ts` | ✅ | LS webhook: subscription_created/updated/cancelled/expired/payment_failed; HMAC-SHA256 signature verification; subscription_cancelled preserves plan + stores ends_at; subscription_expired downgrades to free |
+| `app/api/subscription/create/route.ts` | ✅ | PayPal subscription checkout — reads plan from body, calls createSubscription(), returns approvalUrl for redirect |
+| `app/api/webhooks/paypal/route.ts` | ✅ | PayPal webhook: BILLING.SUBSCRIPTION.ACTIVATED/CANCELLED/EXPIRED/SUSPENDED + PAYMENT.SALE.COMPLETED; verifyWebhookSignature via PayPal API; CANCELLED preserves plan + stores billing_info.next_billing_time; EXPIRED downgrades to free; SUSPENDED sends payment failed email (Day 41) |
 | `app/api/competitors/[id]/sync/route.ts` | ✅ | POST manually re-syncs videos for a single competitor — auth + ownership check, fetches last 10 YouTube videos, upserts to competitor_videos |
 | `app/api/thumbnail-jobs/[jobId]/status/route.ts` | ✅ | GET thumbnail job status — auth-gated; returns status/thumbnail_url/error_message/timestamps |
 | `app/api/health/route.ts` | ✅ | GET — public, no auth; returns { status: 'ok', timestamp } for uptime monitoring |
@@ -785,7 +785,7 @@ const planLimits = {
 
 | File | Status | Notes |
 |---|---|---|
-| `types/index.ts` | ✅ | All interfaces + additions: User (sub_niche fields, LS payment fields, thumbnail quota fields), Competitor (is_dominator, is_searched, sub_niche fields), Idea (thumbnail_image_url, thumbnail_generated_at, thumbnail_source_type, hook_2, hook_3), ThumbnailJob, PlanType, SubscriptionStatus updated to Lemon Squeezy strings |
+| `types/index.ts` | ✅ | All interfaces + additions: User (sub_niche fields, paypal_subscription_id, thumbnail quota fields), Competitor (is_dominator, is_searched, sub_niche fields), Idea (thumbnail_image_url, thumbnail_generated_at, thumbnail_source_type, hook_2, hook_3), ThumbnailJob, PlanType, SubscriptionStatus (includes 'expired') |
 | `types/next-auth.d.ts` | ✅ | NextAuth session type extensions |
 
 ### Scripts / Dev tooling
@@ -823,6 +823,76 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 4 — Day 41 (2026-05-12)
+
+**Payment system migrated from Lemon Squeezy to PayPal Subscriptions API**
+
+*tsc --noEmit: zero errors. @lemonsqueezy/lemonsqueezy.js package removed.*
+
+---
+
+*`lib/paypal.ts` — NEW (replaces lib/lemonsqueezy.ts):*
+* `getAccessToken()` — client_credentials OAuth via `POST /v1/oauth2/token`, reads `PAYPAL_CLIENT_ID` + `PAYPAL_SECRET`, switches base URL on `PAYPAL_MODE` env var (sandbox vs live).
+* `createSubscription(planId, userId, userEmail)` — `POST /v1/billing/subscriptions`, sets `custom_id: userId`, return_url → `/dashboard?upgrade=success`, cancel_url → `/pricing`. Returns `{ subscriptionId, approvalUrl }`.
+* `cancelSubscription(subscriptionId)` — `POST /v1/billing/subscriptions/{id}/cancel`.
+* `getSubscriptionDetails(subscriptionId)` — `GET /v1/billing/subscriptions/{id}`.
+* `verifyWebhookSignature(headers, body)` — async verification via PayPal's own `POST /v1/notifications/verify-webhook-signature` API; reads `PAYPAL_WEBHOOK_ID`.
+* `getPlanFromPayPalPlanId(planId)` — maps `PAYPAL_STARTER_PLAN_ID` / `PAYPAL_PRO_PLAN_ID` env vars to `'starter'` / `'pro'`.
+
+*`lib/lemonsqueezy.ts` — DELETED*
+
+*`scripts/create-paypal-plans.ts` — NEW:*
+* Gets OAuth token, creates "ShowStencil" product, creates Starter ($29/mo) and Pro ($79/mo) billing plans each with 7-day TRIAL cycle then infinite REGULAR cycle.
+* Prints `PAYPAL_STARTER_PLAN_ID` and `PAYPAL_PRO_PLAN_ID` to terminal — copy into Vercel env vars.
+* Run: `npx tsx --env-file=.env.local scripts/create-paypal-plans.ts`
+
+*`app/api/subscription/create/route.ts` — NEW:*
+* Auth-gated POST. Reads `plan` from body, resolves `PAYPAL_STARTER_PLAN_ID` / `PAYPAL_PRO_PLAN_ID`, calls `createSubscription()`, returns `{ approvalUrl }` for frontend redirect.
+
+*`app/api/subscription/cancel/route.ts` — REWRITTEN:*
+* Now reads `paypal_subscription_id` (not LS fields). Calls `getSubscriptionDetails()` first to extract `billing_info.next_billing_time` as `current_period_end`, then calls `cancelSubscription()`. Same grace period logic preserved — `subscription_plan` is NOT changed.
+
+*`app/api/webhooks/paypal/route.ts` — NEW (replaces webhooks/lemonsqueezy):*
+* Verifies signature via `verifyWebhookSignature()` — async PayPal API call, returns 401 on failure.
+* `BILLING.SUBSCRIPTION.ACTIVATED` — reads `resource.custom_id` (userId set at creation), `resource.plan_id` (mapped to plan via `getPlanFromPayPalPlanId`), `billing_info.next_billing_time` (stored as `current_period_end`). Sets `subscription_status='active'`.
+* `BILLING.SUBSCRIPTION.CANCELLED` — reads `resource.id` (subscription ID), looks up user via `getUserByPayPalSubscriptionId`, stores `billing_info.next_billing_time` as `current_period_end`. Does NOT drop plan to free.
+* `BILLING.SUBSCRIPTION.EXPIRED` — sets `subscription_status='expired'`, `subscription_plan='free'`.
+* `BILLING.SUBSCRIPTION.SUSPENDED` — sets `subscription_status='past_due'`, sends payment failed email via Resend.
+* `PAYMENT.SALE.COMPLETED` — logs amount + currency only.
+
+*`app/api/webhooks/lemonsqueezy/` — DELETED (entire directory)*
+
+*`app/api/create-checkout-session/` — DELETED (entire directory)*
+
+*`lib/db.ts` — MODIFIED:*
+* Removed `getUserByLSCustomerId` and `getUserByLSSubscriptionId`.
+* Added `getUserByPayPalSubscriptionId(subscriptionId)` — queries `paypal_subscription_id` column.
+* `updateUserSubscription` data type: removed `lemon_squeezy_customer_id?` and `lemon_squeezy_subscription_id?`, added `paypal_subscription_id?: string`.
+
+*`types/index.ts` — MODIFIED:*
+* `User` interface: removed `lemon_squeezy_customer_id` and `lemon_squeezy_subscription_id`, added `paypal_subscription_id: string | null`.
+
+*`app/pricing/PricingClient.tsx` — MODIFIED:*
+* Checkout: `/api/create-checkout-session` → `/api/subscription/create`, `data.url` → `data.approvalUrl`.
+* Both "Manage subscription at Lemon Squeezy" spans → "Manage subscription at PayPal".
+
+*`app/api/account/delete/route.ts` — REWRITTEN:*
+* Reads `paypal_subscription_id` (not LS fields), calls `cancelSubscription()` from `lib/paypal`. Same FK-order DB deletion preserved.
+
+*Database migration (run once in Supabase SQL editor):*
+```sql
+ALTER TABLE users ADD COLUMN IF NOT EXISTS paypal_subscription_id TEXT;
+ALTER TABLE users DROP COLUMN IF EXISTS lemon_squeezy_customer_id;
+ALTER TABLE users DROP COLUMN IF EXISTS lemon_squeezy_subscription_id;
+```
+
+*`.env.example` — MODIFIED:*
+* Removed `LEMONSQUEEZY_*` block. Added `PAYPAL_CLIENT_ID`, `PAYPAL_SECRET`, `PAYPAL_MODE`, `PAYPAL_STARTER_PLAN_ID`, `PAYPAL_PRO_PLAN_ID`, `PAYPAL_WEBHOOK_ID`.
+
+*`@lemonsqueezy/lemonsqueezy.js` — UNINSTALLED from package.json.*
+
+---
 
 ### Week 4 — Day 40 (2026-05-08)
 
@@ -909,7 +979,7 @@ All use inline `animate-pulse` Tailwind styles — no external component needed.
 
 *Cancel subscription flow (as of Day 39 — corrected by Day 40 grace period fix):*
 * `components/settings/CancelSubscription.tsx` — NEW Client Component. "Cancel Subscription" button opens a confirmation modal. Confirm calls `POST /api/subscription/cancel`. On success shows a "Subscription cancelled — access until [date]" confirmation state before closing and triggering `router.refresh()`. Day 40: added `cancelled` + `accessUntil` states; `router.refresh()` moved to `handleClose()` so it only fires after the user dismisses the confirmation.
-* `app/api/subscription/cancel/route.ts` — NEW. Auth-gated. Reads `lemon_squeezy_subscription_id` from DB. Calls LS `DELETE /v1/subscriptions/:id`. Day 40 fix: parses `ends_at` from LS response, stores as `current_period_end`, does NOT write `subscription_plan='free'`. Returns `{ success: true, accessUntil }` or 502 on LS error.
+* `app/api/subscription/cancel/route.ts` — NEW. Auth-gated. Reads `paypal_subscription_id` from DB. Calls `getSubscriptionDetails()` to extract `billing_info.next_billing_time` as `current_period_end`, then calls `cancelSubscription()`. Does NOT write `subscription_plan='free'`. Returns `{ success: true, accessUntil }`. (Day 41: migrated from Lemon Squeezy to PayPal.)
 * `app/(dashboard)/settings/page.tsx` — `CancelSubscription` rendered in Subscription section when `subscription_status === 'active' || 'on_trial'`. Day 40: added amber "Subscription cancelled — [Plan] access until [date]" info row for cancelled users; "Renews" row suppressed for cancelled users.
 
 ---
@@ -948,7 +1018,7 @@ All use inline `animate-pulse` Tailwind styles — no external component needed.
 * Calls `POST /api/account/delete`. On success, calls `signOut({ callbackUrl: '/' })`.
 
 *`app/api/account/delete/route.ts` — NEW:*
-* Auth-gated. Cancels LS subscription if `lemon_squeezy_subscription_id` is set (best-effort, logs error but proceeds). Deletes all user data in FK order: `thumbnail_jobs → ideas → digests → trends → gap_scores → competitor_videos → competitor_snapshots → competitors → channel_snapshots → videos → user_settings → user_search_history → dominator_history → users`.
+* Auth-gated. Cancels PayPal subscription if `paypal_subscription_id` is set (best-effort, logs error but proceeds). Deletes all user data in FK order: `thumbnail_jobs → ideas → digests → trends → gap_scores → competitor_videos → competitor_snapshots → competitors → channel_snapshots → videos → user_settings → user_search_history → dominator_history → users`.
 
 ---
 
@@ -2485,9 +2555,9 @@ GROUP D — Public (intentionally no auth):
 | Collaboration Finder | Pro only | Identifies Tier 1 and Tier 2 competitors in the same sub-niche that would benefit from a collaboration; scores by audience overlap and growth velocity | New Claude prompt needed; requires sub-niche similarity scoring from `lib/sub-niche-detector.ts` |
 | Digest email re-subscribe flow | All plans | If a user unsubscribes via the one-click link, they have no way to re-subscribe from email — they must go to /settings. A "re-subscribe" link in the unsubscribe confirmation page is missing | `app/api/unsubscribe/route.ts` handles the unsubscribe; needs a `/api/resubscribe?token=X` counterpart |
 | Topic coverage gap score | All plans | `topic_coverage_gap_score` is a stub returning 0 in `lib/gap-scorer.ts`; the dashboard strip hides it | Needs `findUncoveredTopics` result piped into the scorer; removed from dashboard until built (Day 9 decision) |
-| Pricing page checkout wiring | All plans | `app/pricing/page.tsx` shows the plan comparison table but the CTA buttons link to `/api/create-checkout-session` which uses `lib/lemonsqueezy.ts` — needs to verify the variant IDs are correctly wired end-to-end in production | `LEMONSQUEEZY_STARTER_VARIANT_ID` / `LEMONSQUEEZY_PRO_VARIANT_ID` must be set in Vercel env vars |
+| Pricing page checkout wiring | All plans | `app/pricing/page.tsx` CTA buttons call `/api/subscription/create` which uses `lib/paypal.ts` — needs `PAYPAL_STARTER_PLAN_ID` and `PAYPAL_PRO_PLAN_ID` set in Vercel env vars (run `scripts/create-paypal-plans.ts` to generate them) | Done for sandbox; run the script against live PayPal before go live |
 | `app/(auth)/callback/page.tsx` | — | OAuth callback page — not needed; NextAuth handles the callback automatically at `/api/auth/callback/google` | Directory placeholder exists as `.gitkeep`; no code needed |
-| `app/api/webhooks/stripe/` | — | Stripe webhook handler directory — empty `.gitkeep`; Stripe replaced by Lemon Squeezy | Can be deleted in cleanup |
+| `app/api/webhooks/stripe/` | — | Stripe webhook handler directory — empty `.gitkeep`; Stripe replaced by PayPal | Can be deleted in cleanup |
 
 ---
 
@@ -2548,6 +2618,10 @@ GROUP D — Public (intentionally no auth):
 * Text-only logo avoids boxed icon at small sizes (Day 39): The previous boxed-S SVG looked like a generic icon at 14px sidebar width. Replaced with plain "SHOWSTENCIL." in Montserrat 700 — matches the brand name exactly, readable at all sizes, no icon-to-text ambiguity in narrow sidebars.
 * Cancellation uses billing grace period, not immediate downgrade (Day 40): When a user cancels, setting `subscription_plan='free'` immediately is hostile — they've paid for the rest of the month. The cancel route now stores `ends_at` from LS as `current_period_end` and keeps `subscription_plan` unchanged. `lib/access.ts` grants full plan access while `current_period_end` is in the future. The actual free downgrade happens only when Lemon Squeezy fires `subscription_expired` at the true end of the billing period. This also means `subscription_expired` must be handled in the webhook — without it, cancelled users would retain paid access forever. Two-event model: `subscription_cancelled` = "they've decided to stop" → grace period begins; `subscription_expired` = "their time is up" → drop to free.
 * `SubscriptionStatus` type must include every value written to DB (Day 40): The `subscription_expired` webhook handler writes `'expired'` to the `subscription_status` column. The TypeScript type `SubscriptionStatus` was missing `'expired'` (it had `'paused'` instead). This was a silent type mismatch — code compiles, Supabase accepts any string, but TypeScript consumers of the type would not handle `'expired'` in exhaustive switch cases. Added `'expired'` to the union. Rule: whenever a new status string is introduced in a webhook handler, update the type in the same commit.
+* PayPal user identification uses custom_id on ACTIVATED, subscription ID on all other events (Day 41): When creating a PayPal subscription, `custom_id: userId` is embedded in the request. The BILLING.SUBSCRIPTION.ACTIVATED webhook is the only event where PayPal returns this custom_id in the resource body — so it's the only event where we can look up the user by their app userId. For CANCELLED/EXPIRED/SUSPENDED events, the custom_id is not returned; instead we look up by `resource.id` (the PayPal subscription ID) via `getUserByPayPalSubscriptionId`. This asymmetry is expected — the ACTIVATED event is the one that establishes the mapping between PayPal subscription ID and our user.
+* PayPal webhook verification is async (Day 41): Unlike Lemon Squeezy (HMAC-SHA256 local computation), PayPal verification requires an API call to `POST /v1/notifications/verify-webhook-signature`. This adds ~100-200ms to every webhook request but is PayPal's mandated approach. The `PAYPAL_WEBHOOK_ID` env var (from the PayPal dashboard) is required for this call. The webhook handler returns 401 immediately if verification fails, before any event processing.
+* PayPal plan IDs must be created before subscribing (Day 41): Unlike LS which uses a hosted checkout flow tied to product variants, PayPal requires billing plans to be pre-created via the API. `scripts/create-paypal-plans.ts` creates the Starter + Pro plans (each with 7-day trial cycle then infinite monthly billing). The resulting plan IDs are stored in `PAYPAL_STARTER_PLAN_ID` and `PAYPAL_PRO_PLAN_ID` env vars. These plans must be re-created for live mode (sandbox plan IDs don't work in live and vice versa).
+* Lemon Squeezy replaced because approval process was blocking go-live (Day 41): LS requires identity verification (1-3 business days) and store activation before accepting live payments. PayPal business accounts are immediately available for live transactions. Zero real paying users at migration time so no data migration was needed — only the `paypal_subscription_id` column was added; the two LS columns were dropped.
 
 \---
 
@@ -2565,13 +2639,15 @@ GROUP D — Public (intentionally no auth):
 
 \---
 
+*Last updated: 2026-05-12 — Day 41: Payment system migrated from Lemon Squeezy to PayPal Subscriptions API. lib/lemonsqueezy.ts deleted; lib/paypal.ts created (getAccessToken, createSubscription, cancelSubscription, getSubscriptionDetails, verifyWebhookSignature, getPlanFromPayPalPlanId). scripts/create-paypal-plans.ts added. app/api/subscription/create/route.ts created. app/api/webhooks/paypal/route.ts created (ACTIVATED/CANCELLED/EXPIRED/SUSPENDED/PAYMENT.SALE.COMPLETED). webhooks/lemonsqueezy/ and create-checkout-session/ directories deleted. cancel/route.ts rewritten to use PayPal API. account/delete/route.ts rewritten to use paypal_subscription_id. types/index.ts: lemon_squeezy_* → paypal_subscription_id. lib/db.ts: getUserByLSCustomerId/SubscriptionId removed → getUserByPayPalSubscriptionId added. PricingClient.tsx: checkout + downgrade text updated. .env.example: LS vars removed, PayPal vars added. @lemonsqueezy/lemonsqueezy.js uninstalled. SQL migration: paypal_subscription_id column added, lemon_squeezy_* columns dropped. tsc --noEmit: zero errors.*
+
 *Last updated: 2026-05-08 — Day 40: Cancellation grace period fix. cancel/route.ts: parses ends_at from LS response, stores as current_period_end, keeps subscription_plan unchanged. webhooks/lemonsqueezy: subscription_cancelled preserves plan + stores ends_at; new subscription_expired handler sets plan='free' (only place downgrade happens). lib/access.ts: getUserPlan now reads current_period_end; cancelled+future period → stored plan. types/index.ts: 'expired' added to SubscriptionStatus (was missing, causing type mismatch bug). CancelSubscription.tsx: success confirmation state shows "access until [date]" before router.refresh(). settings/page.tsx: "Renews" suppressed for cancelled users; amber "access until" info row added. tsc --noEmit: zero errors.*
 
 *Last updated: 2026-05-08 — Day 39: Sentry monitoring integrated (client/server/edge configs + instrumentation.ts + global-error.tsx). Loading skeleton pages for all 5 dashboard routes. Thumbnail pipeline overhauled: stick figure removed, 16:9 safe-zone prompt, server-side padToSixteenNine via sharp. Regenerate thumbnail button removed — one per idea. Text-only SHOWSTENCIL. logo (Montserrat 700). Cancel subscription flow: CancelSubscription.tsx + POST /api/subscription/cancel. Free tier now gets 1 competitor + 1 idea (was blocked). Insights:ai gated to Starter+ (free shows locked prompt). Bolder/controversial hooks locked for free. Thumbnail button locked for free. Pricing page rebuilt as PricingClient.tsx 3-card layout. Delete account Danger Zone extended: cancel button now shows for on_trial too. Auto-detection upgraded: 2 Tier1 + 2 Tier2 + 1 Dominator (was 1+1+1). plan-limits.ts: free={1 total}, starter={6 total, 2T1+2T2+1Dom}. tsc --noEmit: zero errors.*
 
-*Last updated: 2026-05-08 — Day 38: Cancel subscription button now shows for both 'active' and 'on_trial' users (was active-only). Added Danger Zone section to settings page with DeleteAccount component (modal requires exact "CONFIRM" input). Created POST /api/account/delete route — cancels LS subscription if active, deletes all user data in FK order (thumbnail_jobs → ideas → digests → trends → gap_scores → competitor_videos → competitor_snapshots → competitors → channel_snapshots → videos → user_settings → user_search_history → dominator_history → users), signs user out. tsc --noEmit: zero errors.*
+*Last updated: 2026-05-08 — Day 38: Cancel subscription button now shows for both 'active' and 'on_trial' users (was active-only). Added Danger Zone section to settings page with DeleteAccount component (modal requires exact "CONFIRM" input). Created POST /api/account/delete route — cancels subscription if active, deletes all user data in FK order (thumbnail_jobs → ideas → digests → trends → gap_scores → competitor_videos → competitor_snapshots → competitors → channel_snapshots → videos → user_settings → user_search_history → dominator_history → users), signs user out. tsc --noEmit: zero errors.*
 
-*Last updated: 2026-05-07 — Day 37: CLAUDE.md full audit. Updated Feature Build Status to match actual codebase: lib/utils.ts, privacy/terms pages, digest/[id] page marked ✅; cron/daily marked 🗑️ deleted. Added 14 undocumented files: lib/lemonsqueezy.ts, lib/competitor-metrics.ts, lib/image-utils.ts, lib/niche-images.ts, lib/env-validation.ts; API routes competitors/[id]/sync, thumbnail-jobs/[jobId]/status, health; 14 new scripts. Added "Planned But Not Yet Built" section with Revenue Forecast, Whitespace Map, Collaboration Finder, and 4 smaller gaps. Tech stack Payments updated from Stripe → Lemon Squeezy.*
+*Last updated: 2026-05-07 — Day 37: CLAUDE.md full audit. Updated Feature Build Status to match actual codebase: lib/utils.ts, privacy/terms pages, digest/[id] page marked ✅; cron/daily marked 🗑️ deleted. Added 14 undocumented files: lib/competitor-metrics.ts, lib/image-utils.ts, lib/niche-images.ts, lib/env-validation.ts; API routes competitors/[id]/sync, thumbnail-jobs/[jobId]/status, health; 14 new scripts. Added "Planned But Not Yet Built" section with Revenue Forecast, Whitespace Map, Collaboration Finder, and 4 smaller gaps. Tech stack Payments updated from Stripe → Lemon Squeezy (superseded by Day 41 PayPal migration).*
 
 **Deleted:**
 * `app/api/cron/daily/route.ts` + `app/api/cron/daily/` folder — old Week 1 stub, fully superseded by the 5 dedicated cron routes. Confirmed zero source references before deletion (only .next/ build artifacts).

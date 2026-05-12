@@ -604,54 +604,26 @@ export async function getCompetitorMetricsFromDB(userId: string): Promise<Compet
 }
 
 // ---------------------------------------------------------------------------
-// getUserByLSCustomerId
+// getUserByPayPalSubscriptionId
 // ---------------------------------------------------------------------------
 
 /**
- * Finds a user by their Lemon Squeezy customer ID.
+ * Finds a user by their PayPal subscription ID.
  *
  * @returns User or null if not found / on error
  */
-export async function getUserByLSCustomerId(customerId: string): Promise<User | null> {
+export async function getUserByPayPalSubscriptionId(subscriptionId: string): Promise<User | null> {
   const supabase = createServiceClient()
 
   const { data, error } = await supabase
     .from('users')
     .select('*')
-    .eq('lemon_squeezy_customer_id', customerId)
+    .eq('paypal_subscription_id', subscriptionId)
     .single()
 
   if (error) {
     if (error.code !== 'PGRST116') {
-      console.error('[db] getUserByLSCustomerId error:', error.message)
-    }
-    return null
-  }
-
-  return data as User
-}
-
-// ---------------------------------------------------------------------------
-// getUserByLSSubscriptionId
-// ---------------------------------------------------------------------------
-
-/**
- * Finds a user by their Lemon Squeezy subscription ID.
- *
- * @returns User or null if not found / on error
- */
-export async function getUserByLSSubscriptionId(subscriptionId: string): Promise<User | null> {
-  const supabase = createServiceClient()
-
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('lemon_squeezy_subscription_id', subscriptionId)
-    .single()
-
-  if (error) {
-    if (error.code !== 'PGRST116') {
-      console.error('[db] getUserByLSSubscriptionId error:', error.message)
+      console.error('[db] getUserByPayPalSubscriptionId error:', error.message)
     }
     return null
   }
@@ -672,8 +644,7 @@ export async function getUserByLSSubscriptionId(subscriptionId: string): Promise
 export async function updateUserSubscription(
   userId: string,
   data: {
-    lemon_squeezy_customer_id?: string
-    lemon_squeezy_subscription_id?: string
+    paypal_subscription_id?: string
     subscription_status?: string
     subscription_plan?: string
     trial_ends_at?: string | null

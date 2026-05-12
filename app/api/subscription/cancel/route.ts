@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { getUser, updateUserSubscription } from '@/lib/db'
+import { cancelSubscription, getSubscriptionDetails } from '@/lib/paypal'
 
 export async function POST() {
   const session = await auth()
@@ -13,49 +14,37 @@ export async function POST() {
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
   }
 
-  if (!user.lemon_squeezy_subscription_id) {
+  if (!user.paypal_subscription_id) {
     return NextResponse.json({ error: 'No active subscription found' }, { status: 400 })
   }
 
-  const apiKey = process.env.LEMONSQUEEZY_API_KEY
-  if (!apiKey) {
-    console.error('[cancel] LEMONSQUEEZY_API_KEY not set')
-    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 })
-  }
-
-  const lsRes = await fetch(
-    `https://api.lemonsqueezy.com/v1/subscriptions/${user.lemon_squeezy_subscription_id}`,
-    {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Accept': 'application/vnd.api+json',
-        'Content-Type': 'application/vnd.api+json',
-      },
-    }
-  )
-
-  if (!lsRes.ok && lsRes.status !== 200) {
-    const body = await lsRes.text().catch(() => '')
-    console.error('[cancel] Lemon Squeezy error:', lsRes.status, body)
-    return NextResponse.json({ error: 'Failed to cancel subscription. Please try again.' }, { status: 502 })
-  }
-
-  // Extract ends_at from the LS response — this is the end of the current billing period
-  let endsAt: string | null = null
+  // Fetch subscription details first so we can extract billing_info.next_billing_time
+  // before cancellation (PayPal returns less detail after cancel)
+  let nextBillingTime: string | null = null
   try {
-    const lsBody = await lsRes.json()
-    endsAt = lsBody?.data?.attributes?.ends_at ?? null
-  } catch {
-    console.warn('[cancel] Could not parse LS response body — ends_at will be null')
+    const details = await getSubscriptionDetails(user.paypal_subscription_id)
+    nextBillingTime = details.billing_info?.next_billing_time ?? null
+  } catch (err) {
+    console.warn('[cancel] Could not fetch subscription details:', err)
+  }
+
+  // Cancel with PayPal
+  try {
+    await cancelSubscription(user.paypal_subscription_id)
+  } catch (err) {
+    console.error('[cancel] PayPal cancel error:', err)
+    return NextResponse.json(
+      { error: 'Failed to cancel subscription. Please try again.' },
+      { status: 502 }
+    )
   }
 
   // Set status to cancelled but keep the existing subscription_plan.
-  // The user retains paid access until current_period_end.
+  // The user retains paid access until current_period_end (next_billing_time).
   await updateUserSubscription(session.user.id, {
     subscription_status: 'cancelled',
-    current_period_end: endsAt,
+    current_period_end: nextBillingTime,
   })
 
-  return NextResponse.json({ success: true, accessUntil: endsAt })
+  return NextResponse.json({ success: true, accessUntil: nextBillingTime })
 }

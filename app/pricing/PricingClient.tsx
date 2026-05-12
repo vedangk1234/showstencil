@@ -82,7 +82,7 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
     }
     setLoadingPlan(plan)
     try {
-      const res = await fetch('/api/create-checkout-session', {
+      const res = await fetch('/api/subscription/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan }),
@@ -93,11 +93,11 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
         return
       }
       const data = await res.json()
-      if (!data.url) {
+      if (!data.approvalUrl) {
         alert('No checkout URL received. Please try again.')
         return
       }
-      window.location.href = data.url
+      window.location.href = data.approvalUrl
       setTimeout(() => setLoadingPlan(null), 3000)
     } catch {
       alert('Something went wrong. Please try again.')
@@ -130,7 +130,7 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
         // Already on a paid plan — can't downgrade from UI
         return (
           <span className="block w-full py-3 text-center text-xs text-zinc-600 font-mono">
-            Manage subscription at Lemon Squeezy
+            Manage subscription at PayPal
           </span>
         )
       }
@@ -148,7 +148,7 @@ export function PricingClient({ currentPlan, isLoggedIn }: PricingClientProps) {
       // Downgrade path — don't offer in-app
       return (
         <span className="block w-full py-3 text-center text-xs text-zinc-600 font-mono">
-          Manage subscription at Lemon Squeezy
+          Manage subscription at PayPal
         </span>
       )
     }

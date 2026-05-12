@@ -1,6 +1,7 @@
 import { auth, signOut } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
+import { cancelSubscription } from '@/lib/paypal'
 
 export async function POST() {
   const session = await auth()
@@ -14,32 +15,21 @@ export async function POST() {
   // Get user to check subscription status
   const { data: user } = await supabase
     .from('users')
-    .select('lemon_squeezy_subscription_id, subscription_status')
+    .select('paypal_subscription_id, subscription_status')
     .eq('id', userId)
     .single()
 
-  // Cancel Lemon Squeezy subscription if active
+  // Cancel PayPal subscription if active
   if (
     user &&
-    user.lemon_squeezy_subscription_id &&
+    user.paypal_subscription_id &&
     (user.subscription_status === 'active' || user.subscription_status === 'on_trial')
   ) {
     try {
-      const lsRes = await fetch(
-        `https://api.lemonsqueezy.com/v1/subscriptions/${user.lemon_squeezy_subscription_id}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${process.env.LEMONSQUEEZY_API_KEY}`,
-            Accept: 'application/vnd.api+json',
-          },
-        }
-      )
-      if (!lsRes.ok) {
-        console.error('[account/delete] LS cancel failed:', lsRes.status, await lsRes.text().catch(() => ''))
-      }
+      await cancelSubscription(user.paypal_subscription_id)
     } catch (err) {
-      console.error('[account/delete] LS cancel error:', err)
+      console.error('[account/delete] PayPal cancel error:', err)
+      // Continue with deletion even if cancel fails
     }
   }
 

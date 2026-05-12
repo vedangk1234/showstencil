@@ -20,8 +20,7 @@ export interface User {
   sub_niche_detected_at: string | null;
   subscription_status: SubscriptionStatus;
   subscription_plan: PlanType;
-  lemon_squeezy_customer_id: string | null;
-  lemon_squeezy_subscription_id: string | null;
+  paypal_subscription_id: string | null;
   trial_ends_at: string | null;
   current_period_end: string | null;
   onboarding_completed: boolean;
