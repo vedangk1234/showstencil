@@ -188,17 +188,37 @@ export async function verifyWebhookSignature(
 ): Promise<boolean> {
   const webhookId = process.env.PAYPAL_WEBHOOK_ID
   if (!webhookId) {
-    console.warn('[paypal] PAYPAL_WEBHOOK_ID not set — skipping verification')
+    console.warn('[paypal/verify] PAYPAL_WEBHOOK_ID not set — skipping verification')
     return false
   }
 
   let token: string
   try {
     token = await getAccessToken()
-  } catch {
-    console.error('[paypal] Failed to get access token for webhook verification')
+  } catch (err) {
+    console.error('[paypal/verify] Failed to get access token for webhook verification:', err)
     return false
   }
+
+  const verifyPayload = {
+    auth_algo: headers['paypal-auth-algo'],
+    cert_url: headers['paypal-cert-url'],
+    transmission_id: headers['paypal-transmission-id'],
+    transmission_sig: headers['paypal-transmission-sig'],
+    transmission_time: headers['paypal-transmission-time'],
+    webhook_id: webhookId,
+    webhook_event: JSON.parse(body),
+  }
+
+  console.log('[paypal/verify] Sending verification request to', `${PAYPAL_BASE}/v1/notifications/verify-webhook-signature`)
+  console.log('[paypal/verify] Headers received:', {
+    'paypal-auth-algo': headers['paypal-auth-algo'],
+    'paypal-cert-url': headers['paypal-cert-url'],
+    'paypal-transmission-id': headers['paypal-transmission-id'],
+    'paypal-transmission-sig': headers['paypal-transmission-sig'] ? `${headers['paypal-transmission-sig'].slice(0, 20)}…` : null,
+    'paypal-transmission-time': headers['paypal-transmission-time'],
+  })
+  console.log('[paypal/verify] webhook_id being used:', webhookId)
 
   try {
     const res = await fetch(
@@ -209,22 +229,31 @@ export async function verifyWebhookSignature(
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          auth_algo: headers['paypal-auth-algo'],
-          cert_url: headers['paypal-cert-url'],
-          transmission_id: headers['paypal-transmission-id'],
-          transmission_sig: headers['paypal-transmission-sig'],
-          transmission_time: headers['paypal-transmission-time'],
-          webhook_id: webhookId,
-          webhook_event: JSON.parse(body),
-        }),
+        body: JSON.stringify(verifyPayload),
       }
     )
 
-    if (!res.ok) return false
-    const data = (await res.json()) as { verification_status: string }
+    const responseText = await res.text()
+    console.log('[paypal/verify] PayPal verification API response status:', res.status)
+    console.log('[paypal/verify] PayPal verification API response body:', responseText)
+
+    if (!res.ok) {
+      console.error('[paypal/verify] PayPal verification API returned non-2xx:', res.status, responseText)
+      return false
+    }
+
+    let data: { verification_status: string }
+    try {
+      data = JSON.parse(responseText)
+    } catch {
+      console.error('[paypal/verify] Failed to parse verification response as JSON:', responseText)
+      return false
+    }
+
+    console.log('[paypal/verify] verification_status:', data.verification_status)
     return data.verification_status === 'SUCCESS'
-  } catch {
+  } catch (err) {
+    console.error('[paypal/verify] Exception during verification fetch:', err)
     return false
   }
 }
