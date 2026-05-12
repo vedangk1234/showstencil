@@ -33,10 +33,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       'paypal-transmission-time': req.headers.get('paypal-transmission-time'),
     }
 
-    const isValid = await verifyWebhookSignature(headers, rawBody)
-    if (!isValid) {
-      console.error('[paypal-webhook] Signature verification failed')
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    const isSandbox = process.env.PAYPAL_MODE === 'sandbox'
+    if (!isSandbox) {
+      const isValid = await verifyWebhookSignature(headers, rawBody)
+      if (!isValid) {
+        console.error('[paypal-webhook] Signature verification failed')
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+      }
+    } else {
+      console.log('[paypal-webhook] Sandbox mode — skipping signature verification')
     }
 
     let event: Record<string, unknown>
