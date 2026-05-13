@@ -710,7 +710,7 @@ export default function LandingPage() {
           </div>
           <div className="foot-col">
             <h4>Company</h4>
-            <a href="#">Contact</a>
+            <a href="mailto:support@showstencil.com">Contact</a>
             <a href="https://x.com/ShowStencil" target="_blank" rel="noopener noreferrer">Twitter/X</a>
             <a href="https://www.linkedin.com/company/showstencil/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
           </div>
