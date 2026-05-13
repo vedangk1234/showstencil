@@ -707,20 +707,17 @@ export default function LandingPage() {
             <h4>Product</h4>
             <a href="#features">Features</a>
             <a href="/pricing">Pricing</a>
-            <a href="#">Sample digest</a>
-            <a href="#">Changelog</a>
           </div>
           <div className="foot-col">
             <h4>Company</h4>
-            <a href="#">About</a>
             <a href="#">Contact</a>
-            <a href="#">Twitter</a>
+            <a href="https://x.com/ShowStencil" target="_blank" rel="noopener noreferrer">Twitter/X</a>
+            <a href="https://www.linkedin.com/company/showstencil/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
           </div>
           <div className="foot-col">
             <h4>Legal</h4>
             <a href="/terms">Terms</a>
             <a href="/privacy">Privacy</a>
-            <a href="#">Security</a>
           </div>
         </div>
         <div className="foot-bottom">
