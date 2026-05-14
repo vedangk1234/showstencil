@@ -32,6 +32,7 @@ import { getUser, getUserSettings, upsertUserSettings } from '@/lib/db'
 import { WeeklyDigestEmail } from '@/emails/weekly-digest'
 import { TrendAlertEmail } from '@/emails/trend-alert'
 import { detectViralVideos, findUncoveredTopics } from '@/lib/trend-detector'
+import { logError } from '@/lib/logger'
 import type { DigestResult, ViralVideo } from '@/types'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
@@ -226,6 +227,12 @@ export async function sendWeeklyDigest(
 
     if (sendError) {
       console.error('[email] sendWeeklyDigest Resend error:', sendError)
+      void logError({
+        userId,
+        route: 'lib/email/sendWeeklyDigest',
+        error: sendError.message,
+        details: { to: user.email, subject: `Weekly digest for ${user.name ?? user.email}` },
+      })
       return false
     }
 
@@ -252,6 +259,12 @@ export async function sendWeeklyDigest(
     return true
   } catch (err) {
     console.error('[email] sendWeeklyDigest unexpected error:', err)
+    void logError({
+      userId,
+      route: 'lib/email/sendWeeklyDigest',
+      error: err instanceof Error ? err.message : String(err),
+      details: { error_stack: err instanceof Error ? err.stack : undefined },
+    })
     return false
   }
 }
@@ -347,6 +360,12 @@ export async function sendTrendAlert(
 
     if (sendError) {
       console.error('[email] sendTrendAlert Resend error:', sendError)
+      void logError({
+        userId,
+        route: 'lib/email/sendTrendAlert',
+        error: sendError.message,
+        details: { to: user.email, video_title: viralVideo.title },
+      })
       return false
     }
 
@@ -360,6 +379,12 @@ export async function sendTrendAlert(
     return true
   } catch (err) {
     console.error('[email] sendTrendAlert unexpected error:', err)
+    void logError({
+      userId,
+      route: 'lib/email/sendTrendAlert',
+      error: err instanceof Error ? err.message : String(err),
+      details: { error_stack: err instanceof Error ? err.stack : undefined },
+    })
     return false
   }
 }
@@ -474,6 +499,12 @@ export async function checkAndSendAlerts(): Promise<{ checked: number; sent: num
       }
     } catch (err) {
       console.error(`[email] checkAndSendAlerts: error processing user ${userId}:`, err)
+      void logError({
+        userId,
+        route: 'lib/email/checkAndSendAlerts',
+        error: err instanceof Error ? err.message : String(err),
+        details: { error_stack: err instanceof Error ? err.stack : undefined },
+      })
       // Continue to next user — one failure must not stop the batch
     }
   }

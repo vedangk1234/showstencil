@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import * as Sentry from '@sentry/nextjs'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
 import { deleteAllUserThumbnails, setIdeasRefreshAvailable } from '@/lib/db'
+import { logError } from '@/lib/logger'
 import type { Idea } from '@/types'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -462,6 +463,12 @@ Respond in this exact JSON structure with no text before or after:
       tags: { route: 'ideas/generate' },
     })
     console.error('[ideas/generate]', error)
+    void logError({
+      userId: undefined,
+      route: 'api/ideas/generate',
+      error: msg,
+      details: { error_stack: error instanceof Error ? error.stack : undefined },
+    })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

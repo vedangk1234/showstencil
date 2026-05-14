@@ -4,6 +4,8 @@
  * Uses YOUTUBE_API_KEY for all requests.
  */
 
+import { logError } from '@/lib/logger';
+
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
 
 function apiKey(): string {
@@ -242,6 +244,11 @@ export async function getChannelStats(channelId: string): Promise<ChannelStats |
     };
   } catch (err) {
     console.error(`[youtube-data] getChannelStats error for ${channelId}:`, err);
+    void logError({
+      route: 'lib/youtube-data/getChannelStats',
+      error: err instanceof Error ? err.message : String(err),
+      details: { channel_id: channelId, error_stack: err instanceof Error ? err.stack : undefined },
+    });
     return null;
   }
 }
@@ -303,6 +310,12 @@ export async function getRecentVideos(
       }));
     } catch (err) {
       console.error(`[youtube-data] getRecentVideos error for ${channelId} (${dur}):`, err);
+      void logError({
+        route: 'lib/youtube-data/getRecentVideos',
+        error: err instanceof Error ? err.message : String(err),
+        details: { channel_id: channelId, duration_filter: dur },
+        severity: 'warn',
+      });
       return [];
     }
   });
@@ -412,6 +425,12 @@ export async function getVideoDetails(videoIds: string[]): Promise<VideoDetail[]
       }
     } catch (err) {
       console.error(`[youtube-data] getVideoDetails error for batch ${i}:`, err);
+      void logError({
+        route: 'lib/youtube-data/getVideoDetails',
+        error: err instanceof Error ? err.message : String(err),
+        details: { batch_index: i, error_stack: err instanceof Error ? err.stack : undefined },
+        severity: 'warn',
+      });
     }
   }
 
@@ -462,6 +481,12 @@ export async function getChannelVideoVelocity(
     return computeVelocity(details);
   } catch (err) {
     console.error(`[youtube-data] getChannelVideoVelocity error for ${channelId}:`, err);
+    void logError({
+      route: 'lib/youtube-data/getChannelVideoVelocity',
+      error: err instanceof Error ? err.message : String(err),
+      details: { channel_id: channelId },
+      severity: 'warn',
+    });
     return null;
   }
 }
@@ -506,6 +531,11 @@ export async function getCompetitorFullProfile(
     };
   } catch (err) {
     console.error(`[youtube-data] getCompetitorFullProfile error for ${channelId}:`, err);
+    void logError({
+      route: 'lib/youtube-data/getCompetitorFullProfile',
+      error: err instanceof Error ? err.message : String(err),
+      details: { channel_id: channelId, error_stack: err instanceof Error ? err.stack : undefined },
+    });
     return null;
   }
 }

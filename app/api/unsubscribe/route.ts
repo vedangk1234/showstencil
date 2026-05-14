@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { logError } from '@/lib/logger'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://showstencil.com'
 
@@ -127,6 +128,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (updateError) {
     console.error('[unsubscribe] update error:', updateError.message)
+    void logError({
+      userId: settings.user_id,
+      route: 'api/unsubscribe',
+      error: updateError.message,
+      details: { token_prefix: token.slice(0, 8) },
+    })
     return htmlPage(
       'Error',
       'Something went wrong',

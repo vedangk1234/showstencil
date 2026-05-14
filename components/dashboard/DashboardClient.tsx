@@ -129,7 +129,7 @@ export default function DashboardClient({
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [isSyncingManually, setIsSyncingManually] = useState(false)
-  const [manualSyncError, setManualSyncError] = useState(false)
+  const [manualSyncError, setManualSyncError] = useState<string | null>(null)
   const [syncErrorDismissed, setSyncErrorDismissed] = useState(false)
 
   useEffect(() => {
@@ -142,13 +142,16 @@ export default function DashboardClient({
 
   async function handleManualSync() {
     setIsSyncingManually(true)
-    setManualSyncError(false)
+    setManualSyncError(null)
     try {
       const res = await fetch('/api/sync', { method: 'POST' })
-      if (!res.ok) throw new Error('Sync failed')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error ?? `Sync failed (${res.status})`)
+      }
       window.location.reload()
-    } catch {
-      setManualSyncError(true)
+    } catch (err) {
+      setManualSyncError(err instanceof Error ? err.message : 'Sync failed — please try again')
       setIsSyncingManually(false)
     }
   }
@@ -218,7 +221,7 @@ export default function DashboardClient({
             </button>
             {manualSyncError && (
               <p className="text-stencil-red font-mono text-[11px] m-0">
-                Sync failed — please try again
+                {manualSyncError}
               </p>
             )}
           </div>

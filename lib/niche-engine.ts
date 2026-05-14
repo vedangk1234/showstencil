@@ -18,6 +18,7 @@ import { getCompetitorFullProfile, getRecentVideos } from '@/lib/youtube-data';
 import { calculateCompetitorMetrics } from '@/lib/competitor-metrics';
 import { updateCompetitorMetrics, saveCompetitorSnapshot } from '@/lib/db';
 import { detectSubNiche } from '@/lib/sub-niche-detector';
+import { logError } from '@/lib/logger';
 import type { NicheResult, CompetitorCandidate } from '@/types';
 
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
@@ -231,6 +232,12 @@ Respond with ONLY a JSON object — no other text, no markdown fences:
     return result;
   } catch (err) {
     console.error('[niche-engine] detectNiche: Claude API error:', err);
+    void logError({
+      userId: userId ?? null,
+      route: 'lib/niche-engine/detectNiche',
+      error: err instanceof Error ? err.message : String(err),
+      details: { error_stack: err instanceof Error ? err.stack : undefined },
+    });
     return defaultNiche('Claude API error');
   }
 }
@@ -394,6 +401,12 @@ export async function saveDetectedNiche(userId: string, nicheId: string): Promis
 
   if (error) {
     console.error('[niche-engine] saveDetectedNiche error:', error.message);
+    void logError({
+      userId,
+      route: 'lib/niche-engine/saveDetectedNiche',
+      error: error.message,
+      details: { niche_id: nicheId },
+    });
     return false;
   }
 
@@ -608,6 +621,13 @@ async function assignCompetitor(
       `[niche-engine] assignCompetitor: getCompetitorFullProfile failed for "${candidate.channelName}":`,
       err,
     );
+    void logError({
+      userId,
+      route: 'lib/niche-engine/assignCompetitor',
+      error: err instanceof Error ? err.message : String(err),
+      details: { channel_id: candidate.channelId, channel_name: candidate.channelName, tier },
+      severity: 'warn',
+    });
   }
 
   if (!fullProfile) {
@@ -879,6 +899,12 @@ export async function detectAndAssignCompetitors(
         `[niche-engine] detectAndAssignCompetitors: Tier ${toAssign[i].tier} assignment failed:`,
         result.reason,
       );
+      void logError({
+        userId,
+        route: 'lib/niche-engine/detectAndAssignCompetitors',
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        details: { tier: toAssign[i].tier, channel_name: toAssign[i].candidate.channelName },
+      });
     }
   });
 

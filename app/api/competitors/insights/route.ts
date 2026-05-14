@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createServiceClient } from '@/lib/supabase'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
 import { getCachedInsights } from '@/lib/db'
+import { logError } from '@/lib/logger'
 
 export async function POST(request: Request) {
   try {
@@ -91,6 +92,13 @@ export async function POST(request: Request) {
 
     if (!insights || insights.length === 0) {
       console.error('[competitors/insights] generateAndCacheInsightsForCompetitor returned empty for', competitor_id)
+      void logError({
+        userId,
+        route: 'api/competitors/insights',
+        error: 'AI generation returned empty insights array',
+        details: { competitor_id, competitor_name: competitor.channel_name },
+        severity: 'warn',
+      })
       return NextResponse.json(
         { error: 'AI generation returned no insights — please try again.', retryable: true },
         { status: 500 },
@@ -104,6 +112,12 @@ export async function POST(request: Request) {
       tags: { route: 'competitors/insights' },
     })
     console.error('[competitors/insights]', error)
+    void logError({
+      userId: undefined,
+      route: 'api/competitors/insights',
+      error: msg,
+      details: { error_stack: error instanceof Error ? error.stack : undefined },
+    })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

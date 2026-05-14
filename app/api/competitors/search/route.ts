@@ -3,6 +3,7 @@ import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
 import { getPlanLimits } from '@/lib/plan-limits'
 import { normalizeChannelInput, getChannelData } from '@/lib/channel-search'
+import { logError } from '@/lib/logger'
 
 export async function POST(request: Request) {
   try {
@@ -87,6 +88,12 @@ export async function POST(request: Request) {
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Search failed'
     console.error('[competitors/search]', error)
+    void logError({
+      userId: undefined,
+      route: 'api/competitors/search',
+      error: msg,
+      details: { error_stack: error instanceof Error ? error.stack : undefined },
+    })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

@@ -18,6 +18,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { saveCompetitorSnapshot, updateCompetitorMetrics, getRecentCompetitorVideos } from '@/lib/db'
+import { logError } from '@/lib/logger'
 
 function parseDuration(duration: string): number {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
@@ -188,6 +189,10 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error('[cron/refresh-data] Failed to load users:', error.message)
+    void logError({
+      route: 'cron/refresh-data',
+      error: error.message,
+    })
     return NextResponse.json({ error: 'Failed to load users' }, { status: 500 })
   }
 
@@ -227,6 +232,13 @@ export async function GET(request: Request) {
 
           if (!syncResult.success) {
             console.warn(`[cron/refresh-data]   ${comp.channel_name}: sync failed — skipping snapshot`)
+            void logError({
+              userId: user.id,
+              route: 'cron/refresh-data',
+              error: `Competitor video sync failed for ${comp.channel_name}`,
+              details: { competitor_id: comp.id, channel_name: comp.channel_name },
+              severity: 'warn',
+            })
             return
           }
 
@@ -279,6 +291,12 @@ export async function GET(request: Request) {
         `[cron/refresh-data] Competitor sync block failed for user ${user.id}:`,
         blockErr
       )
+      void logError({
+        userId: user.id,
+        route: 'cron/refresh-data',
+        error: blockErr instanceof Error ? blockErr.message : String(blockErr),
+        details: { error_stack: blockErr instanceof Error ? blockErr.stack : undefined },
+      })
     }
 
     // Throttle between users to avoid rate limits

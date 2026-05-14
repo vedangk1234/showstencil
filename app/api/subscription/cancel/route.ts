@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { getUser, updateUserSubscription } from '@/lib/db'
 import { cancelSubscription, getSubscriptionDetails } from '@/lib/paypal'
+import { logError } from '@/lib/logger'
 
 export async function POST() {
   const session = await auth()
@@ -32,7 +33,14 @@ export async function POST() {
   try {
     await cancelSubscription(user.paypal_subscription_id)
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     console.error('[cancel] PayPal cancel error:', err)
+    void logError({
+      userId: session.user.id,
+      route: 'api/subscription/cancel',
+      error: message,
+      details: { paypal_subscription_id: user.paypal_subscription_id },
+    })
     return NextResponse.json(
       { error: 'Failed to cancel subscription. Please try again.' },
       { status: 502 }

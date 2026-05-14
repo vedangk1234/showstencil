@@ -18,6 +18,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { getRecentVideos, getVideoDetails } from '@/lib/youtube-data'
+import { logError } from '@/lib/logger'
 
 export async function GET(request: Request) {
   // ── Auth check ─────────────────────────────────────────────────────────────
@@ -36,6 +37,10 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error('[cron/trend-detection] Failed to load competitors:', error.message)
+    void logError({
+      route: 'cron/trend-detection',
+      error: error.message,
+    })
     return NextResponse.json({ error: 'Failed to load competitors' }, { status: 500 })
   }
 
@@ -148,6 +153,15 @@ export async function GET(request: Request) {
         `[cron/trend-detection] Failed for competitor ${competitor.id}:`,
         err,
       )
+      void logError({
+        route: 'cron/trend-detection',
+        error: err instanceof Error ? err.message : String(err),
+        details: {
+          competitor_id: competitor.id,
+          channel_name: competitor.channel_name,
+          error_stack: err instanceof Error ? err.stack : undefined,
+        },
+      })
       channelsChecked++
     }
   }

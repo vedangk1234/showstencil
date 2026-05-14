@@ -30,6 +30,7 @@ import { getUser, getChannelSnapshots, getVideos, getWorstVideos, getCompetitorM
 import { calculateGapScore } from '@/lib/gap-scorer';
 import { getTrendingInNiche, findUncoveredTopics } from '@/lib/trend-detector';
 import { sendWeeklyDigest } from '@/lib/email';
+import { logError } from '@/lib/logger';
 import type { DigestResult, DigestVideoIdea, UncoveredTopic, ViralVideo, Video } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -332,6 +333,12 @@ For each idea, use this exact format:
   } catch (err) {
     const elapsedMs = Date.now() - t0;
     console.error('[digest-generator] Claude API error — switching to fallback:', err);
+    void logError({
+      route: 'lib/digest-generator/callClaudeForDigest',
+      error: err instanceof Error ? err.message : String(err),
+      details: { error_stack: err instanceof Error ? err.stack : undefined },
+      severity: 'warn',
+    });
     return { rawMarkdown: '', inputTokens: 0, outputTokens: 0, elapsedMs, usedFallback: true };
   }
 }
@@ -605,6 +612,14 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
 
   if (digestError || !savedDigest) {
     console.error('[digest-generator] Failed to save digest:', digestError?.message);
+    if (digestError) {
+      void logError({
+        userId,
+        route: 'lib/digest-generator/generateDigest',
+        error: digestError.message,
+        severity: 'warn',
+      });
+    }
   } else {
     console.log('[digest-generator] Digest saved to DB for week starting', weekStartDate);
   }

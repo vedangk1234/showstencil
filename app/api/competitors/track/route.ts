@@ -7,6 +7,7 @@ import { calculateSubNicheSimilarity } from '@/lib/sub-niche-detector'
 import { getCompetitorFullProfile } from '@/lib/youtube-data'
 import { updateCompetitorMetrics, saveCompetitorSnapshot } from '@/lib/db'
 import { calculateCompetitorMetrics } from '@/lib/competitor-metrics'
+import { logError } from '@/lib/logger'
 
 export async function POST(request: Request) {
   try {
@@ -202,6 +203,12 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error('[competitors/track] DB insert error:', error.message)
+      void logError({
+        userId: session.user.id,
+        route: 'api/competitors/track',
+        error: error.message,
+        details: { channel_id, tier },
+      })
       return NextResponse.json({ error: 'Failed to add competitor' }, { status: 500 })
     }
 
@@ -312,7 +319,14 @@ export async function POST(request: Request) {
         : {}),
     })
   } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
     console.error('[competitors/track] Unexpected error:', error)
+    void logError({
+      userId: undefined,
+      route: 'api/competitors/track',
+      error: message,
+      details: { error_stack: error instanceof Error ? error.stack : undefined },
+    })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

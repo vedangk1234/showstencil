@@ -17,6 +17,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { syncUserChannel } from '@/lib/sync-logic'
+import { logError } from '@/lib/logger'
 
 export async function GET(request: Request) {
   const startMs = Date.now()
@@ -40,6 +41,10 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error('[cron/user-sync] Failed to load users:', error.message)
+    void logError({
+      route: 'cron/user-sync',
+      error: error.message,
+    })
     return NextResponse.json({ error: 'Failed to load users' }, { status: 500 })
   }
 
@@ -57,10 +62,22 @@ export async function GET(request: Request) {
           )
         } else {
           console.error(`[cron/user-sync] User ${user.id}: failed — ${result.error}`)
+          void logError({
+            userId: user.id,
+            route: 'cron/user-sync',
+            error: result.error ?? 'syncUserChannel returned success=false',
+            severity: 'warn',
+          })
         }
         return result
       } catch (err) {
         console.error(`[cron/user-sync] User ${user.id}: unexpected error —`, err)
+        void logError({
+          userId: user.id,
+          route: 'cron/user-sync',
+          error: err instanceof Error ? err.message : String(err),
+          details: { error_stack: err instanceof Error ? err.stack : undefined },
+        })
         throw err
       }
     }),

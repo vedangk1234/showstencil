@@ -391,6 +391,18 @@ CREATE TABLE IF NOT EXISTS thumbnail_jobs (
   completed\_at TIMESTAMPTZ
 );
 
+-- error_logs — permanent server-side error log (migration 20260513)
+CREATE TABLE IF NOT EXISTS public.error_logs (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at    TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
+  user_id       UUID        REFERENCES public.users(id) ON DELETE SET NULL,
+  route         TEXT        NOT NULL,
+  error_message TEXT        NOT NULL,
+  error_details JSONB,
+  severity      TEXT        NOT NULL    DEFAULT 'error'
+);
+-- RLS enabled; service_role gets INSERT + SELECT only (no authenticated grant)
+
 -- New columns on ideas table (thumbnail + hook variants — run once):
 -- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS thumbnail\_image\_url TEXT;
 -- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS thumbnail\_generated\_at TIMESTAMPTZ;
@@ -669,6 +681,7 @@ const planLimits = {
 | `lib/image-utils.ts` | ✅ | padToSixteenNine (sharp) — server-side padding of any image to 16:9 by sampling edge pixel colour; used in thumbnail pipeline before Supabase upload |
 | `lib/niche-images.ts` | ✅ | getNicheImage + getShuffledNicheImages — maps niche_id to curated stock image filenames in public/niche-images/ with seeded Fisher-Yates shuffle; stable per generation seed |
 | `lib/env-validation.ts` | ✅ | validateEnv — checks 9 required env vars at startup; throws with clear list of missing keys |
+| `lib/logger.ts` | ✅ | logError — writes structured error records to error_logs Supabase table (userId, route, error, details JSONB, severity); never throws; always called with void |
 | `lib/sub-niche-detector.ts` | ✅ | detectSubNiche (Claude), calculateSubNicheSimilarity — granular sub-niche within a broad niche |
 | `lib/db.ts` (Day 13 additions) | ✅ | saveCompetitorSnapshot, getCompetitorSnapshots, getAllCompetitorSnapshotsForUser, updateCompetitorMetrics, saveCompetitorInsights, getCachedInsights; saveChannelSnapshot extended with optional extras (demographics + trafficSources) written to three new JSONB columns (Day 42) |
 | `lib/dominator-finder.ts` | ✅ | findDominatorsForUser — niche-specific rules (sub_niche match for gaming/fitness/tech/education, broad for others) |
@@ -718,6 +731,7 @@ const planLimits = {
 | `app/api/onboarding/complete/route.ts` | ✅ | POST sets onboarding_completed=true — called by Step 5 and skip link |
 | `app/api/account/delete/route.ts` | ✅ | POST deletes all user data in FK order, cancels LS subscription if active, signs user out |
 | `app/api/subscription/cancel/route.ts` | ✅ | POST cancels LS subscription via DELETE /v1/subscriptions/:id API call; sets subscription_status='cancelled' and stores ends_at as current_period_end — does NOT drop subscription_plan to free immediately; user retains paid access until billing period ends |
+| `app/api/subscription/downgrade/route.ts` | ✅ | POST downgrade Pro → Starter via PayPal subscription revise API; validates user is on pro plan with active subscription; calls POST /v1/billing/subscriptions/{id}/revise with PAYPAL_STARTER_PLAN_ID; returns approvalUrl for PayPal redirect |
 
 ### App pages
 
@@ -826,6 +840,100 @@ const planLimits = {
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 4 — Day 43 (2026-05-14)
+
+**Observability layer, proactive token refresh, Pro→Starter downgrade route, and Supabase explicit grants migration**
+
+*tsc --noEmit: zero errors across all changes.*
+
+---
+
+*`lib/logger.ts` — NEW:*
+* `logError({ userId, route, error, details, severity })` — writes structured error records to the `error_logs` Supabase table using the service role client. `userId` and `details` (JSONB) are nullable. `severity` defaults to `'error'`; accepts `'error' | 'warn' | 'info'`. Never throws — logging failures are caught and written to `console.error` only so a logging hiccup never crashes the caller. Called with `void` everywhere to make the fire-and-forget intent explicit.
+
+*`supabase/migrations/20260513000000_add_explicit_grants.sql` — NEW:*
+* Creates `error_logs` table: `id UUID`, `created_at TIMESTAMPTZ`, `user_id UUID` (FK → users, ON DELETE SET NULL), `route TEXT`, `error_message TEXT`, `error_details JSONB`, `severity TEXT DEFAULT 'error'`. RLS enabled. `service_role` gets SELECT + INSERT only — `authenticated` role intentionally excluded (users must never read other users' errors).
+* Enables RLS on `ideas` and `thumbnail_jobs` — both were created without explicit RLS in earlier migrations/scripts.
+* Adds explicit `GRANT SELECT, INSERT, UPDATE, DELETE` on all 15 existing tables for `authenticated` and `service_role`. Required by Supabase from October 30 2026 when implicit grants are removed. `anon` gets SELECT only on `searched_channels_cache` (its existing RLS policy already allows `USING (true)` for unauthenticated reads).
+
+*`app/api/subscription/downgrade/route.ts` — NEW:*
+* `POST /api/subscription/downgrade` — auth-gated. Validates user is on `subscription_plan = 'pro'` with an active/on_trial/past_due status and has a `paypal_subscription_id`. Calls PayPal's `POST /v1/billing/subscriptions/{id}/revise` with `PAYPAL_STARTER_PLAN_ID` as the new plan. `return_url → /dashboard?downgrade=success`, `cancel_url → /pricing`. Returns `{ approvalUrl }` for frontend redirect to PayPal approval page. Returns 400 if user is not Pro or has no subscription; 502 if PayPal returns non-2xx; 500 if `PAYPAL_STARTER_PLAN_ID` env var is not set.
+
+*Observability pass — `logError()` wired into 20+ files:*
+
+`auth.ts`:
+* Sign-in upsert failure (`severity: 'error'`) — logs email, Supabase error code, and whether tokens were present.
+* Missing YouTube channel ID (`severity: 'warn'`) — logs email and OAuth token presence; fires when `account.access_token` returns a null channel list.
+* No access token in account (`severity: 'error'`) — fires when Google OAuth completes but `account.access_token` is null (tokens never stored to DB).
+
+`lib/sync-logic.ts` (beyond logging — proactive token refresh added):
+* Added proactive token refresh before any YouTube API calls: if `token_expires_at <= NOW() + 5 minutes`, attempts refresh immediately rather than waiting for `TOKEN_EXPIRED` from the API. This prevents the cron failure mode where the token expires between the DB read and the first API call. Returns early (401) if no refresh token is stored or if refresh fails, with a user-facing message instructing the user to reconnect.
+* `logError` added for: user not found in DB, no access token, proactive refresh failure, reactive TOKEN_EXPIRED refresh failure, YouTube Analytics API errors, video save errors, competitor auto-detection failures.
+
+`app/api/sync/route.ts`:
+* Parallel fetch: now fetches `channel_snapshots` (for cooldown) and `users` row (for pre-flight checks) simultaneously via `Promise.all` instead of sequentially.
+* Pre-flight validation added before `syncUserChannel()`: (1) if `userRow` is null → 400 "Account not found" with `logError severity: 'error'`; (2) if `youtube_access_token` is null → 400 "YouTube is not connected" with `logError severity: 'error'`. Both return early before burning any quota.
+* Structured pre-flight log on every sync attempt (channel ID, token expiry, refresh token presence) — visible in Vercel logs even for successful syncs.
+* `manualSyncError` state in `DashboardClient.tsx` changed from `boolean` to `string | null` — the sync error message returned from the API is now displayed verbatim instead of a generic "Sync failed — please try again" string.
+* `logError` added for: sync unexpected exception, `syncUserChannel` returning `success=false`.
+
+`lib/paypal.ts`:
+* `getAccessToken` — missing credentials error, OAuth failed error.
+* `createSubscription` — non-2xx response (includes partial `plan_id_prefix` in details, not the full ID).
+* `verifyWebhookSignature` — getAccessToken step failure, PayPal verification API non-2xx, exception during verification fetch.
+
+`lib/youtube-analytics.ts`:
+* `analyticsQuery` — network error, HTTP error response (with status code and error message).
+
+`lib/youtube-data.ts`:
+* `getChannelStats`, `getRecentVideos`, `getVideoDetails`, `getChannelVideoVelocity`, `getCompetitorFullProfile` — all catch blocks now call `logError` with channel ID and error stack.
+
+`lib/email.ts`:
+* `sendWeeklyDigest` — Resend send error (logs `to` and `subject`), unexpected catch error (logs stack).
+* `sendTrendAlert` — Resend send error (logs `to` and video title), unexpected catch error.
+* `checkAndSendAlerts` — per-user batch error.
+
+`lib/gap-scorer.ts`:
+* `saveGapScore` — DB insert error.
+
+`lib/niche-engine.ts`:
+* `detectNiche` — Claude API error.
+* `saveDetectedNiche` — DB update error (logs `niche_id`).
+* `assignCompetitor` — `getCompetitorFullProfile` failure (logs channel ID, name, tier; `severity: 'warn'`).
+* `detectAndAssignCompetitors` — per-tier assignment failure (logs tier and channel name).
+
+`lib/digest-generator.ts`:
+* `callClaudeForDigest` — Claude API error (`severity: 'warn'` since fallback kicks in).
+* `generateDigest` — DB save error.
+
+*API routes — `logError` wired into catch blocks:*
+* `api/competitors/insights` — empty generation result (`severity: 'warn'`), unhandled exception.
+* `api/competitors/search` — unhandled exception.
+* `api/competitors/track` — DB insert error (logs channel_id + tier), unhandled exception.
+* `api/competitors/[id]/sync` — DB upsert error, unhandled exception.
+* `api/cron/refresh-data` — users load failure, per-competitor sync failure (`severity: 'warn'`), per-user competitor block failure.
+* `api/cron/trend-detection` — competitors load failure, per-competitor processing failure (logs competitor ID, name, stack).
+* `api/cron/user-sync` — users load failure, per-user sync failure (`severity: 'warn'`), per-user unexpected error.
+* `api/cron/weekly-digest` — users load failure, per-user digest failure.
+* `api/ideas/generate` — unhandled exception.
+* `api/ideas/[id]/generate-thumbnail` — thumbnail job creation failure.
+* `api/ideas/[id]/made` — DB update error, unhandled exception.
+* `api/ideas/[id]/plan` — DB update error, unhandled exception.
+* `api/subscription/cancel` — PayPal cancel error (logs partial subscription ID).
+* `api/subscription/create` — missing plan ID env var (`severity: 'error'`), PayPal error.
+* `api/unsubscribe` — DB update error (logs token prefix).
+* `api/webhooks/paypal` — signature verification failure (`severity: 'warn'`), JSON parse failure (`severity: 'warn'`), unhandled exception.
+* `api/account/delete` — DB deletion error.
+
+*Database migration (run once in Supabase SQL editor):*
+```sql
+-- Run supabase/migrations/20260513000000_add_explicit_grants.sql in full.
+-- Creates error_logs table, enables RLS on ideas + thumbnail_jobs,
+-- and adds explicit grants on all 15 tables.
+```
+
+---
 
 ### Week 4 — Day 42 (2026-05-12)
 
@@ -2691,6 +2799,10 @@ GROUP D — Public (intentionally no auth):
 * Dashboard blocks entirely on null `youtube_channel_id` (Day 42): A user can authenticate with Google (creating a users row) but have no YouTube channel linked — either because the Google account has no channel, or the channel was deauthorised. Without a channel ID, every API call downstream (sync, competitor fetch, gap score) would fail or return empty data. Rather than show a broken dashboard, the page renders a full-screen explanation with a support email link. `DashboardClient` is never mounted in this state.
 * Onboarding niche timeout requires explicit selection, no silent default (Day 42): The previous `'finance'` fallback on polling timeout would write a wrong niche for most users — only ~30% of creators are in finance. A wrong niche means wrong competitors, wrong digest, wrong ideas. The fix forces the user to make a conscious choice from the dropdown. There is no "best guess" when the guess is wrong 70% of the time.
 * Email from addresses are split by email type (Day 42): `digest@showstencil.com` for weekly digests, `trend@showstencil.com` for trend alerts. A single shared `FROM_EMAIL` env var was removed because the two addresses are permanently different — digest emails and alerts serve different purposes and should be distinguishable in the user's inbox. Both add `replyTo: SUPPORT_EMAIL` so replies route to the support inbox rather than bouncing.
+* Structured error logging to DB, not just console (Day 43): All errors previously logged only via `console.error` — invisible after the 1-hour Vercel log window. `lib/logger.ts` writes structured records to the `error_logs` table (route, error message, JSONB details, severity, nullable userId). Fire-and-forget (`void logError(...)`): logging failures never propagate to callers. No `authenticated` grant on the table — users must never read other users' error records. `service_role` only. This creates a permanent audit trail for production debugging without adding Datadog/LogRocket cost.
+* Proactive token refresh before API calls, not just on TOKEN_EXPIRED (Day 43): The reactive TOKEN_EXPIRED pattern requires one failed API call (5 quota units wasted) before refreshing. The new proactive check refreshes if `token_expires_at <= NOW() + 5 minutes` — before any YouTube API calls are made. This is especially important for the 3am cron where tokens may be seconds from expiry. If no refresh token is stored, the sync returns a clear 401 with a user-facing reconnect message rather than a cryptic "TOKEN_EXPIRED" from YouTube.
+* sync/route.ts pre-flight validation catches no-token state before burning quota (Day 43): Previously, API calls were attempted even when the user had no `youtube_access_token` in the DB — the failure would emerge deep in `syncUserChannel`. Pre-flight now checks `userRow === null` (stale JWT) and `youtube_access_token === null` (OAuth never completed) before calling `syncUserChannel()`. Returns specific 400 error messages so the dashboard can display actionable guidance to the user. The user row fetch is parallelised with the snapshot fetch via `Promise.all` so there is no added latency for the common case.
+* Downgrade uses PayPal subscription revise, not cancel+recreate (Day 43): PayPal's `POST /v1/billing/subscriptions/{id}/revise` changes the plan on an existing subscription — the subscriber approves the revision via the same PayPal approval flow as initial checkout, and billing continues on the new (Starter) plan from the next cycle. This avoids the cancel+recreate flow which would lose the existing billing date and require a new subscription ID stored to the DB.
 
 \---
 
@@ -2707,6 +2819,8 @@ GROUP D — Public (intentionally no auth):
 * Anthropic API: https://docs.anthropic.com
 
 \---
+
+*Last updated: 2026-05-14 — Day 43: lib/logger.ts centralised error logging (logError writes to error_logs Supabase table). Supabase migration 20260513 adds error_logs table, explicit GRANT statements on all 15 tables, RLS on ideas+thumbnail_jobs. app/api/subscription/downgrade added (Pro→Starter via PayPal revise API). Proactive token refresh in sync-logic (refresh within 5min of expiry before any API calls, not just on TOKEN_EXPIRED). api/sync pre-flight validation (user not found + no token = early 400 before burning quota). DashboardClient manualSyncError changed from boolean to string — shows API error message verbatim. logError wired into 20+ files: auth, sync-logic, api/sync, paypal, youtube-analytics, youtube-data, email, gap-scorer, niche-engine, digest-generator, and all API route catch blocks. tsc --noEmit: zero errors.*
 
 *Last updated: 2026-05-12 — Day 42: PayPal error logging (getAccessToken validates credentials, createSubscription logs full request body). Audience demographics + traffic sources now persisted in channel_snapshots (age_gender_breakdown, top_countries, traffic_sources JSONB columns). Subscriber count ?? 45000 fallback removed from sync-logic — auto-detection skipped when no snapshot exists. Niche corruption fix: detectNiche no longer writes niche on confidence===0. Digest niche fallback aligned to 'general'. Email from addresses split: digest@showstencil.com for weekly digest, trend@showstencil.com for alerts; both add replyTo SUPPORT_EMAIL. Dashboard guards against null youtube_channel_id (no-channel error screen). StepConfirmNiche timeout now switches to manual selection instead of silently writing 'finance'. Landing page timezone fallback for broken browsers (try/catch + range check on ET offset). Vercel Analytics added (@vercel/analytics). tsc --noEmit: zero errors.*
 

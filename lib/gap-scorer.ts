@@ -10,6 +10,7 @@
  */
 
 import { createServiceClient } from '@/lib/supabase';
+import { logError } from '@/lib/logger';
 import type { CompetitorFullProfile } from '@/lib/youtube-data';
 import type {
   UserMetrics,
@@ -445,6 +446,11 @@ export async function saveGapScore(
 
   if (error) {
     console.error('[gap-scorer] saveGapScore error:', error.message);
+    void logError({
+      userId,
+      route: 'lib/gap-scorer/saveGapScore',
+      error: error.message,
+    });
     return false;
   }
 

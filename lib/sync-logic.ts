@@ -11,6 +11,7 @@
 import { getUser, saveChannelSnapshot, saveVideoData } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
 import { detectAndAssignCompetitors } from '@/lib/niche-engine'
+import { logError } from '@/lib/logger'
 import {
   getChannelOverview,
   getVideoPerformance,
@@ -63,7 +64,24 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
   // ── 1. Load user from DB ───────────────────────────────────────────────────
   const user = await getUser(userId)
 
+  if (user === null) {
+    console.error(`[sync] User ${userId} not found in DB — JWT userId may be stale`)
+  } else if (!user.youtube_access_token) {
+    console.warn(`[sync] User ${userId} has no YouTube access token — OAuth may not have completed. youtube_channel_id=${user.youtube_channel_id ?? 'null'}`)
+  }
+
   if (!user?.youtube_access_token) {
+    void logError({
+      userId,
+      route: 'lib/sync-logic',
+      error: user === null ? 'User not found in DB' : 'No YouTube access token',
+      details: {
+        youtube_channel_id: user?.youtube_channel_id ?? null,
+        has_refresh_token: !!user?.youtube_refresh_token,
+        token_expires_at: user?.token_expires_at ?? null,
+      },
+      severity: 'warn',
+    })
     return {
       success: false,
       channelSnapshot: false,
@@ -74,6 +92,57 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
   }
 
   let accessToken = user.youtube_access_token
+
+  // ── 1b. Proactively refresh if token is expired or within 5 minutes of expiry ─
+  // auth.ts refreshes the JWT token on browser requests (with a 5-min buffer),
+  // but cron runs at 3am with no active session — the DB token can be stale.
+  // Refreshing here before any API calls avoids burning 5 quota units on failures.
+  const tokenExpiresAt = user.token_expires_at ? new Date(user.token_expires_at) : null
+  const tokenNeedsRefresh = tokenExpiresAt !== null && tokenExpiresAt <= new Date(Date.now() + 300_000)
+
+  if (tokenNeedsRefresh) {
+    if (!user.youtube_refresh_token) {
+      console.error(`[sync] Token expired for user ${userId} but no refresh token stored — user must reconnect`)
+      void logError({
+        userId,
+        route: 'lib/sync-logic',
+        error: 'Token expired and no refresh token stored',
+        details: {
+          token_expires_at: user.token_expires_at,
+          youtube_channel_id: user.youtube_channel_id ?? null,
+        },
+        severity: 'warn',
+      })
+      return {
+        success: false,
+        channelSnapshot: false,
+        videosSynced: 0,
+        error: 'YouTube token expired — please sign out and sign back in to reconnect your account',
+        httpStatus: 401,
+      }
+    }
+    console.log(`[sync] Token expired/expiring at ${tokenExpiresAt.toISOString()} — proactively refreshing for user ${userId}`)
+    const refreshed = await refreshAccessToken(userId, user.youtube_refresh_token)
+    if (!refreshed) {
+      void logError({
+        userId,
+        route: 'lib/sync-logic',
+        error: 'Proactive token refresh failed',
+        details: { token_expires_at: user.token_expires_at },
+        severity: 'warn',
+      })
+      return {
+        success: false,
+        channelSnapshot: false,
+        videosSynced: 0,
+        error: 'YouTube token refresh failed — please sign out and sign back in to reconnect your account',
+        httpStatus: 401,
+      }
+    }
+    accessToken = refreshed
+    console.log(`[sync] Token proactively refreshed for user ${userId}`)
+  }
+
   console.log(`[sync] Starting full sync for user ${userId}`)
 
   // ── 2. Parallel analytics calls (with one token-refresh retry) ─────────────
@@ -101,6 +170,12 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
       console.log(`[sync] Token expired for user ${userId} — attempting refresh`)
       const newToken = await refreshAccessToken(userId, user.youtube_refresh_token)
       if (!newToken) {
+        void logError({
+          userId,
+          route: 'lib/sync-logic',
+          error: 'YouTube token expired and refresh failed',
+          details: { youtube_channel_id: user.youtube_channel_id ?? null },
+        })
         return {
           success: false,
           channelSnapshot: false,
@@ -116,6 +191,12 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
         console.error(`[sync] Retry failed for user ${userId}:`, retryMsg)
+        void logError({
+          userId,
+          route: 'lib/sync-logic',
+          error: `YouTube API error after token refresh: ${retryMsg}`,
+          details: { error_stack: retryErr instanceof Error ? retryErr.stack : undefined },
+        })
         return {
           success: false,
           channelSnapshot: false,
@@ -126,6 +207,13 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
       }
     } else {
       console.error(`[sync] YouTube Analytics error for user ${userId}:`, message)
+      void logError({
+        userId,
+        route: 'lib/sync-logic',
+        error: `YouTube Analytics API error: ${message}`,
+        details: { error_stack: err instanceof Error ? err.stack : undefined },
+        severity: message === 'TOKEN_EXPIRED' ? 'warn' : 'error',
+      })
       return {
         success: false,
         channelSnapshot: false,
@@ -157,6 +245,13 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
       videosSynced = await saveVideoData(userId, videoPerformance, videoDetails)
     } catch (err) {
       console.error(`[sync] Video save error for user ${userId}:`, err)
+      void logError({
+        userId,
+        route: 'lib/sync-logic',
+        error: err instanceof Error ? err.message : String(err),
+        details: { error_stack: err instanceof Error ? err.stack : undefined },
+        severity: 'warn',
+      })
     }
   }
 
@@ -221,6 +316,13 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
     }
   } catch (err) {
     console.error(`[sync] Competitor auto-detection failed for user ${userId}:`, err)
+    void logError({
+      userId,
+      route: 'lib/sync-logic',
+      error: err instanceof Error ? err.message : String(err),
+      details: { error_stack: err instanceof Error ? err.stack : undefined },
+      severity: 'warn',
+    })
   }
 
   return { success: true, channelSnapshot, videosSynced }

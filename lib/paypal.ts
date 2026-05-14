@@ -5,6 +5,8 @@
  * All operations switch between sandbox and live based on PAYPAL_MODE env var.
  */
 
+import { logError } from '@/lib/logger'
+
 // Read at request time so Vercel env var changes take effect without redeploy.
 function getBaseUrl(): string {
   return process.env.PAYPAL_MODE === 'production'
@@ -24,6 +26,11 @@ export async function getAccessToken(): Promise<string> {
   console.log('[paypal/getAccessToken] PAYPAL_MODE:', process.env.PAYPAL_MODE ?? 'not set', '→ base URL:', base, '| clientId:', clientId ? `${clientId.slice(0, 8)}…` : 'MISSING', '| secret:', secret ? 'set' : 'MISSING')
 
   if (!clientId || !secret) {
+    void logError({
+      route: 'lib/paypal/getAccessToken',
+      error: 'PayPal credentials not configured',
+      details: { missing: !clientId ? 'PAYPAL_CLIENT_ID' : 'PAYPAL_SECRET' },
+    })
     throw new Error('PayPal credentials not configured (PAYPAL_CLIENT_ID or PAYPAL_SECRET missing)')
   }
 
@@ -40,6 +47,11 @@ export async function getAccessToken(): Promise<string> {
 
   if (!res.ok) {
     const body = await res.text()
+    void logError({
+      route: 'lib/paypal/getAccessToken',
+      error: `PayPal OAuth failed (${res.status})`,
+      details: { status: res.status, body: body.slice(0, 500) },
+    })
     throw new Error(`PayPal OAuth failed (${res.status}): ${body}`)
   }
 
@@ -97,6 +109,12 @@ export async function createSubscription(
   if (!res.ok) {
     const body = await res.text()
     console.error('[paypal/createSubscription] failed:', res.status, body)
+    void logError({
+      userId,
+      route: 'lib/paypal/createSubscription',
+      error: `PayPal create subscription failed (${res.status})`,
+      details: { plan_id_prefix: planId.slice(0, 6), status: res.status, body: body.slice(0, 500) },
+    })
     throw new Error(`PayPal create subscription failed (${res.status}): ${body}`)
   }
 
@@ -200,6 +218,11 @@ export async function verifyWebhookSignature(
     token = await getAccessToken()
   } catch (err) {
     console.error('[paypal/verify] Failed to get access token for webhook verification:', err)
+    void logError({
+      route: 'lib/paypal/verifyWebhookSignature',
+      error: err instanceof Error ? err.message : String(err),
+      details: { step: 'getAccessToken' },
+    })
     return false
   }
 
@@ -242,6 +265,12 @@ export async function verifyWebhookSignature(
 
     if (!res.ok) {
       console.error('[paypal/verify] PayPal verification API returned non-2xx:', res.status, responseText)
+      void logError({
+        route: 'lib/paypal/verifyWebhookSignature',
+        error: `PayPal verification API returned ${res.status}`,
+        details: { status: res.status, body: responseText.slice(0, 500) },
+        severity: 'warn',
+      })
       return false
     }
 
@@ -257,6 +286,11 @@ export async function verifyWebhookSignature(
     return data.verification_status === 'SUCCESS'
   } catch (err) {
     console.error('[paypal/verify] Exception during verification fetch:', err)
+    void logError({
+      route: 'lib/paypal/verifyWebhookSignature',
+      error: err instanceof Error ? err.message : String(err),
+      details: { step: 'verifyFetch', error_stack: err instanceof Error ? err.stack : undefined },
+    })
     return false
   }
 }

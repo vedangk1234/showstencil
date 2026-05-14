@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
+import { logError } from '@/lib/logger'
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -31,12 +32,24 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
     if (error) {
       console.error('[ideas/plan] DB error:', error.message)
+      void logError({
+        userId: session.user.id,
+        route: 'api/ideas/[id]/plan',
+        error: error.message,
+        details: { idea_id: id },
+      })
       return NextResponse.json({ error: 'Failed to update idea' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
     console.error('[ideas/plan] Unexpected error:', err)
+    void logError({
+      userId: undefined,
+      route: 'api/ideas/[id]/plan',
+      error: message,
+    })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

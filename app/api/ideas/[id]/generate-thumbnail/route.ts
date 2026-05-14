@@ -7,6 +7,7 @@ import { createThumbnailJob, updateThumbnailJob } from '@/lib/db'
 import { generateThumbnail } from '@/lib/gemini-image'
 import { uploadThumbnail } from '@/lib/thumbnail-storage'
 import { padToSixteenNine } from '@/lib/image-utils'
+import { logError } from '@/lib/logger'
 
 type PhotoSource = 'camera' | 'upload' | 'google_profile' | 'no_photo'
 
@@ -107,6 +108,7 @@ export async function POST(
   // Create the job row (returns immediately)
   const jobId = await createThumbnailJob({ userId, ideaId })
   if (!jobId) {
+    void logError({ userId, route: 'api/ideas/[id]/generate-thumbnail', error: 'Failed to create thumbnail job', details: { idea_id: ideaId } })
     return NextResponse.json({ error: 'Failed to create thumbnail job' }, { status: 500 })
   }
 

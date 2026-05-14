@@ -12,6 +12,8 @@
  *   - Other errors → logs and returns null/[] — never crashes the app
  */
 
+import { logError } from '@/lib/logger';
+
 const BASE_URL = 'https://youtubeanalytics.googleapis.com/v2';
 
 // ---------------------------------------------------------------------------
@@ -141,6 +143,11 @@ async function analyticsQuery(
     });
   } catch (err) {
     console.error('[youtube-analytics] network error:', err);
+    void logError({
+      route: 'lib/youtube-analytics/analyticsQuery',
+      error: err instanceof Error ? err.message : String(err),
+      details: { error_stack: err instanceof Error ? err.stack : undefined },
+    });
     return null;
   }
 
@@ -180,6 +187,11 @@ async function analyticsQuery(
     `[youtube-analytics] HTTP ${res.status}:`,
     errorBody?.error?.message ?? 'unknown error',
   );
+  void logError({
+    route: 'lib/youtube-analytics/analyticsQuery',
+    error: `HTTP ${res.status}: ${errorBody?.error?.message ?? 'unknown error'}`,
+    severity: 'warn',
+  });
   return null;
 }
 

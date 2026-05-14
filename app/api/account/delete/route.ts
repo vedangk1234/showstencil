@@ -2,6 +2,7 @@ import { auth, signOut } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
 import { cancelSubscription } from '@/lib/paypal'
+import { logError } from '@/lib/logger'
 
 export async function POST() {
   const session = await auth()
@@ -64,6 +65,12 @@ export async function POST() {
     await supabase.from('users').delete().eq('id', userId)
   } catch (err) {
     console.error('[account/delete] DB deletion error:', err)
+    void logError({
+      userId,
+      route: 'api/account/delete',
+      error: err instanceof Error ? err.message : String(err),
+      details: { error_stack: err instanceof Error ? err.stack : undefined },
+    })
     return NextResponse.json({ error: 'Failed to delete account data. Please try again.' }, { status: 500 })
   }
 

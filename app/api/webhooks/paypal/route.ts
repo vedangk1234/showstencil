@@ -13,6 +13,7 @@ import {
   updateUserSubscription,
 } from '@/lib/db'
 import { verifyWebhookSignature, getPlanFromPayPalPlanId, getSubscriptionDetails } from '@/lib/paypal'
+import { logError } from '@/lib/logger'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -38,6 +39,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const isValid = await verifyWebhookSignature(headers, rawBody)
       if (!isValid) {
         console.error('[paypal-webhook] Signature verification failed')
+        void logError({
+          route: 'api/webhooks/paypal',
+          error: 'Signature verification failed',
+          details: {
+            transmission_id: headers['paypal-transmission-id'],
+            auth_algo: headers['paypal-auth-algo'],
+          },
+          severity: 'warn',
+        })
         return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
       }
     } else {
@@ -49,6 +59,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       event = JSON.parse(rawBody)
     } catch {
       console.error('[paypal-webhook] Failed to parse JSON body')
+      void logError({
+        route: 'api/webhooks/paypal',
+        error: 'Failed to parse JSON body',
+        severity: 'warn',
+      })
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
     }
 
@@ -262,10 +277,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ received: true })
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const stack = err instanceof Error ? err.stack : undefined
     Sentry.captureException(err, {
       tags: { route: 'webhooks/paypal' },
     })
     console.error('[paypal-webhook] Unhandled exception:', err)
+    void logError({
+      route: 'api/webhooks/paypal',
+      error: message,
+      details: { error_stack: stack },
+    })
     return NextResponse.json({ error: 'Bad request' }, { status: 400 })
   }
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
+import { logError } from '@/lib/logger'
 
 function parseDuration(duration: string): number {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
@@ -90,6 +91,12 @@ export async function POST(
 
     if (error) {
       console.error('[competitors/[id]/sync] DB error:', error.message)
+      void logError({
+        userId: session.user.id,
+        route: 'api/competitors/[id]/sync',
+        error: error.message,
+        details: { competitor_id: id, channel_name: competitor.channel_name },
+      })
       return NextResponse.json({ error: 'Failed to save videos' }, { status: 500 })
     }
 
@@ -99,7 +106,14 @@ export async function POST(
       message: `Synced ${videos.length} videos for ${competitor.channel_name}`,
     })
   } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
     console.error('[competitors/[id]/sync] Unexpected error:', error)
+    void logError({
+      userId: undefined,
+      route: 'api/competitors/[id]/sync',
+      error: message,
+      details: { error_stack: error instanceof Error ? error.stack : undefined },
+    })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth'
 import Google from 'next-auth/providers/google'
 import { createServiceClient } from '@/lib/supabase'
+import { logError } from '@/lib/logger'
 import type { JWT } from 'next-auth/jwt'
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -50,6 +51,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         )
         if (error) {
           console.error('[auth] upsert error:', error.message)
+          void logError({
+            route: 'auth/signIn/upsert',
+            error: `Supabase upsert failed: ${error.message}`,
+            details: {
+              email: user.email,
+              supabase_code: error.code ?? null,
+              has_access_token: !!account.access_token,
+              has_refresh_token: !!account.refresh_token,
+            },
+            severity: 'error',
+          })
           return false
         }
 
@@ -64,7 +76,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               .eq('email', user.email)
           } else {
             console.warn('[auth] Could not fetch YouTube channel ID for', user.email)
+            void logError({
+              route: 'auth/signIn/getYouTubeChannelId',
+              error: 'YouTube channel ID returned null — Google account may have no YouTube channel, or the access token lacks youtube.readonly scope',
+              details: {
+                email: user.email,
+                has_access_token: !!account.access_token,
+                has_refresh_token: !!account.refresh_token,
+                token_expires_at: account.expires_at
+                  ? new Date(account.expires_at * 1000).toISOString()
+                  : null,
+              },
+              severity: 'warn',
+            })
           }
+        } else {
+          console.error('[auth] No access token in account — OAuth did not return an access token')
+          void logError({
+            route: 'auth/signIn/no_access_token',
+            error: 'Google OAuth completed but account.access_token is null — tokens will not be stored',
+            details: { email: user.email, has_refresh_token: !!account.refresh_token },
+            severity: 'error',
+          })
         }
 
         return true

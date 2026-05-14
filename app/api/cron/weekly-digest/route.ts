@@ -12,6 +12,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { generateDigest } from '@/lib/digest-generator'
+import { logError } from '@/lib/logger'
 
 export async function GET(request: Request) {
   // ── Auth check ─────────────────────────────────────────────────────────────
@@ -32,6 +33,10 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error('[cron/weekly-digest] Failed to load users:', error.message)
+    void logError({
+      route: 'cron/weekly-digest',
+      error: error.message,
+    })
     return NextResponse.json({ error: 'Failed to load users' }, { status: 500 })
   }
 
@@ -49,6 +54,12 @@ export async function GET(request: Request) {
     } catch (err) {
       failed++
       console.error(`[cron/weekly-digest] Failed for user ${user.id}:`, err)
+      void logError({
+        userId: user.id,
+        route: 'cron/weekly-digest',
+        error: err instanceof Error ? err.message : String(err),
+        details: { error_stack: err instanceof Error ? err.stack : undefined },
+      })
     }
 
     // 500ms delay between users — avoid hammering YouTube + Anthropic APIs

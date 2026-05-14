@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { getUser } from '@/lib/db'
 import { createSubscription } from '@/lib/paypal'
+import { logError } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   const session = await auth()
@@ -46,7 +47,15 @@ export async function POST(request: NextRequest) {
   })
 
   if (!planId) {
-    console.error(`[subscription/create] PAYPAL_${plan.toUpperCase()}_PLAN_ID not set`)
+    const missingVar = `PAYPAL_${plan.toUpperCase()}_PLAN_ID`
+    console.error(`[subscription/create] ${missingVar} not set`)
+    void logError({
+      userId: session.user.id,
+      route: 'api/subscription/create',
+      error: `${missingVar} env var not set`,
+      details: { plan },
+      severity: 'error',
+    })
     return NextResponse.json(
       { error: 'Server configuration error — plan ID not set.' },
       { status: 500 }
@@ -64,6 +73,12 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[subscription/create] PayPal error:', message)
+    void logError({
+      userId: session.user.id,
+      route: 'api/subscription/create',
+      error: message,
+      details: { plan, plan_id_prefix: planId.slice(0, 6) },
+    })
     return NextResponse.json(
       { error: 'Failed to create subscription. Please try again.' },
       { status: 502 }
