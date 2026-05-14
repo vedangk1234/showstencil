@@ -841,6 +841,22 @@ const planLimits = {
 
 > Update this section every Friday
 
+### Week 4 — Day 44 (2026-05-14)
+
+**Fix sync 429 handling — reload instead of error on empty dashboard**
+
+*tsc --noEmit: zero errors.*
+
+---
+
+*`app/api/sync/route.ts` — MODIFIED:*
+* 429 cooldown response message changed from `"Sync completed recently. Please wait N minute(s) before syncing again."` to `"Your channel was synced recently. Refreshing your dashboard..."` — the new message matches the client-side behaviour (a reload, not a wait).
+
+*`components/dashboard/DashboardClient.tsx` — MODIFIED:*
+* `handleManualSync()` now checks `res.status === 429` before reading the response body and calls `window.location.reload()` immediately, returning early. Previously a 429 fell through to the error branch and set `manualSyncError`, showing a red error message on the empty dashboard. A 429 on the empty dashboard always means the onboarding background sync already completed and data exists — a reload reveals it. Non-429 failures continue to show the error string as before.
+
+---
+
 ### Week 4 — Day 43 (2026-05-14)
 
 **Observability layer, proactive token refresh, Pro→Starter downgrade route, and Supabase explicit grants migration**
@@ -2819,6 +2835,8 @@ GROUP D — Public (intentionally no auth):
 * Anthropic API: https://docs.anthropic.com
 
 \---
+
+*Last updated: 2026-05-14 — Day 44: Sync 429 handling fix — api/sync 429 message updated to "Your channel was synced recently. Refreshing your dashboard...". DashboardClient handleManualSync() reloads page on 429 instead of showing error string (429 on empty dashboard = data exists, reload reveals it). tsc --noEmit: zero errors.*
 
 *Last updated: 2026-05-14 — Day 43: lib/logger.ts centralised error logging (logError writes to error_logs Supabase table). Supabase migration 20260513 adds error_logs table, explicit GRANT statements on all 15 tables, RLS on ideas+thumbnail_jobs. app/api/subscription/downgrade added (Pro→Starter via PayPal revise API). Proactive token refresh in sync-logic (refresh within 5min of expiry before any API calls, not just on TOKEN_EXPIRED). api/sync pre-flight validation (user not found + no token = early 400 before burning quota). DashboardClient manualSyncError changed from boolean to string — shows API error message verbatim. logError wired into 20+ files: auth, sync-logic, api/sync, paypal, youtube-analytics, youtube-data, email, gap-scorer, niche-engine, digest-generator, and all API route catch blocks. tsc --noEmit: zero errors.*
 

@@ -145,6 +145,10 @@ export default function DashboardClient({
     setManualSyncError(null)
     try {
       const res = await fetch('/api/sync', { method: 'POST' })
+      if (res.status === 429) {
+        window.location.reload()
+        return
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string }
         throw new Error(body.error ?? `Sync failed (${res.status})`)

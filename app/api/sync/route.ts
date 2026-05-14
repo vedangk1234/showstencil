@@ -101,7 +101,7 @@ export async function POST() {
     if (msSinceLastSync < SYNC_COOLDOWN_MS) {
       const retryAfterSec = Math.ceil((SYNC_COOLDOWN_MS - msSinceLastSync) / 1000)
       return NextResponse.json(
-        { error: `Sync completed recently. Please wait ${Math.ceil(retryAfterSec / 60)} minute(s) before syncing again.` },
+        { error: 'Your channel was synced recently. Refreshing your dashboard...' },
         { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
       )
     }
