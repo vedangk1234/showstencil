@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { deleteThumbnailFromStorage } from '@/lib/thumbnail-storage'
+import { logError } from '@/lib/logger'
 
 // Runs daily at 2 AM UTC — purges expired searched_channels_cache rows
 export async function GET(request: Request) {
@@ -19,6 +20,12 @@ export async function GET(request: Request) {
 
   if (cacheErr) {
     console.error('[cron/cache-cleanup] Cache delete error:', cacheErr)
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to delete expired searched_channels_cache rows',
+      details: { supabaseError: cacheErr.message },
+      severity: 'error',
+    })
   }
 
   // Delete search history older than 90 days
@@ -32,6 +39,12 @@ export async function GET(request: Request) {
 
   if (histErr) {
     console.error('[cron/cache-cleanup] History delete error:', histErr)
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to delete old user_search_history rows',
+      details: { supabaseError: histErr.message },
+      severity: 'error',
+    })
   }
 
   // Delete inactive competitors older than 30 days
@@ -46,6 +59,12 @@ export async function GET(request: Request) {
 
   if (compErr) {
     console.error('[cron/cache-cleanup] Competitor delete error:', compErr)
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to delete inactive competitor rows',
+      details: { supabaseError: compErr.message },
+      severity: 'error',
+    })
   }
 
   // Delete thumbnail_jobs older than 24 hours
@@ -59,6 +78,12 @@ export async function GET(request: Request) {
 
   if (jobsErr) {
     console.error('[cron/cache-cleanup] thumbnail_jobs delete error:', jobsErr)
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to delete old thumbnail_jobs rows',
+      details: { supabaseError: jobsErr.message },
+      severity: 'error',
+    })
   }
 
   // Expire thumbnails older than 7 days: delete from Storage + null DB columns
@@ -73,6 +98,12 @@ export async function GET(request: Request) {
 
   if (expiredErr) {
     console.error('[cron/cache-cleanup] expired thumbnails fetch error:', expiredErr)
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to fetch expired thumbnail ideas',
+      details: { supabaseError: expiredErr.message },
+      severity: 'error',
+    })
   }
 
   let deletedThumbnails = 0
@@ -113,6 +144,12 @@ export async function GET(request: Request) {
 
     if (wipeError) {
       console.error('[cron/cache-cleanup] Failed to wipe insights:', wipeError.message)
+      void logError({
+        route: 'api/cron/cache-cleanup',
+        error: 'Monday: failed to wipe competitor insights cache',
+        details: { supabaseError: wipeError.message },
+        severity: 'error',
+      })
     } else {
       insightsWiped = cachedCount ?? 0
       console.log(`[cron/cache-cleanup] Wiped insights for ${insightsWiped} competitors`)
@@ -126,6 +163,12 @@ export async function GET(request: Request) {
 
     if (flagError) {
       console.error('[cron/cache-cleanup] Failed to set ideas_refresh_available:', flagError.message)
+      void logError({
+        route: 'api/cron/cache-cleanup',
+        error: 'Monday: failed to set ideas_refresh_available on user_settings',
+        details: { supabaseError: flagError.message },
+        severity: 'error',
+      })
     } else {
       usersEnabled = flaggedCount ?? 0
       console.log(`[cron/cache-cleanup] Enabled ideas refresh for ${usersEnabled} users`)
@@ -153,6 +196,12 @@ export async function GET(request: Request) {
 
       if (insertError) {
         console.error('[cron/cache-cleanup] Failed to create missing user_settings rows:', insertError.message)
+        void logError({
+          route: 'api/cron/cache-cleanup',
+          error: 'Monday: failed to insert user_settings rows for new users',
+          details: { supabaseError: insertError.message, rowCount: newRows.length },
+          severity: 'error',
+        })
       } else {
         console.log(`[cron/cache-cleanup] Created user_settings for ${newRows.length} users without settings`)
         usersEnabled += newRows.length

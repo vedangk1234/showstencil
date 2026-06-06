@@ -89,6 +89,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               },
               severity: 'warn',
             })
+            // Critical: the upsert succeeded but this user has no youtube_channel_id
+            // on their row. They will never sync successfully and their dashboard will
+            // be permanently empty until they reconnect with a Google account that has
+            // a YouTube channel attached.
+            void logError({
+              route: 'auth/signIn',
+              error: 'User created without youtube_channel_id',
+              details: {
+                email: user.email,
+                has_access_token: !!account.access_token,
+                has_refresh_token: !!account.refresh_token,
+              },
+              severity: 'error',
+            })
           }
         } else {
           console.error('[auth] No access token in account — OAuth did not return an access token')

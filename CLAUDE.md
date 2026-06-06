@@ -403,6 +403,25 @@ CREATE TABLE IF NOT EXISTS public.error_logs (
 );
 -- RLS enabled; service_role gets INSERT + SELECT only (no authenticated grant)
 
+-- sync_logs — every /api/sync attempt (migration 20260514)
+CREATE TABLE IF NOT EXISTS public.sync_logs (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at    TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
+  user_id       UUID        REFERENCES public.users(id) ON DELETE SET NULL,
+  email         TEXT,
+  route         TEXT        NOT NULL    DEFAULT '/api/sync',
+  status        INTEGER     NOT NULL,
+  message       TEXT,
+  duration_ms   INTEGER,
+  ip            TEXT,
+  country       TEXT,
+  city          TEXT,
+  user_agent    TEXT,
+  channel_id    TEXT,
+  videos_synced INTEGER
+);
+-- RLS enabled; service_role gets SELECT + INSERT only
+
 -- New columns on ideas table (thumbnail + hook variants — run once):
 -- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS thumbnail\_image\_url TEXT;
 -- ALTER TABLE ideas ADD COLUMN IF NOT EXISTS thumbnail\_generated\_at TIMESTAMPTZ;
@@ -681,7 +700,7 @@ const planLimits = {
 | `lib/image-utils.ts` | ✅ | padToSixteenNine (sharp) — server-side padding of any image to 16:9 by sampling edge pixel colour; used in thumbnail pipeline before Supabase upload |
 | `lib/niche-images.ts` | ✅ | getNicheImage + getShuffledNicheImages — maps niche_id to curated stock image filenames in public/niche-images/ with seeded Fisher-Yates shuffle; stable per generation seed |
 | `lib/env-validation.ts` | ✅ | validateEnv — checks 9 required env vars at startup; throws with clear list of missing keys |
-| `lib/logger.ts` | ✅ | logError — writes structured error records to error_logs Supabase table (userId, route, error, details JSONB, severity); never throws; always called with void |
+| `lib/logger.ts` | ✅ | logError — writes structured error records to error_logs Supabase table (userId, route, error, details JSONB, severity); logSyncAttempt — writes every /api/sync attempt to sync_logs (status, durationMs, ip, country, city, userAgent, channelId, videosSynced); both never throw; both called with void |
 | `lib/sub-niche-detector.ts` | ✅ | detectSubNiche (Claude), calculateSubNicheSimilarity — granular sub-niche within a broad niche |
 | `lib/db.ts` (Day 13 additions) | ✅ | saveCompetitorSnapshot, getCompetitorSnapshots, getAllCompetitorSnapshotsForUser, updateCompetitorMetrics, saveCompetitorInsights, getCachedInsights; saveChannelSnapshot extended with optional extras (demographics + trafficSources) written to three new JSONB columns (Day 42) |
 | `lib/dominator-finder.ts` | ✅ | findDominatorsForUser — niche-specific rules (sub_niche match for gaming/fitness/tech/education, broad for others) |

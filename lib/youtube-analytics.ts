@@ -204,6 +204,7 @@ async function analyticsQuery(
 async function queryWithRevenueRetry(
   accessToken: string,
   params: Record<string, string>,
+  reportName?: string,
 ): Promise<{ result: AnalyticsResult; hasRevenue: boolean } | null> {
   const result = await analyticsQuery(accessToken, params);
   if (result) return { result, hasRevenue: true };
@@ -218,8 +219,30 @@ async function queryWithRevenueRetry(
   console.warn(
     '[youtube-analytics] retrying without estimatedRevenue (channel may not be monetized)',
   );
+  void logError({
+    route: 'lib/youtube-analytics/queryWithRevenueRetry',
+    error: 'Retrying Analytics call without estimatedRevenue',
+    details: {
+      report_name: reportName ?? 'unknown',
+      retry_count: 1,
+      original_metrics: params.metrics ?? null,
+    },
+    severity: 'warn',
+  });
   const fallback = await analyticsQuery(accessToken, { ...params, metrics: metricsWithout });
-  if (!fallback) return null;
+  if (!fallback) {
+    void logError({
+      route: 'lib/youtube-analytics/queryWithRevenueRetry',
+      error: 'Analytics retry without estimatedRevenue also failed',
+      details: {
+        report_name: reportName ?? 'unknown',
+        original_metrics: params.metrics ?? null,
+        retry_metrics: metricsWithout,
+      },
+      severity: 'error',
+    });
+    return null;
+  }
   return { result: fallback, hasRevenue: false };
 }
 
@@ -238,12 +261,25 @@ export async function getChannelOverview(
 ): Promise<ChannelOverview | null> {
   const { startDate, endDate } = dateRange(90);
 
-  const attempt = await queryWithRevenueRetry(accessToken, {
-    startDate,
-    endDate,
-    metrics:
-      'views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost,estimatedRevenue',
-  });
+  let attempt: Awaited<ReturnType<typeof queryWithRevenueRetry>> = null;
+  try {
+    attempt = await queryWithRevenueRetry(accessToken, {
+      startDate,
+      endDate,
+      metrics:
+        'views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost,estimatedRevenue',
+    }, 'overview');
+  } catch (err) {
+    // Only TOKEN_EXPIRED propagates here. Log and rethrow so caller can refresh.
+    const message = err instanceof Error ? err.message : String(err);
+    void logError({
+      route: 'lib/youtube-analytics/getChannelOverview',
+      error: `Analytics report "overview" failed: ${message}`,
+      details: { report_name: 'overview' },
+      severity: message === 'TOKEN_EXPIRED' ? 'warn' : 'error',
+    });
+    throw err;
+  }
 
   if (!attempt) {
     // Task 4: detect missing YouTube channel gracefully
@@ -251,6 +287,12 @@ export async function getChannelOverview(
       '[youtube-analytics] getChannelOverview: no YouTube channel found on this account, ' +
         'or the account does not have access to YouTube Analytics.',
     );
+    void logError({
+      route: 'lib/youtube-analytics/getChannelOverview',
+      error: 'getChannelOverview returned null — no channel or no Analytics access',
+      details: { report_name: 'overview', date_range: `${startDate}..${endDate}` },
+      severity: 'error',
+    });
     return null;
   }
 
@@ -258,6 +300,12 @@ export async function getChannelOverview(
 
   if (result.rows.length === 0) {
     // Channel exists but has no data yet (brand-new or no views in window)
+    void logError({
+      route: 'lib/youtube-analytics/getChannelOverview',
+      error: 'Analytics report returned empty data',
+      details: { report_name: 'overview', date_range: `${startDate}..${endDate}` },
+      severity: 'warn',
+    });
     return {
       totalViews: 0,
       totalWatchTimeMinutes: 0,
@@ -299,22 +347,49 @@ export async function getVideoPerformance(
 ): Promise<VideoPerformanceItem[]> {
   const { startDate, endDate } = dateRange(90);
 
-  const attempt = await queryWithRevenueRetry(accessToken, {
-    startDate,
-    endDate,
-    dimensions: 'video',
-    metrics:
-      'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,likes,comments,shares,subscribersGained,estimatedRevenue,annotationClickThroughRate',
-    sort: '-views',
-    maxResults: String(maxResults),
-  });
+  let attempt: Awaited<ReturnType<typeof queryWithRevenueRetry>> = null;
+  try {
+    attempt = await queryWithRevenueRetry(accessToken, {
+      startDate,
+      endDate,
+      dimensions: 'video',
+      metrics:
+        'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,likes,comments,shares,subscribersGained,estimatedRevenue,annotationClickThroughRate',
+      sort: '-views',
+      maxResults: String(maxResults),
+    }, 'videos');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void logError({
+      route: 'lib/youtube-analytics/getVideoPerformance',
+      error: `Analytics report "videos" failed: ${message}`,
+      details: { report_name: 'videos' },
+      severity: message === 'TOKEN_EXPIRED' ? 'warn' : 'error',
+    });
+    throw err;
+  }
 
   if (!attempt) {
     console.error('[youtube-analytics] getVideoPerformance: failed to fetch data');
+    void logError({
+      route: 'lib/youtube-analytics/getVideoPerformance',
+      error: 'getVideoPerformance returned null',
+      details: { report_name: 'videos', date_range: `${startDate}..${endDate}` },
+      severity: 'error',
+    });
     return [];
   }
 
   const { result, hasRevenue } = attempt;
+
+  if (result.rows.length === 0) {
+    void logError({
+      route: 'lib/youtube-analytics/getVideoPerformance',
+      error: 'Analytics report returned empty data',
+      details: { report_name: 'videos', date_range: `${startDate}..${endDate}` },
+      severity: 'warn',
+    });
+  }
 
   return result.rows.map((row) => {
     const r = parseRow(result.columnHeaders, row);
@@ -349,26 +424,54 @@ export async function getAudienceDemographics(
 ): Promise<AudienceDemographics | null> {
   const { startDate, endDate } = dateRange(90);
 
-  const [ageGenderResult, countriesResult] = await Promise.all([
-    analyticsQuery(accessToken, {
-      startDate,
-      endDate,
-      dimensions: 'ageGroup,gender',
-      metrics: 'viewerPercentage',
-    }),
-    analyticsQuery(accessToken, {
-      startDate,
-      endDate,
-      dimensions: 'country',
-      metrics: 'views',
-      sort: '-views',
-      maxResults: '10',
-    }),
-  ]);
+  let ageGenderResult: AnalyticsResult | null = null;
+  let countriesResult: AnalyticsResult | null = null;
+  try {
+    [ageGenderResult, countriesResult] = await Promise.all([
+      analyticsQuery(accessToken, {
+        startDate,
+        endDate,
+        dimensions: 'ageGroup,gender',
+        metrics: 'viewerPercentage',
+      }),
+      analyticsQuery(accessToken, {
+        startDate,
+        endDate,
+        dimensions: 'country',
+        metrics: 'views',
+        sort: '-views',
+        maxResults: '10',
+      }),
+    ]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void logError({
+      route: 'lib/youtube-analytics/getAudienceDemographics',
+      error: `Analytics report "demographics" failed: ${message}`,
+      details: { report_name: 'demographics' },
+      severity: message === 'TOKEN_EXPIRED' ? 'warn' : 'error',
+    });
+    throw err;
+  }
 
   if (!ageGenderResult && !countriesResult) {
     console.error('[youtube-analytics] getAudienceDemographics: failed to fetch data');
+    void logError({
+      route: 'lib/youtube-analytics/getAudienceDemographics',
+      error: 'getAudienceDemographics: both age/gender and countries returned null',
+      details: { report_name: 'demographics', date_range: `${startDate}..${endDate}` },
+      severity: 'error',
+    });
     return null;
+  }
+
+  if ((ageGenderResult?.rows.length ?? 0) === 0 && (countriesResult?.rows.length ?? 0) === 0) {
+    void logError({
+      route: 'lib/youtube-analytics/getAudienceDemographics',
+      error: 'Analytics report returned empty data',
+      details: { report_name: 'demographics', date_range: `${startDate}..${endDate}` },
+      severity: 'warn',
+    });
   }
 
   const ageGender = (ageGenderResult?.rows ?? []).map((row) => {
@@ -405,16 +508,43 @@ export async function getTrafficSources(
 ): Promise<TrafficSourceItem[]> {
   const { startDate, endDate } = dateRange(90);
 
-  const result = await analyticsQuery(accessToken, {
-    startDate,
-    endDate,
-    dimensions: 'insightTrafficSourceType',
-    metrics: 'views,estimatedMinutesWatched',
-  });
+  let result: AnalyticsResult | null = null;
+  try {
+    result = await analyticsQuery(accessToken, {
+      startDate,
+      endDate,
+      dimensions: 'insightTrafficSourceType',
+      metrics: 'views,estimatedMinutesWatched',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void logError({
+      route: 'lib/youtube-analytics/getTrafficSources',
+      error: `Analytics report "traffic" failed: ${message}`,
+      details: { report_name: 'traffic' },
+      severity: message === 'TOKEN_EXPIRED' ? 'warn' : 'error',
+    });
+    throw err;
+  }
 
   if (!result) {
     console.error('[youtube-analytics] getTrafficSources: failed to fetch data');
+    void logError({
+      route: 'lib/youtube-analytics/getTrafficSources',
+      error: 'getTrafficSources returned null',
+      details: { report_name: 'traffic', date_range: `${startDate}..${endDate}` },
+      severity: 'error',
+    });
     return [];
+  }
+
+  if (result.rows.length === 0) {
+    void logError({
+      route: 'lib/youtube-analytics/getTrafficSources',
+      error: 'Analytics report returned empty data',
+      details: { report_name: 'traffic', date_range: `${startDate}..${endDate}` },
+      severity: 'warn',
+    });
   }
 
   const rows = result.rows.map((row) => {
@@ -450,20 +580,47 @@ export async function getDailyAnalytics(
 ): Promise<DailyAnalyticsItem[]> {
   const { startDate, endDate } = dateRange(days);
 
-  const attempt = await queryWithRevenueRetry(accessToken, {
-    startDate,
-    endDate,
-    dimensions: 'day',
-    metrics: 'views,estimatedMinutesWatched,subscribersGained,estimatedRevenue',
-    sort: 'day',
-  });
+  let attempt: Awaited<ReturnType<typeof queryWithRevenueRetry>> = null;
+  try {
+    attempt = await queryWithRevenueRetry(accessToken, {
+      startDate,
+      endDate,
+      dimensions: 'day',
+      metrics: 'views,estimatedMinutesWatched,subscribersGained,estimatedRevenue',
+      sort: 'day',
+    }, 'daily');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void logError({
+      route: 'lib/youtube-analytics/getDailyAnalytics',
+      error: `Analytics report "daily" failed: ${message}`,
+      details: { report_name: 'daily' },
+      severity: message === 'TOKEN_EXPIRED' ? 'warn' : 'error',
+    });
+    throw err;
+  }
 
   if (!attempt) {
     console.error('[youtube-analytics] getDailyAnalytics: failed to fetch data');
+    void logError({
+      route: 'lib/youtube-analytics/getDailyAnalytics',
+      error: 'getDailyAnalytics returned null',
+      details: { report_name: 'daily', date_range: `${startDate}..${endDate}` },
+      severity: 'error',
+    });
     return [];
   }
 
   const { result, hasRevenue } = attempt;
+
+  if (result.rows.length === 0) {
+    void logError({
+      route: 'lib/youtube-analytics/getDailyAnalytics',
+      error: 'Analytics report returned empty data',
+      details: { report_name: 'daily', date_range: `${startDate}..${endDate}` },
+      severity: 'warn',
+    });
+  }
 
   return result.rows.map((row) => {
     const r = parseRow(result.columnHeaders, row);

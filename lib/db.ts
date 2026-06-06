@@ -10,6 +10,7 @@
  */
 
 import { createServiceClient } from '@/lib/supabase'
+import { logError } from '@/lib/logger'
 import type { ChannelOverview, VideoPerformanceItem, AudienceDemographics, TrafficSourceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
 import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, CompetitorVideo, Insight, Idea, ThumbnailJob } from '@/types'
@@ -31,6 +32,7 @@ export async function saveChannelSnapshot(
   extras?: {
     demographics: AudienceDemographics | null;
     trafficSources: TrafficSourceItem[];
+    subscriberCount?: number | null;
   },
 ): Promise<boolean> {
   // Don't write a null row — if the Analytics API returned no real data at all,
@@ -39,6 +41,19 @@ export async function saveChannelSnapshot(
   const hasRealData = data.totalViews > 0 || data.avgViewDurationSeconds > 0
   if (!hasRealData) {
     console.warn(`[saveChannelSnapshot] Skipping null snapshot for user ${userId} — no real data from Analytics API`)
+    void logError({
+      userId,
+      route: 'lib/db/saveChannelSnapshot',
+      error: 'Skipping snapshot write — Analytics API returned no real data',
+      details: {
+        total_views: data.totalViews,
+        avg_view_duration_seconds: data.avgViewDurationSeconds,
+        had_demographics: !!extras?.demographics,
+        had_traffic_sources: !!extras?.trafficSources?.length,
+        subscriber_count_present: extras?.subscriberCount != null,
+      },
+      severity: 'warn',
+    })
     return false
   }
 
@@ -70,29 +85,86 @@ export async function saveChannelSnapshot(
     ? Math.round(data.avgViewDurationSeconds)
     : (existing?.avg_view_duration_seconds ?? null)
 
-  const { error } = await supabase.from('channel_snapshots').insert({
-    user_id: userId,
-    snapshot_date: today,
-    // Preserve enriched fields from seed / Data API that Analytics API doesn't provide
-    subscriber_count: existing?.subscriber_count ?? null,
-    videos_count: existing?.videos_count ?? null,
-    avg_views_per_video: existing?.avg_views_per_video ?? null,
-    avg_ctr: existing?.avg_ctr ?? null,
-    avg_like_ratio: existing?.avg_like_ratio ?? null,
-    rpm: existing?.rpm ?? null,
-    momentum_score: existing?.momentum_score ?? null,
-    // Analytics API fields
-    total_views: data.totalViews,
-    avg_view_duration_seconds: avgWatchSeconds,
-    estimated_monthly_revenue: estimatedMonthlyRevenue,
-    // Demographics and traffic sources — null when unavailable, never blocks save
-    age_gender_breakdown: extras?.demographics?.ageGender ?? null,
-    top_countries: extras?.demographics?.topCountries ?? null,
-    traffic_sources: extras?.trafficSources?.length ? extras.trafficSources : null,
-  })
+  const resolvedSubscriberCount = extras?.subscriberCount ?? existing?.subscriber_count ?? null
+  const resolvedVideosCount = existing?.videos_count ?? null
+  const resolvedAvgViewsPerVideo = existing?.avg_views_per_video ?? null
+  const resolvedAvgCtr = existing?.avg_ctr ?? null
 
-  if (error) {
-    console.error('[db] saveChannelSnapshot error:', error.message)
+  // Loud warn when about to write a snapshot with null subscriber_count.
+  // Doesn't block the write — we still want whatever data we have for diagnostics.
+  if (resolvedSubscriberCount == null) {
+    void logError({
+      userId,
+      route: 'lib/db/saveChannelSnapshot',
+      error: 'About to write snapshot with null subscriber_count',
+      details: {
+        snapshot_date: today,
+        had_extras_subscriber_count: extras?.subscriberCount != null,
+        had_existing_snapshot: !!existing,
+        nullness_map: {
+          subscriber_count: resolvedSubscriberCount == null,
+          videos_count: resolvedVideosCount == null,
+          avg_views_per_video: resolvedAvgViewsPerVideo == null,
+          avg_ctr: resolvedAvgCtr == null,
+          avg_view_duration_seconds: avgWatchSeconds == null,
+        },
+      },
+      severity: 'warn',
+    })
+  }
+
+  let insertError: { message: string; code?: string } | null = null
+  try {
+    const { error } = await supabase.from('channel_snapshots').insert({
+      user_id: userId,
+      snapshot_date: today,
+      // subscriber_count comes from the YouTube Data API (getChannelStats), not the Analytics API.
+      // Prefer the freshly-fetched value; fall back to today's existing snapshot; last resort null.
+      subscriber_count: resolvedSubscriberCount,
+      videos_count: resolvedVideosCount,
+      avg_views_per_video: resolvedAvgViewsPerVideo,
+      avg_ctr: resolvedAvgCtr,
+      avg_like_ratio: existing?.avg_like_ratio ?? null,
+      rpm: existing?.rpm ?? null,
+      momentum_score: existing?.momentum_score ?? null,
+      // Analytics API fields
+      total_views: data.totalViews,
+      avg_view_duration_seconds: avgWatchSeconds,
+      estimated_monthly_revenue: estimatedMonthlyRevenue,
+      // Demographics and traffic sources — null when unavailable, never blocks save
+      age_gender_breakdown: extras?.demographics?.ageGender ?? null,
+      top_countries: extras?.demographics?.topCountries ?? null,
+      traffic_sources: extras?.trafficSources?.length ? extras.trafficSources : null,
+    })
+    insertError = error
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[db] saveChannelSnapshot threw:', message)
+    void logError({
+      userId,
+      route: 'lib/db/saveChannelSnapshot',
+      error: `Insert threw: ${message}`,
+      details: {
+        snapshot_date: today,
+        error_stack: err instanceof Error ? err.stack : undefined,
+      },
+      severity: 'error',
+    })
+    return false
+  }
+
+  if (insertError) {
+    console.error('[db] saveChannelSnapshot error:', insertError.message)
+    void logError({
+      userId,
+      route: 'lib/db/saveChannelSnapshot',
+      error: `Insert failed: ${insertError.message}`,
+      details: {
+        snapshot_date: today,
+        supabase_code: insertError.code ?? null,
+      },
+      severity: 'error',
+    })
     return false
   }
 

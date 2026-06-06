@@ -19,7 +19,7 @@ import {
   getTrafficSources,
   getDailyAnalytics,
 } from '@/lib/youtube-analytics'
-import { getVideoDetails } from '@/lib/youtube-data'
+import { getVideoDetails, getChannelStats } from '@/lib/youtube-data'
 
 export interface SyncResult {
   success: boolean
@@ -27,9 +27,16 @@ export interface SyncResult {
   videosSynced: number
   error?: string
   httpStatus?: 400 | 401 | 502
+  // Populated when a snapshot was written with partial/null data — never blocks success.
+  snapshotNullFields?: string[]
 }
 
-async function refreshAccessToken(userId: string, refreshToken: string): Promise<string | null> {
+async function refreshAccessToken(
+  userId: string,
+  refreshToken: string,
+  context: { token_expires_at: string | null },
+): Promise<string | null> {
+  let httpStatus: number | null = null
   try {
     const res = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -41,9 +48,28 @@ async function refreshAccessToken(userId: string, refreshToken: string): Promise
         refresh_token: refreshToken,
       }),
     })
-    const data = (await res.json()) as { access_token?: string; expires_in?: number; error?: string }
+    httpStatus = res.status
+    const data = (await res.json().catch(() => ({}))) as {
+      access_token?: string
+      expires_in?: number
+      error?: string
+      error_description?: string
+    }
     if (!res.ok || !data.access_token) {
-      console.error(`[sync] Token refresh failed: ${data.error}`)
+      const errorBody = data.error_description ?? data.error ?? 'unknown'
+      console.error(`[sync] Token refresh failed: ${errorBody}`)
+      void logError({
+        userId,
+        route: 'lib/sync-logic/refreshAccessToken',
+        error: `Token refresh HTTP ${httpStatus}: ${errorBody}`,
+        details: {
+          token_expires_at: context.token_expires_at,
+          has_refresh_token: true,
+          http_status: httpStatus,
+          refresh_error: String(errorBody).slice(0, 500),
+        },
+        severity: 'error',
+      })
       return null
     }
     const expiresAt = new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString()
@@ -53,14 +79,62 @@ async function refreshAccessToken(userId: string, refreshToken: string): Promise
       .update({ youtube_access_token: data.access_token, token_expires_at: expiresAt, updated_at: new Date().toISOString() })
       .eq('id', userId)
     console.log(`[sync] Token refreshed for user ${userId}, expires ${expiresAt}`)
+    void logError({
+      userId,
+      route: 'lib/sync-logic/refreshAccessToken',
+      error: 'Token refresh succeeded',
+      details: {
+        previous_token_expires_at: context.token_expires_at,
+        new_token_expires_at: expiresAt,
+        http_status: httpStatus,
+      },
+      severity: 'info',
+    })
     return data.access_token
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     console.error('[sync] refreshAccessToken error:', err)
+    void logError({
+      userId,
+      route: 'lib/sync-logic/refreshAccessToken',
+      error: `Token refresh threw: ${message}`,
+      details: {
+        token_expires_at: context.token_expires_at,
+        has_refresh_token: true,
+        http_status: httpStatus,
+        error_stack: err instanceof Error ? err.stack : undefined,
+      },
+      severity: 'error',
+    })
     return null
   }
 }
 
 export async function syncUserChannel(userId: string): Promise<SyncResult> {
+  try {
+    return await _syncUserChannelBody(userId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const stack = err instanceof Error ? err.stack : undefined
+    console.error(`[sync] Unhandled exception in syncUserChannel for user ${userId}:`, err)
+    void logError({
+      userId,
+      route: 'lib/sync-logic/syncUserChannel',
+      error: `Unhandled exception in syncUserChannel: ${message}`,
+      details: { error_stack: stack },
+      severity: 'error',
+    })
+    return {
+      success: false,
+      channelSnapshot: false,
+      videosSynced: 0,
+      error: `Sync failed unexpectedly: ${message}`,
+      httpStatus: 502,
+    }
+  }
+}
+
+async function _syncUserChannelBody(userId: string): Promise<SyncResult> {
   // ── 1. Load user from DB ───────────────────────────────────────────────────
   const user = await getUser(userId)
 
@@ -122,7 +196,9 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
       }
     }
     console.log(`[sync] Token expired/expiring at ${tokenExpiresAt.toISOString()} — proactively refreshing for user ${userId}`)
-    const refreshed = await refreshAccessToken(userId, user.youtube_refresh_token)
+    const refreshed = await refreshAccessToken(userId, user.youtube_refresh_token, {
+      token_expires_at: user.token_expires_at ?? null,
+    })
     if (!refreshed) {
       void logError({
         userId,
@@ -146,14 +222,32 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
   console.log(`[sync] Starting full sync for user ${userId}`)
 
   // ── 2. Parallel analytics calls (with one token-refresh retry) ─────────────
-  const runAnalytics = (token: string) =>
-    Promise.all([
-      getChannelOverview(token),
-      getVideoPerformance(token, 20),
-      getAudienceDemographics(token),
-      getTrafficSources(token),
-      getDailyAnalytics(token, 30),
+  // Each call is wrapped so we know which of the 5 reports failed if an error
+  // propagates. Errors are re-thrown to preserve Promise.all's reject behavior.
+  const runAnalytics = (token: string) => {
+    const wrap = async <T>(name: 'overview' | 'videos' | 'demographics' | 'traffic' | 'daily', fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await fn()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        void logError({
+          userId,
+          route: 'lib/sync-logic',
+          error: `Analytics report "${name}" threw: ${message}`,
+          details: { report: name, channel_id: user.youtube_channel_id ?? null },
+          severity: message === 'TOKEN_EXPIRED' ? 'warn' : 'error',
+        })
+        throw err
+      }
+    }
+    return Promise.all([
+      wrap('overview', () => getChannelOverview(token)),
+      wrap('videos', () => getVideoPerformance(token, 20)),
+      wrap('demographics', () => getAudienceDemographics(token)),
+      wrap('traffic', () => getTrafficSources(token)),
+      wrap('daily', () => getDailyAnalytics(token, 30)),
     ])
+  }
 
   let overview: Awaited<ReturnType<typeof getChannelOverview>> = null
   let videoPerformance: Awaited<ReturnType<typeof getVideoPerformance>> = []
@@ -168,7 +262,9 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
     const message = err instanceof Error ? err.message : String(err)
     if (message === 'TOKEN_EXPIRED' && user.youtube_refresh_token) {
       console.log(`[sync] Token expired for user ${userId} — attempting refresh`)
-      const newToken = await refreshAccessToken(userId, user.youtube_refresh_token)
+      const newToken = await refreshAccessToken(userId, user.youtube_refresh_token, {
+        token_expires_at: user.token_expires_at ?? null,
+      })
       if (!newToken) {
         void logError({
           userId,
@@ -228,12 +324,79 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
   console.log(`[sync] Analytics fetched — overview: ${!!overview}, videos: ${videoPerformance.length}, demographics: ${!!demographics}, traffic: ${trafficSources.length}, daily: ${dailyAnalytics.length} days`)
 
   // ── 3. Save channel snapshot ───────────────────────────────────────────────
+  // subscriber_count comes from the public YouTube Data API (getChannelStats),
+  // not the Analytics API — Analytics only returns subscriber deltas (gained/lost).
   let channelSnapshot = false
+  const snapshotNullFields: string[] = []
   if (overview) {
-    channelSnapshot = await saveChannelSnapshot(userId, overview, {
-      demographics,
-      trafficSources,
-    })
+    let subscriberCount: number | null = null
+    if (user.youtube_channel_id) {
+      const channelStats = await getChannelStats(user.youtube_channel_id)
+      subscriberCount = channelStats?.subscriberCount ?? null
+      if (subscriberCount !== null) {
+        console.log(`[sync] Fetched subscriber_count=${subscriberCount} from Data API for user ${userId}`)
+      } else {
+        console.warn(`[sync] getChannelStats returned null for channel ${user.youtube_channel_id} — subscriber_count will fall back to existing snapshot value`)
+      }
+    }
+
+    // Pre-write nullness check: log a loud signal if the snapshot will be partial.
+    // Does NOT block the write — we still want whatever data we have.
+    if (subscriberCount == null) snapshotNullFields.push('subscriber_count')
+    if (overview.totalViews == null || overview.totalViews === 0) snapshotNullFields.push('total_views')
+    if (overview.avgViewDurationSeconds == null || overview.avgViewDurationSeconds === 0) snapshotNullFields.push('avg_view_duration_seconds')
+    if (overview.totalWatchTimeMinutes == null || overview.totalWatchTimeMinutes === 0) snapshotNullFields.push('total_watch_time')
+
+    if (snapshotNullFields.length > 0) {
+      void logError({
+        userId,
+        route: 'lib/sync-logic',
+        error: 'Sync producing partial/null snapshot data',
+        details: {
+          nullFields: snapshotNullFields,
+          channel_id: user.youtube_channel_id ?? null,
+          has_videos_data: videoPerformance.length > 0,
+          has_demographics_data: !!demographics,
+          has_traffic_data: trafficSources.length > 0,
+          has_daily_data: dailyAnalytics.length > 0,
+        },
+        severity: 'warn',
+      })
+    }
+
+    try {
+      channelSnapshot = await saveChannelSnapshot(userId, overview, {
+        demographics,
+        trafficSources,
+        subscriberCount,
+      })
+      if (!channelSnapshot) {
+        void logError({
+          userId,
+          route: 'lib/sync-logic',
+          error: 'saveChannelSnapshot returned false — write was skipped or failed',
+          details: {
+            channel_id: user.youtube_channel_id ?? null,
+            had_overview: true,
+            subscriber_count_present: subscriberCount != null,
+            total_views: overview.totalViews,
+          },
+          severity: 'error',
+        })
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      void logError({
+        userId,
+        route: 'lib/sync-logic/saveChannelSnapshot',
+        error: `saveChannelSnapshot threw: ${message}`,
+        details: {
+          channel_id: user.youtube_channel_id ?? null,
+          error_stack: err instanceof Error ? err.stack : undefined,
+        },
+        severity: 'error',
+      })
+    }
   }
 
   // ── 4. Fetch public video details + save video data ────────────────────────
@@ -325,5 +488,5 @@ export async function syncUserChannel(userId: string): Promise<SyncResult> {
     })
   }
 
-  return { success: true, channelSnapshot, videosSynced }
+  return { success: true, channelSnapshot, videosSynced, snapshotNullFields: snapshotNullFields.length > 0 ? snapshotNullFields : undefined }
 }

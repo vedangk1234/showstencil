@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { detectSubNiche } from '@/lib/sub-niche-detector'
+import { logError } from '@/lib/logger'
 
 // Runs daily at 5 AM UTC — detects/refreshes sub-niche for users missing it
 export async function GET(request: Request) {
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
   const thirtyDaysAgo = new Date()
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-  const { data: users } = await supabase
+  const { data: users, error: usersErr } = await supabase
     .from('users')
     .select('id')
     .eq('onboarding_completed', true)
@@ -24,6 +25,16 @@ export async function GET(request: Request) {
       `sub_niche.is.null,sub_niche_detected_at.lt.${thirtyDaysAgo.toISOString()}`,
     )
     .limit(50) // Process up to 50 per run to avoid timeouts
+
+  if (usersErr) {
+    void logError({
+      route: 'api/cron/sub-niche-detection',
+      error: 'Failed to load eligible users',
+      details: { supabaseError: usersErr.message },
+      severity: 'error',
+    })
+    return NextResponse.json({ error: 'Failed to load users' }, { status: 500 })
+  }
 
   if (!users || users.length === 0) {
     return NextResponse.json({ processed: 0, message: 'All users have fresh sub-niche data' })
@@ -72,6 +83,13 @@ export async function GET(request: Request) {
       succeeded++
     } catch (err) {
       console.error(`[cron/sub-niche-detection] Failed for user ${userId}:`, err)
+      void logError({
+        userId,
+        route: 'api/cron/sub-niche-detection',
+        error: err instanceof Error ? err.message : String(err),
+        details: { stack: err instanceof Error ? err.stack : undefined },
+        severity: 'warn',
+      })
       failed++
     }
 

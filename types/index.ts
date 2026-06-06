@@ -410,6 +410,24 @@ export interface BenchmarkComparison {
   topInsight: string;
 }
 
+// Sync attempt log (maps to sync_logs table)
+export interface SyncLog {
+  id: string;
+  created_at: string;
+  user_id: string | null;
+  email: string | null;
+  route: string;
+  status: number;
+  message: string | null;
+  duration_ms: number | null;
+  ip: string | null;
+  country: string | null;
+  city: string | null;
+  user_agent: string | null;
+  channel_id: string | null;
+  videos_synced: number | null;
+}
+
 // Gap scorer — full result
 export interface GapScoreResult {
   overallScore: number;              // 0–100. Higher = bigger gap = more opportunity

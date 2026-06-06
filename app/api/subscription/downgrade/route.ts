@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { getUser } from '@/lib/db'
 import { getAccessToken } from '@/lib/paypal'
+import { logError } from '@/lib/logger'
 
 const PAYPAL_BASE =
   process.env.PAYPAL_MODE === 'live'
@@ -64,6 +65,16 @@ export async function POST() {
     if (!res.ok) {
       const body = await res.text()
       console.error('[downgrade] PayPal revise error:', res.status, body)
+      void logError({
+        userId: session.user.id,
+        route: 'api/subscription/downgrade',
+        error: 'PayPal revise API returned non-2xx',
+        details: {
+          paypalStatus: res.status,
+          subscriptionIdPrefix: user.paypal_subscription_id?.slice(0, 8),
+        },
+        severity: 'error',
+      })
       return NextResponse.json(
         { error: 'Failed to initiate downgrade. Please try again.' },
         { status: 502 }
@@ -84,6 +95,13 @@ export async function POST() {
     return NextResponse.json({ approvalUrl })
   } catch (err) {
     console.error('[downgrade] Error:', err)
+    void logError({
+      userId: session.user.id,
+      route: 'api/subscription/downgrade',
+      error: err instanceof Error ? err.message : String(err),
+      details: { stack: err instanceof Error ? err.stack : undefined },
+      severity: 'error',
+    })
     return NextResponse.json({ error: 'Internal error. Please try again.' }, { status: 500 })
   }
 }

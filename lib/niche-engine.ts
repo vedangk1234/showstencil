@@ -539,7 +539,20 @@ async function searchAllChannelCandidates(
 async function meetsActivityThreshold(channelId: string): Promise<boolean> {
   try {
     const videos = await getRecentVideos(channelId, 20);
-    if (!videos || videos.length === 0) return false;
+    if (!videos || videos.length === 0) {
+      void logError({
+        route: 'lib/niche-engine/meetsActivityThreshold',
+        error: 'Competitor candidate failed activity threshold',
+        details: {
+          channel_id: channelId,
+          last_30d_videos: 0,
+          last_60d_videos: 0,
+          reason: 'no_recent_videos',
+        },
+        severity: 'warn',
+      });
+      return false;
+    }
 
     const now = Date.now();
     const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
@@ -560,10 +573,26 @@ async function meetsActivityThreshold(channelId: string): Promise<boolean> {
         `[niche-engine] ${channelId} failed activity check: ` +
           `${last30} videos in 30d (need 3), ${last60} videos in 60d (need 6)`,
       );
+      void logError({
+        route: 'lib/niche-engine/meetsActivityThreshold',
+        error: 'Competitor candidate failed activity threshold',
+        details: {
+          channel_id: channelId,
+          last_30d_videos: last30,
+          last_60d_videos: last60,
+        },
+        severity: 'warn',
+      });
     }
 
     return passes;
-  } catch {
+  } catch (err) {
+    void logError({
+      route: 'lib/niche-engine/meetsActivityThreshold',
+      error: err instanceof Error ? err.message : String(err),
+      details: { channel_id: channelId },
+      severity: 'warn',
+    });
     return false;
   }
 }
@@ -804,6 +833,18 @@ export async function detectAndAssignCompetitors(
     console.warn(
       `[niche-engine] detectAndAssignCompetitors: no candidates found for query "${query}"`,
     );
+    void logError({
+      userId,
+      route: 'lib/niche-engine/detectAndAssignCompetitors',
+      error: 'Competitor search returned zero candidates',
+      details: {
+        niche_id: nicheId,
+        user_subscriber_count: userSubscriberCount,
+        user_channel_id: userChannelId,
+        query,
+      },
+      severity: 'error',
+    });
     return;
   }
 
@@ -912,6 +953,34 @@ export async function detectAndAssignCompetitors(
   console.log(
     `[niche-engine] detectAndAssignCompetitors: done — ${succeeded}/${toAssign.length} competitors assigned for user ${userId}`,
   );
+
+  // Count successful per-tier assignments to determine which slots are still empty.
+  const succeededByTier: Record<1 | 2 | 3, number> = { 1: 0, 2: 0, 3: 0 };
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      succeededByTier[toAssign[i].tier]++;
+    }
+  });
+  const remainingT1 = Math.max(0, tier1Slots - succeededByTier[1]);
+  const remainingT2 = Math.max(0, tier2Slots - succeededByTier[2]);
+  const remainingDom = Math.max(0, domSlots - succeededByTier[3]);
+
+  if (remainingT1 > 0 || remainingT2 > 0 || remainingDom > 0) {
+    void logError({
+      userId,
+      route: 'lib/niche-engine/detectAndAssignCompetitors',
+      error: 'Auto-detection finished with unfilled tiers',
+      details: {
+        unfilled: { t1: remainingT1, t2: remainingT2, dom: remainingDom },
+        candidates_pool_size: allCandidates.length,
+        eligible_pool_size: eligible.length,
+        tier_pool_sizes: { t1: tier1Pool.length, t2: tier2Pool.length, dom: dominatorPool.length },
+        niche_id: nicheId,
+        user_subscriber_count: userSubscriberCount,
+      },
+      severity: 'warn',
+    });
+  }
 
   // Fire-and-forget: trigger refresh-data immediately so videos, metrics, and snapshots
   // populate for all new competitors without waiting for the 3am cron.

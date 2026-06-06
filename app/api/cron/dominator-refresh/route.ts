@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { findDominatorsForUser } from '@/lib/dominator-finder'
+import { logError } from '@/lib/logger'
 
 // Runs daily at 4 AM UTC — assigns a Dominator competitor for users who don't have one yet.
 // Once assigned, the dominator is never replaced by this cron — their data is updated daily
@@ -13,12 +14,22 @@ export async function GET(request: Request) {
 
   const supabase = createServiceClient()
 
-  const { data: users } = await supabase
+  const { data: users, error: usersErr } = await supabase
     .from('users')
     .select('id, niche_id, sub_niche, sub_niche_keywords, subscription_plan')
     .eq('onboarding_completed', true)
     .not('youtube_access_token', 'is', null)
     .in('subscription_status', ['on_trial', 'active', 'past_due'])
+
+  if (usersErr) {
+    void logError({
+      route: 'api/cron/dominator-refresh',
+      error: 'Failed to load eligible users',
+      details: { supabaseError: usersErr.message },
+      severity: 'error',
+    })
+    return NextResponse.json({ error: 'Failed to load users' }, { status: 500 })
+  }
 
   if (!users || users.length === 0) {
     return NextResponse.json({ processed: 0, message: 'No eligible users' })
@@ -113,6 +124,13 @@ export async function GET(request: Request) {
       succeeded++
     } catch (err) {
       console.error(`[cron/dominator-refresh] Failed for user ${user.id}:`, err)
+      void logError({
+        userId: user.id,
+        route: 'api/cron/dominator-refresh',
+        error: err instanceof Error ? err.message : String(err),
+        details: { stack: err instanceof Error ? err.stack : undefined },
+        severity: 'warn',
+      })
       failed++
     }
 

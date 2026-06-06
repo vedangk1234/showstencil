@@ -216,6 +216,12 @@ export async function getChannelStats(channelId: string): Promise<ChannelStats |
     const res = await fetch(url.toString());
     if (!res.ok) {
       console.error(`[youtube-data] getChannelStats HTTP ${res.status} for ${channelId}`);
+      void logError({
+        route: 'lib/youtube-data/getChannelStats',
+        error: `HTTP ${res.status} from channels.list`,
+        details: { channel_id: channelId, http_status: res.status },
+        severity: 'error',
+      });
       return null;
     }
 
@@ -223,7 +229,32 @@ export async function getChannelStats(channelId: string): Promise<ChannelStats |
     const item = data.items?.[0];
     if (!item) {
       console.error(`[youtube-data] getChannelStats: no channel found for ${channelId}`);
+      void logError({
+        route: 'lib/youtube-data/getChannelStats',
+        error: 'channels.list returned no items',
+        details: { channel_id: channelId },
+        severity: 'warn',
+      });
       return null;
+    }
+
+    // Detect channels with hidden subscriber counts — these will produce nulls
+    // downstream (tier classification, gap scoring, dashboard metric strip).
+    const hiddenSubscriberCount: boolean = item.statistics?.hiddenSubscriberCount === true;
+    const subscriberCount = parseInt(item.statistics?.subscriberCount ?? '0', 10);
+    if (hiddenSubscriberCount || subscriberCount === 0) {
+      void logError({
+        route: 'lib/youtube-data/getChannelStats',
+        error: hiddenSubscriberCount
+          ? 'Channel has hidden subscriber count'
+          : 'Channel reports zero subscribers',
+        details: {
+          channel_id: channelId,
+          hidden_subscriber_count: hiddenSubscriberCount,
+          subscriber_count: subscriberCount,
+        },
+        severity: 'warn',
+      });
     }
 
     const rawKeywords: string = item.brandingSettings?.channel?.keywords ?? '';
@@ -232,7 +263,7 @@ export async function getChannelStats(channelId: string): Promise<ChannelStats |
     return {
       id: item.id,
       name: item.snippet.title,
-      subscriberCount: parseInt(item.statistics.subscriberCount ?? '0', 10),
+      subscriberCount,
       totalViews: parseInt(item.statistics.viewCount ?? '0', 10),
       videoCount: parseInt(item.statistics.videoCount ?? '0', 10),
       thumbnail: item.snippet.thumbnails?.default?.url ?? '',
@@ -288,6 +319,12 @@ export async function getRecentVideos(
         console.error(
           `[youtube-data] getRecentVideos HTTP ${res.status} for ${channelId} (${dur})`,
         );
+        void logError({
+          route: 'lib/youtube-data/getRecentVideos',
+          error: `HTTP ${res.status} from search.list`,
+          details: { channel_id: channelId, duration_filter: dur, http_status: res.status },
+          severity: 'warn',
+        });
         return [];
       }
 
@@ -325,13 +362,26 @@ export async function getRecentVideos(
 
   // Sort by date descending, deduplicate by videoId
   const seen = new Set<string>();
-  return allResults
+  const merged = allResults
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
     .filter((v) => {
       if (seen.has(v.videoId)) return false;
       seen.add(v.videoId);
       return true;
     });
+
+  // Zero results = channel has no recent uploads or all uploads were Shorts/filtered.
+  // Either way, downstream callers (auto-detection, trend detection) need to know.
+  if (merged.length === 0) {
+    void logError({
+      route: 'lib/youtube-data/getRecentVideos',
+      error: 'Channel has zero recent videos',
+      details: { channel_id: channelId, published_after: publishedAfter },
+      severity: 'warn',
+    });
+  }
+
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +414,12 @@ export async function getVideoDetails(videoIds: string[]): Promise<VideoDetail[]
         console.error(
           `[youtube-data] getVideoDetails HTTP ${res.status} for batch ${i}–${i + batch.length}`,
         );
+        void logError({
+          route: 'lib/youtube-data/getVideoDetails',
+          error: `HTTP ${res.status} from videos.list`,
+          details: { batch_index: i, batch_size: batch.length, http_status: res.status },
+          severity: 'warn',
+        });
         continue;
       }
 
@@ -467,6 +523,12 @@ export async function getChannelVideoVelocity(
       console.error(
         `[youtube-data] getChannelVideoVelocity search HTTP ${searchRes.status} for ${channelId}`,
       );
+      void logError({
+        route: 'lib/youtube-data/getChannelVideoVelocity',
+        error: `HTTP ${searchRes.status} from search.list`,
+        details: { channel_id: channelId, http_status: searchRes.status },
+        severity: 'warn',
+      });
       return null;
     }
 
@@ -515,6 +577,12 @@ export async function getCompetitorFullProfile(
       console.error(
         `[youtube-data] getCompetitorFullProfile: could not fetch stats for ${channelId}`,
       );
+      void logError({
+        route: 'lib/youtube-data/getCompetitorFullProfile',
+        error: 'getChannelStats returned null — caller expects object',
+        details: { channel_id: channelId },
+        severity: 'warn',
+      });
       return null;
     }
 
