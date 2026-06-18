@@ -17,7 +17,9 @@ const USER_ID = '848f7497-9a46-40a3-8d90-a96d1c9cf909'
 const fakeViralVideo: ViralVideo = {
   videoId: 'test_viral_001',
   title: 'I Quit My Job to Invest Full Time',
-  channelId: 'comp_finance_sarah',
+  // Phase 9: synthetic channel-ID prefix updated to the new 'finance_crypto' slug
+  // (matches scripts/seed-test-data.ts SARAH_CHANNEL_ID).
+  channelId: 'comp_finance_crypto_sarah',
   channelName: 'Finance With Sarah',
   viewCount: 89000,
   velocityScore: 245,

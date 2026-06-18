@@ -7,6 +7,12 @@
  *   - findCompetitors: 101 YouTube Data API quota units per call (100 search + 1 channels).
  *
  * Always pass userId to detectNiche so the result is cached and we skip Claude on repeat calls.
+ *
+ * Phase 3 (2026-06-09) — taxonomy migrated from a hardcoded 12-niche list to the
+ * 31-niche taxonomy in lib/niches.ts. The Claude prompt was rewritten. The silent
+ * confidence-0 fallback to 'entertainment' was removed entirely: when Claude cannot
+ * classify confidently, detectNiche now returns nicheSlug=null and
+ * requiresManualSelection=true so that callers can surface the manual picker UI.
  */
 
 import { config } from 'dotenv'
@@ -19,9 +25,28 @@ import { calculateCompetitorMetrics } from '@/lib/competitor-metrics';
 import { updateCompetitorMetrics, saveCompetitorSnapshot } from '@/lib/db';
 import { detectSubNiche } from '@/lib/sub-niche-detector';
 import { logError } from '@/lib/logger';
+import {
+  VALID_NICHE_SLUGS,
+  type ValidNicheSlug,
+  isValidNicheSlug,
+  getNicheBySlug,
+  getSubNicheBySlug,
+  getDisplayName,
+  NICHES,
+} from '@/lib/niches';
 import type { NicheResult, CompetitorCandidate } from '@/types';
 
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
+
+// Manual-selection sentinel stored in users.niche_id when the user picks "Other".
+// Not a valid taxonomy slug — handled as a special case in the cache path and in
+// saveManualNicheSelection's validation. Downstream slug-keyed lookups treat
+// 'other' the same as an unknown slug (i.e. fall through to fallback behaviour).
+export const NICHE_OTHER_SENTINEL = 'other';
+
+// Claude confidence threshold — anything strictly below this is treated as
+// "uncertain" and surfaces the manual picker instead of writing to the DB.
+const CONFIDENCE_THRESHOLD = 0.6;
 
 function apiKey(): string {
   const key = process.env.YOUTUBE_API_KEY;
@@ -30,64 +55,42 @@ function apiKey(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Niche metadata
+// Legacy exports — DO NOT USE in new code.
+//
+// lib/competitor-matcher.ts and lib/dominator-finder.ts still import these
+// and use them to type their internal slug→name maps with the old 12-niche
+// taxonomy. They will be migrated to the new lib/niches.ts API in Phase 4,
+// at which point this block can be deleted.
+//
+// New code MUST import VALID_NICHE_SLUGS / ValidNicheSlug / isValidNicheSlug
+// from lib/niches.ts instead.
 // ---------------------------------------------------------------------------
 
-const VALID_NICHE_IDS = [
+export const VALID_NICHE_IDS = [
   'finance', 'tech', 'gaming', 'cooking', 'fitness',
   'beauty', 'travel', 'education', 'business', 'entertainment', 'diy', 'vlog',
 ] as const;
 
-type ValidNicheId = (typeof VALID_NICHE_IDS)[number];
-
-function isValidNicheId(id: string): id is ValidNicheId {
-  return VALID_NICHE_IDS.includes(id as ValidNicheId);
-}
-
-const NICHE_DISPLAY_NAMES: Record<ValidNicheId, string> = {
-  finance:       'Personal Finance',
-  tech:          'Technology',
-  gaming:        'Gaming',
-  cooking:       'Cooking',
-  fitness:       'Fitness',
-  beauty:        'Beauty',
-  travel:        'Travel',
-  education:     'Education',
-  business:      'Business',
-  entertainment: 'Entertainment',
-  diy:           'DIY',
-  vlog:          'Vlog',
-};
-
-// Search queries calibrated to find US-based relevant channels.
-const NICHE_SEARCH_QUERIES: Record<ValidNicheId, string> = {
-  finance:       'personal finance investing money USA',
-  tech:          'technology software programming USA',
-  gaming:        'gaming youtube USA',
-  cooking:       'cooking recipes food USA',
-  fitness:       'fitness workout health USA',
-  beauty:        'beauty makeup skincare USA',
-  travel:        'travel vlog USA',
-  education:     'education learning USA',
-  business:      'business entrepreneur USA',
-  entertainment: 'entertainment youtube USA',
-  diy:           'DIY home improvement USA',
-  vlog:          'vlog daily life USA',
-};
+export type ValidNicheId = (typeof VALID_NICHE_IDS)[number];
 
 // ---------------------------------------------------------------------------
 // Function 1 — detectNiche
 // ---------------------------------------------------------------------------
 
 /**
- * Classifies a YouTube creator into one of 12 niches using Claude.
+ * Classifies a YouTube creator into one of 31 niches using Claude.
  * Pass userId to enable DB caching — the Claude call is skipped if niche_id
- * is already stored for that user.
+ * is already stored for that user and the stored slug is still valid.
  *
- * @quota 0 units (YouTube) / ~500 Claude input tokens per call
+ * Returns NicheResult with nicheSlug=null and requiresManualSelection=true
+ * whenever Claude returns confidence below the threshold OR an unknown slug.
+ * In that case, NOTHING is written to the DB — the caller is responsible for
+ * surfacing the manual picker UI.
+ *
+ * @quota 0 units (YouTube) / ~1500 Claude input + 400 output tokens per call
  * @param videoTitles  User's last 20 video titles
  * @param descriptions User's last 20 video descriptions (partial text is fine)
- * @param userId       If provided: checks DB cache first, saves result after classification
+ * @param userId       If provided: checks DB cache first, saves result on confident classification
  */
 export async function detectNiche(
   videoTitles: string[],
@@ -104,16 +107,49 @@ export async function detectNiche(
         .eq('id', userId)
         .single();
 
-      if (data?.niche_id && isValidNicheId(data.niche_id)) {
+      const storedSlug = data?.niche_id ?? null;
+
+      if (storedSlug === NICHE_OTHER_SENTINEL) {
+        // User has explicitly chosen "Other" via the manual picker. Treat as a
+        // settled state — no need to re-classify, no picker required.
         console.log(
-          `[niche-engine] detectNiche: cache hit — "${data.niche_id}" for user ${userId}`,
+          `[niche-engine] detectNiche: cache hit — manual "other" selection for user ${userId}`,
         );
         return {
-          nicheId: data.niche_id,
-          nicheName: NICHE_DISPLAY_NAMES[data.niche_id],
+          nicheSlug: null,
+          confidence: 1,
+          reasoning: 'User manually selected "Other".',
+          requiresManualSelection: false,
+          source: 'cache',
+        };
+      }
+
+      if (storedSlug && isValidNicheSlug(storedSlug)) {
+        console.log(
+          `[niche-engine] detectNiche: cache hit — "${storedSlug}" for user ${userId}`,
+        );
+        return {
+          nicheSlug: storedSlug,
           confidence: 1,
           reasoning: 'Loaded from cache.',
+          requiresManualSelection: false,
+          source: 'cache',
         };
+      }
+
+      if (storedSlug) {
+        // Stale or unknown slug from a previous taxonomy version. Don't trust
+        // it — fall through to Claude classification.
+        console.warn(
+          `[niche-engine] detectNiche: stored niche_id "${storedSlug}" is not in the current taxonomy — ignoring cache and re-classifying`,
+        );
+        void logError({
+          userId,
+          route: 'lib/niche-engine/detectNiche',
+          error: `Stored niche_id "${storedSlug}" is not in the current taxonomy`,
+          details: { stored_niche_id: storedSlug },
+          severity: 'warn',
+        });
       }
     } catch (err) {
       // Cache miss errors are non-fatal — fall through to Claude
@@ -132,48 +168,7 @@ export async function detectNiche(
     .map((d, i) => `${i + 1}. ${d.slice(0, 200)}`)
     .join('\n');
 
-  const prompt = `You are classifying a YouTube channel into exactly one niche based on their video titles and descriptions.
-
-Valid niche IDs — you MUST return exactly one of these 12 values:
-- finance    (personal finance, investing, budgeting, money, stocks, crypto, taxes)
-- tech       (technology, gadgets, software, programming, AI, reviews, unboxing)
-- gaming     (video games, walkthroughs, gaming news, esports, game reviews)
-- cooking    (recipes, food, meal prep, baking, restaurant reviews, cuisine)
-- fitness    (workouts, exercise, gym, nutrition, weight loss, yoga, running)
-- beauty     (makeup, skincare, hair, fashion, style, tutorials, product reviews)
-- travel     (travel vlogs, destinations, hotels, flights, adventures, tourism)
-- education  (tutorials, explainers, how-to, science, history, languages, skills)
-- business   (entrepreneurship, startups, marketing, productivity, career, real estate)
-- entertainment (comedy, skits, reaction videos, news commentary, celebrity)
-- diy        (home improvement, crafts, woodworking, repairs, making things)
-- vlog       (daily life, personal stories, lifestyle, family, behind the scenes)
-
-Example videos per niche to calibrate your judgment:
-- finance: "How I Saved $50K in 2 Years" / "Best Index Funds for Beginners" / "My Roth IRA Strategy"
-- tech: "iPhone 16 Pro Review" / "I Built a PC for $500" / "ChatGPT vs Claude: Full Comparison"
-- gaming: "Elden Ring Full Walkthrough" / "Best Weapons in Fortnite Season 5" / "I Hit Grandmaster in League"
-- cooking: "Gordon Ramsay's Butter Chicken Recipe" / "30 Minute Dinner Ideas" / "I Made Julia Child's Boeuf Bourguignon"
-- fitness: "Full Body Workout No Equipment" / "What I Eat in a Day (Cutting)" / "How I Lost 30 Pounds in 6 Months"
-- beauty: "Full Glam Makeup Tutorial" / "My 10-Step Korean Skincare Routine" / "Drugstore Dupes for High-End Products"
-- travel: "7 Days in Japan on $100/Day" / "Hidden Gems in Southeast Asia" / "Honest Review: Maldives Overwater Bungalow"
-- education: "Why the Roman Empire Actually Fell" / "Learn Python in 1 Hour" / "How Black Holes Actually Work"
-- business: "How I Built a $10K/Month Side Hustle" / "What VCs Actually Look For" / "Best Productivity Apps for 2024"
-- entertainment: "I Tried Every McDonald's Menu Item" / "Reacting to Viral TikToks" / "Worst Movies on Netflix Ranked"
-- diy: "Building a Garden Shed from Scratch" / "How to Rewire a Light Switch" / "Epoxy Resin Table Build"
-- vlog: "Day in My Life as a Software Engineer" / "Moving to NYC: Week 1" / "Our Pregnancy Announcement"
-
-Video titles to classify:
-${titlesText}
-
-Recent descriptions (partial):
-${descriptionsText}
-
-Respond with ONLY a JSON object — no other text, no markdown fences:
-{
-  "nicheId": "<one of the 12 valid niche IDs>",
-  "confidence": <number between 0 and 1>,
-  "reasoning": "<one sentence explaining the classification>"
-}`;
+  const prompt = buildClassificationPrompt(titlesText, descriptionsText);
 
   // --- Call Claude ---
   try {
@@ -181,7 +176,7 @@ Respond with ONLY a JSON object — no other text, no markdown fences:
 
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 256,
+      max_tokens: 400,
       temperature: 0.2, // low temperature — this is classification, not creative writing
       messages: [{ role: 'user', content: prompt }],
     });
@@ -189,47 +184,76 @@ Respond with ONLY a JSON object — no other text, no markdown fences:
     const rawText =
       message.content[0].type === 'text' ? message.content[0].text.trim() : '';
 
-    let parsed: { nicheId: string; confidence: number; reasoning: string };
+    let parsed: { nicheSlug?: string | null; confidence?: number; reasoning?: string };
     try {
       parsed = JSON.parse(rawText);
     } catch {
       console.error('[niche-engine] detectNiche: failed to parse Claude JSON:', rawText);
-      return defaultNiche('Failed to parse Claude response');
+      void logError({
+        userId: userId ?? null,
+        route: 'lib/niche-engine/detectNiche',
+        error: 'Claude returned non-JSON response',
+        details: { raw_response_preview: rawText.slice(0, 500) },
+        severity: 'warn',
+      });
+      return failureResult('Failed to parse Claude response');
     }
 
-    // Validate and normalise
-    const nicheId: ValidNicheId = isValidNicheId(parsed.nicheId)
-      ? parsed.nicheId
-      : 'entertainment';
+    const rawConfidence =
+      typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+    const confidence = Math.max(0, Math.min(1, rawConfidence));
+    const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
 
-    if (!isValidNicheId(parsed.nicheId)) {
+    // Normalise the slug: null or unknown values both end up as null.
+    const candidateSlug =
+      typeof parsed.nicheSlug === 'string' && isValidNicheSlug(parsed.nicheSlug)
+        ? parsed.nicheSlug
+        : null;
+
+    if (typeof parsed.nicheSlug === 'string' && !isValidNicheSlug(parsed.nicheSlug)) {
       console.warn(
-        `[niche-engine] detectNiche: Claude returned unknown nicheId "${parsed.nicheId}", defaulting to "entertainment"`,
+        `[niche-engine] detectNiche: Claude returned unknown nicheSlug "${parsed.nicheSlug}" — treating as null`,
       );
+      void logError({
+        userId: userId ?? null,
+        route: 'lib/niche-engine/detectNiche',
+        error: 'Claude returned unknown nicheSlug',
+        details: { returned_slug: parsed.nicheSlug, confidence },
+        severity: 'warn',
+      });
     }
 
-    const result: NicheResult = {
-      nicheId,
-      nicheName: NICHE_DISPLAY_NAMES[nicheId],
-      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-      reasoning: parsed.reasoning ?? '',
-    };
+    const confident = candidateSlug !== null && confidence >= CONFIDENCE_THRESHOLD;
+
+    if (!confident) {
+      console.log(
+        `[niche-engine] detectNiche: low-confidence classification — slug=${candidateSlug ?? 'null'}, confidence=${confidence}. Skipping DB write; manual selection required.`,
+      );
+      return {
+        nicheSlug: null,
+        confidence,
+        reasoning: reasoning || 'Claude could not classify confidently.',
+        requiresManualSelection: true,
+        source: 'failure',
+      };
+    }
+
+    // Confident classification — persist to DB if userId was provided.
+    if (userId) {
+      await saveDetectedNiche(userId, candidateSlug);
+    }
 
     console.log(
-      `[niche-engine] detectNiche: classified as "${nicheId}" (confidence: ${result.confidence})`,
+      `[niche-engine] detectNiche: classified as "${candidateSlug}" (confidence: ${confidence})`,
     );
 
-    // Persist to DB only when we have a confident classification.
-    // confidence === 0 means Claude errored or returned garbage — do not corrupt the user's niche.
-    if (userId && result.confidence > 0) {
-      await saveDetectedNiche(userId, nicheId);
-    } else if (userId) {
-      console.error(
-        `[niche-engine] detectNiche: confidence 0 for user ${userId} — skipping DB write to avoid corrupting niche data`,
-      );
-    }
-
-    return result;
+    return {
+      nicheSlug: candidateSlug,
+      confidence,
+      reasoning,
+      requiresManualSelection: false,
+      source: 'claude',
+    };
   } catch (err) {
     console.error('[niche-engine] detectNiche: Claude API error:', err);
     void logError({
@@ -238,17 +262,128 @@ Respond with ONLY a JSON object — no other text, no markdown fences:
       error: err instanceof Error ? err.message : String(err),
       details: { error_stack: err instanceof Error ? err.stack : undefined },
     });
-    return defaultNiche('Claude API error');
+    return failureResult('Claude API error');
   }
 }
 
-function defaultNiche(reason: string): NicheResult {
+function failureResult(reason: string): NicheResult {
   return {
-    nicheId: 'entertainment',
-    nicheName: NICHE_DISPLAY_NAMES.entertainment,
+    nicheSlug: null,
     confidence: 0,
-    reasoning: `Defaulted to entertainment: ${reason}`,
+    reasoning: reason,
+    requiresManualSelection: true,
+    source: 'failure',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Prompt builder — kept as a named function so the integration tests and the
+// in-file test block can assert against the exact string template if needed.
+// ---------------------------------------------------------------------------
+
+function buildClassificationPrompt(titlesText: string, descriptionsText: string): string {
+  const nicheList = NICHES.map((n) => {
+    return `- ${n.displayName} [slug: ${n.slug}] — ${describeNiche(n.slug)}`;
+  }).join('\n');
+
+  return `You are classifying a YouTube channel into exactly one niche from a fixed taxonomy of 31 niches.
+
+Here is the complete list. Each entry is: <displayName> [slug: <slug>] — <one-line description>.
+
+${nicheList}
+
+You MUST return exactly one of these 31 slug values, or null if you cannot classify confidently.
+
+Confidence calibration:
+- 0.9+   — The titles are unambiguously in one niche. Example: 5 of 5 titles are clearly about cryptocurrency → finance_crypto with 0.95.
+- 0.6–0.8 — Most titles point to one niche but there is some noise or cross-over. Still pick a slug.
+- 0.4–0.6 — The signal is mixed. Do NOT pick a niche at this level — return "nicheSlug": null.
+- 0.0–0.3 — Titles are too generic, vague, or personal to identify a niche. Return "nicheSlug": null.
+
+If you are uncertain, return "nicheSlug": null with a low confidence. Do NOT default to a fallback niche — the caller will surface a manual picker to the user.
+
+Video titles to classify:
+${titlesText || '(no titles available)'}
+
+Recent descriptions (partial):
+${descriptionsText || '(no descriptions available)'}
+
+Respond with ONLY a JSON object — no other text, no markdown fences:
+{
+  "nicheSlug": "<one of the 31 slugs above OR null>",
+  "confidence": <number between 0.0 and 1.0>,
+  "reasoning": "<one sentence explaining the classification or why you cannot classify>"
+}`;
+}
+
+// Per-slug one-line descriptions used in the Claude prompt. Kept in this file
+// rather than in lib/niches.ts because the wording is tuned for classification,
+// not UI display, and we want it co-located with the prompt template.
+function describeNiche(slug: ValidNicheSlug): string {
+  switch (slug) {
+    case 'animals':
+      return 'pets, pet training, animal rescue, wildlife, veterinary content.';
+    case 'arts_culture':
+      return 'visual arts, performing arts, photography, architecture, literature, art history.';
+    case 'automotive':
+      return 'car reviews, maintenance, motorsports, EVs, motorcycles, classic cars.';
+    case 'beauty_makeup':
+      return 'makeup tutorials, skincare, hair care, fragrances, GRWM, beauty trends.';
+    case 'business_startups':
+      return 'entrepreneurship, freelancing, leadership, VC, productivity, corporate culture.';
+    case 'ecommerce':
+      return 'dropshipping, Amazon FBA, Shopify, D2C brands, print-on-demand.';
+    case 'education':
+      return 'language learning, STEM, online courses, study tips, educational documentaries.';
+    case 'entertainment_comedy':
+      return 'comedy sketches, reaction videos, pranks, ASMR, vlogs, movie/TV reviews.';
+    case 'fashion':
+      return 'outfit inspiration, fashion hauls, sustainable fashion, men\'s/women\'s fashion, styling.';
+    case 'finance_crypto':
+      return 'personal finance, investing, crypto, NFTs, fintech, real estate investing, retirement planning.';
+    case 'fitness':
+      return 'workouts, gym, HIIT, yoga, weight loss, running, nutrition & supplements.';
+    case 'food_drink_cooking':
+      return 'recipes, baking, food reviews, mukbangs, restaurant vlogs, world cuisines.';
+    case 'gaming':
+      return 'game reviews, walkthroughs, specific titles (Minecraft, Fortnite, GTA, Pokemon, etc.), esports, streaming.';
+    case 'health':
+      return 'mental health, nutrition, disease prevention, wellness, holistic medicine, women\'s/men\'s health.';
+    case 'home_diy':
+      return 'home improvement, gardening, interior design, woodworking, plumbing, sustainable living.';
+    case 'humanities':
+      return 'philosophy, psychology, history, sociology, religion, linguistics, political science.';
+    case 'magic_paranormal':
+      return 'magic tricks, ghost hunting, unexplained mysteries, supernatural stories.';
+    case 'motivation_self_improvement':
+      return 'motivational talks, goal setting, mindfulness, life coaching, self-care.';
+    case 'music':
+      return 'pop, rock, hip-hop, classical, jazz, K-pop, Latin, music production, performances & covers.';
+    case 'nature_outdoors':
+      return 'hiking, fishing, camping, bushcraft, water sports, nature photography.';
+    case 'news_politics':
+      return 'global politics, political commentary, economic analysis, regional politics (UK, EU, Asia, Latin America, etc.).';
+    case 'news_politics_us':
+      return 'US-specific political commentary (immigration, healthcare, legal, religion, etc.). ONLY use this if the channel is clearly US-focused.';
+    case 'podcast':
+      return 'long-form podcast episodes across topics (interviews, comedy, news, sports). Pick this when the channel\'s primary format is podcast episodes regardless of subject.';
+    case 'product_reviews':
+      return 'dedicated product reviews across categories (tech, beauty, kitchen, sports gear, baby, pet supplies, etc.).';
+    case 'relationships_family':
+      return 'dating advice, marriage, parenting, family vlogs, fertility/pregnancy, LGBTQ+ relationships.';
+    case 'sales_marketing':
+      return 'digital marketing, branding, SEO, growth hacking, content marketing, B2B/B2C strategy, email marketing.';
+    case 'social_media':
+      return 'growing on Instagram/TikTok/LinkedIn/YouTube, personal branding, influencer marketing, content creation strategy.';
+    case 'sports':
+      return 'NFL, NBA, soccer, motorsports, sports commentary, athlete training, sports highlights.';
+    case 'tech_ai_software':
+      return 'AI, programming, cybersecurity, gadgets, robotics, SaaS, smart home, VR/AR.';
+    case 'travel':
+      return 'travel vlogs, destinations, budget travel, road trips, cruises, luxury travel.';
+    case 'video_essays':
+      return 'long-form analytical essays on film, history, internet culture, true crime, science explainers.';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,18 +401,18 @@ function defaultNiche(reason: string): NicheResult {
  * No API route re-runs findCompetitors for existing users.
  *
  * @quota 101 YouTube Data API units per attempt (100 search.list + 1 channels.list)
- * @param nicheId       One of the 12 valid niche IDs
+ * @param nicheSlug     One of the 31 valid niche slugs (or a raw query string)
  * @param userSubCount  User's current subscriber count
  * @param userChannelId User's own channel ID (excluded from results)
  * @returns Up to 5 CompetitorCandidate objects sorted by subscriber count ascending
  */
 export async function findCompetitors(
-  nicheId: string,
+  nicheSlug: string,
   userSubCount: number,
   userChannelId: string,
 ): Promise<CompetitorCandidate[]> {
-  const query =
-    isValidNicheId(nicheId) ? NICHE_SEARCH_QUERIES[nicheId] : nicheId;
+  const nicheDef = isValidNicheSlug(nicheSlug) ? getNicheBySlug(nicheSlug) : undefined;
+  const query = nicheDef?.searchQuery ?? nicheSlug;
 
   const minSubs = Math.round(userSubCount * 0.5);
   const maxSubs = Math.round(userSubCount * 3);
@@ -382,18 +517,34 @@ async function searchChannelsInRange(
 // ---------------------------------------------------------------------------
 
 /**
- * Persists a detected niche to the users table.
- * Called automatically by detectNiche when userId is provided.
+ * Persists a Claude-detected niche slug to the users table.
+ * Called automatically by detectNiche when confidence >= threshold and slug is valid.
  *
- * @returns true on success, false on error
+ * Runtime validation: unknown slugs are refused with a logged error rather than
+ * silently writing garbage to the DB. Use saveManualNicheSelection for the
+ * separate "user manually picked Other" code path.
+ *
+ * @returns true on success, false on error or invalid slug
  */
-export async function saveDetectedNiche(userId: string, nicheId: string): Promise<boolean> {
+export async function saveDetectedNiche(userId: string, nicheSlug: string): Promise<boolean> {
+  if (!isValidNicheSlug(nicheSlug)) {
+    console.error(`[niche-engine] saveDetectedNiche: refusing to save unknown slug "${nicheSlug}"`);
+    void logError({
+      userId,
+      route: 'lib/niche-engine/saveDetectedNiche',
+      error: `Refused to save unknown niche slug "${nicheSlug}"`,
+      details: { attempted_slug: nicheSlug },
+      severity: 'error',
+    });
+    return false;
+  }
+
   const supabase = createServiceClient();
 
   const { error } = await supabase
     .from('users')
     .update({
-      niche_id: nicheId,
+      niche_id: nicheSlug,
       niche_detected_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -405,12 +556,168 @@ export async function saveDetectedNiche(userId: string, nicheId: string): Promis
       userId,
       route: 'lib/niche-engine/saveDetectedNiche',
       error: error.message,
-      details: { niche_id: nicheId },
+      details: { niche_slug: nicheSlug },
     });
     return false;
   }
 
-  console.log(`[niche-engine] saveDetectedNiche: saved niche "${nicheId}" for user ${userId}`);
+  console.log(`[niche-engine] saveDetectedNiche: saved niche "${nicheSlug}" for user ${userId}`);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Function 3b — saveManualNicheSelection
+// ---------------------------------------------------------------------------
+
+/**
+ * Writes a manual niche selection (from the picker UI) to the users table.
+ *
+ * nicheSlug accepts:
+ *   - A valid taxonomy slug from VALID_NICHE_SLUGS (stored verbatim in niche_id), OR
+ *   - The literal string 'other' (stored as NICHE_OTHER_SENTINEL in niche_id)
+ *
+ * options.subNicheSlug accepts:
+ *   - A valid sub-slug under nicheSlug → stored in users.sub_niche directly
+ *     (manual selection — no detector pass needed)
+ *   - The literal 'other' → sub_niche fields are cleared so the next sync
+ *     re-derives via the sub-niche detector (which will receive the description)
+ *   - null/undefined → same as 'other': clear sub_niche fields
+ *   - Note: if nicheSlug is 'other', subNicheSlug must be null/undefined/'other'
+ *     (the new niche is freeform, so structured sub-niches don't apply yet).
+ *
+ * options.description is required (≥ 10 chars) when nicheSlug === 'other' OR
+ * subNicheSlug === 'other'. Otherwise optional. Stored in users.niche_description
+ * (replaces any prior value; pass null/empty to clear it). The 10-char floor
+ * here is defence-in-depth; the API route enforces a 50-char minimum upstream.
+ *
+ * @returns true on success, false on validation error or DB failure
+ */
+export async function saveManualNicheSelection(
+  userId: string,
+  nicheSlug: string,
+  options: {
+    subNicheSlug?: string | null;
+    description?: string | null;
+  } = {},
+): Promise<boolean> {
+  if (nicheSlug !== NICHE_OTHER_SENTINEL && !isValidNicheSlug(nicheSlug)) {
+    console.error(
+      `[niche-engine] saveManualNicheSelection: invalid nicheSlug "${nicheSlug}" for user ${userId}`,
+    );
+    void logError({
+      userId,
+      route: 'lib/niche-engine/saveManualNicheSelection',
+      error: `Invalid manual nicheSlug "${nicheSlug}"`,
+      details: { attempted_slug: nicheSlug },
+      severity: 'warn',
+    });
+    return false;
+  }
+
+  const rawSub = options.subNicheSlug ?? null;
+  const subIsOther = rawSub === NICHE_OTHER_SENTINEL;
+  const nicheIsOther = nicheSlug === NICHE_OTHER_SENTINEL;
+  const description = typeof options.description === 'string' ? options.description.trim() : '';
+  const requiresDescription = nicheIsOther || subIsOther;
+
+  if (requiresDescription && description.length < 10) {
+    console.error(
+      `[niche-engine] saveManualNicheSelection: description too short for user ${userId}`,
+    );
+    void logError({
+      userId,
+      route: 'lib/niche-engine/saveManualNicheSelection',
+      error: 'Manual niche description must be at least 10 characters when an "Other" branch is selected',
+      details: { description_length: description.length, niche_slug: nicheSlug, sub_niche_slug: rawSub },
+      severity: 'warn',
+    });
+    return false;
+  }
+
+  // If a real sub-slug was provided, validate it against the chosen parent.
+  // Reject any sub-slug at all when the parent is 'other' — the freeform niche
+  // doesn't have a structured sub-niche taxonomy attached.
+  let validatedSubSlug: string | null = null;
+  if (rawSub != null && rawSub !== '' && !subIsOther) {
+    if (nicheIsOther) {
+      console.error(
+        `[niche-engine] saveManualNicheSelection: subNicheSlug "${rawSub}" not allowed with nicheSlug='other' for user ${userId}`,
+      );
+      void logError({
+        userId,
+        route: 'lib/niche-engine/saveManualNicheSelection',
+        error: 'subNicheSlug not allowed when nicheSlug is "other"',
+        details: { niche_slug: nicheSlug, sub_niche_slug: rawSub },
+        severity: 'warn',
+      });
+      return false;
+    }
+    const sub = getSubNicheBySlug(nicheSlug, rawSub);
+    if (!sub) {
+      console.error(
+        `[niche-engine] saveManualNicheSelection: subNicheSlug "${rawSub}" is not a valid child of "${nicheSlug}" for user ${userId}`,
+      );
+      void logError({
+        userId,
+        route: 'lib/niche-engine/saveManualNicheSelection',
+        error: `subNicheSlug "${rawSub}" is not a valid child of "${nicheSlug}"`,
+        details: { niche_slug: nicheSlug, sub_niche_slug: rawSub },
+        severity: 'warn',
+      });
+      return false;
+    }
+    validatedSubSlug = rawSub;
+  }
+
+  const supabase = createServiceClient();
+
+  // Stored slug is either the verbatim valid slug or the 'other' sentinel.
+  const storedSlug = nicheIsOther ? NICHE_OTHER_SENTINEL : nicheSlug;
+
+  // Build the update. Description is overwritten on every call (including being
+  // cleared to null when not provided) so the row always reflects the latest
+  // manual choice rather than a stale free-text value from an earlier pick.
+  const nowIso = new Date().toISOString();
+  const update: Record<string, unknown> = {
+    niche_id: storedSlug,
+    niche_description: description.length > 0 ? description : null,
+    niche_detected_at: nowIso,
+    updated_at: nowIso,
+  };
+
+  if (validatedSubSlug) {
+    // Manual sub-niche selection: store directly. Wipe detector outputs
+    // (keywords/confidence) since they correspond to an earlier auto-derived
+    // sub-niche and would be misleading next to a manually-picked one.
+    update.sub_niche = validatedSubSlug;
+    update.sub_niche_keywords = null;
+    update.sub_niche_confidence = null;
+    update.sub_niche_detected_at = nowIso;
+  } else {
+    // Either no sub-niche was specified or 'other' was picked. Clear all
+    // sub_niche fields so the sub-niche detector re-derives on the next sync.
+    update.sub_niche = null;
+    update.sub_niche_keywords = null;
+    update.sub_niche_confidence = null;
+    update.sub_niche_detected_at = null;
+  }
+
+  const { error } = await supabase.from('users').update(update).eq('id', userId);
+
+  if (error) {
+    console.error('[niche-engine] saveManualNicheSelection error:', error.message);
+    void logError({
+      userId,
+      route: 'lib/niche-engine/saveManualNicheSelection',
+      error: error.message,
+      details: { niche_slug: storedSlug, sub_niche_slug: validatedSubSlug },
+    });
+    return false;
+  }
+
+  console.log(
+    `[niche-engine] saveManualNicheSelection: saved manual selection niche="${storedSlug}" sub="${validatedSubSlug ?? '∅'}" hasDescription=${description.length > 0} for user ${userId}`,
+  );
   return true;
 }
 
@@ -777,18 +1084,26 @@ async function assignCompetitor(
  */
 export async function detectAndAssignCompetitors(
   userId: string,
-  nicheId: string | null,
+  nicheSlug: string | null,
   userSubscriberCount: number,
 ): Promise<void> {
-  if (!nicheId || !isValidNicheId(nicheId)) {
+  if (!nicheSlug || !isValidNicheSlug(nicheSlug)) {
     console.warn(
-      `[niche-engine] detectAndAssignCompetitors: invalid nicheId "${nicheId}" for user ${userId} — skipping`,
+      `[niche-engine] detectAndAssignCompetitors: invalid nicheSlug "${nicheSlug}" for user ${userId} — skipping`,
     );
     return;
   }
 
   const supabase = createServiceClient();
-  const query = NICHE_SEARCH_QUERIES[nicheId];
+  const nicheDef = getNicheBySlug(nicheSlug);
+  if (!nicheDef) {
+    // Defensive — isValidNicheSlug just passed, so this should never fire.
+    console.warn(
+      `[niche-engine] detectAndAssignCompetitors: getNicheBySlug returned undefined for valid slug "${nicheSlug}" — skipping`,
+    );
+    return;
+  }
+  const query = nicheDef.searchQuery;
 
   const { data: userData } = await supabase
     .from('users')
@@ -824,7 +1139,7 @@ export async function detectAndAssignCompetitors(
   );
 
   console.log(
-    `[niche-engine] detectAndAssignCompetitors: user ${userId}, niche "${nicheId}", userSubs ${userSubscriberCount}`,
+    `[niche-engine] detectAndAssignCompetitors: user ${userId}, niche "${nicheSlug}", userSubs ${userSubscriberCount}`,
   );
 
   const allCandidates = await searchAllChannelCandidates(query, userChannelId);
@@ -838,7 +1153,7 @@ export async function detectAndAssignCompetitors(
       route: 'lib/niche-engine/detectAndAssignCompetitors',
       error: 'Competitor search returned zero candidates',
       details: {
-        niche_id: nicheId,
+        niche_slug: nicheSlug,
         user_subscriber_count: userSubscriberCount,
         user_channel_id: userChannelId,
         query,
@@ -975,7 +1290,7 @@ export async function detectAndAssignCompetitors(
         candidates_pool_size: allCandidates.length,
         eligible_pool_size: eligible.length,
         tier_pool_sizes: { t1: tier1Pool.length, t2: tier2Pool.length, dom: dominatorPool.length },
-        niche_id: nicheId,
+        niche_slug: nicheSlug,
         user_subscriber_count: userSubscriberCount,
       },
       severity: 'warn',
@@ -1006,34 +1321,31 @@ if (process.env.RUN_NICHE_TEST === 'true') {
   (async () => {
     console.log('=== Niche Engine Test ===\n');
 
-    // Test 1: detectNiche — should return "finance"
-    console.log('--- Test 1: detectNiche (finance titles, no userId) ---');
+    // Test 1: detectNiche — should return "music"
+    console.log('--- Test 1: detectNiche (music titles, no userId) ---');
     const sampleTitles = [
-      'How I Invested My First $1,000 in Index Funds',
-      'Roth IRA vs Traditional IRA: Which Is Better in 2024?',
-      'I Paid Off $40,000 in Student Loans in 18 Months',
-      'The 50/30/20 Budget Rule Explained',
-      'How to Build a 6-Month Emergency Fund Fast',
+      'Black star by radiohead',
+      'are you not lonely?',
+      'worldstar money joji',
+      'hurts me too by faye webster',
+      'echo by clairo',
     ];
-    const sampleDescriptions = [
-      'In this video I break down exactly how I started investing with just $1,000...',
-      'The age-old debate: Roth vs Traditional. I run the actual numbers for different income levels...',
-      'My aggressive debt payoff journey — every sacrifice I made and whether it was worth it...',
-      'Simple budgeting that actually works for most people starting from zero...',
-      'Step by step guide to building your emergency fund even on a tight budget...',
-    ];
+    const sampleDescriptions: string[] = [];
 
     const nicheResult = await detectNiche(sampleTitles, sampleDescriptions);
     console.log('Result:', JSON.stringify(nicheResult, null, 2));
     console.log(
       'PASS:',
-      nicheResult.nicheId === 'finance' ? '✓ returned "finance"' : `✗ expected "finance", got "${nicheResult.nicheId}"`,
+      nicheResult.nicheSlug === 'music' && !nicheResult.requiresManualSelection
+        ? '✓ returned "music" with no manual-selection requirement'
+        : `✗ expected nicheSlug "music" with requiresManualSelection false, got nicheSlug=${nicheResult.nicheSlug} requiresManualSelection=${nicheResult.requiresManualSelection}`,
     );
+    console.log(`Display name: ${nicheResult.nicheSlug ? getDisplayName(nicheResult.nicheSlug) : '—'}`);
 
     // Test 2: findCompetitors — should return channels with channelId and channelName
-    console.log('\n--- Test 2: findCompetitors("finance", 50000, "fake_channel_id") ---');
+    console.log('\n--- Test 2: findCompetitors("music", 50000, "fake_channel_id") ---');
     console.log('(costs 101 YouTube Data API quota units)');
-    const competitors = await findCompetitors('finance', 50000, 'fake_channel_id');
+    const competitors = await findCompetitors('music', 50000, 'fake_channel_id');
     console.log(`Found ${competitors.length} competitor(s)`);
     if (competitors.length > 0) {
       console.log('First result:', JSON.stringify(competitors[0], null, 2));
@@ -1047,6 +1359,12 @@ if (process.env.RUN_NICHE_TEST === 'true') {
     } else {
       console.log('No competitors found — check YOUTUBE_API_KEY and quota, or widen sub range.');
     }
+
+    // Test 3: VALID_NICHE_SLUGS sanity check
+    console.log('\n--- Test 3: VALID_NICHE_SLUGS sanity ---');
+    console.log(`Total slugs: ${VALID_NICHE_SLUGS.length}`);
+    console.log(`Includes 'music': ${VALID_NICHE_SLUGS.includes('music' as ValidNicheSlug)}`);
+    console.log(`'finance' is NOT in new taxonomy: ${!(VALID_NICHE_SLUGS as readonly string[]).includes('finance')}`);
 
     console.log('\n=== Test Complete ===');
   })();

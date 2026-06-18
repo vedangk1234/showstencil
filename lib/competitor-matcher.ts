@@ -1,5 +1,7 @@
 import { detectSubNiche, calculateSubNicheSimilarity } from './sub-niche-detector'
 import type { SubNicheResult } from './sub-niche-detector'
+import { getNicheBySlug } from './niches'
+import { logError } from './logger'
 
 export type Tier = 1 | 2 | 3
 
@@ -24,20 +26,10 @@ export interface CompetitorMatch {
   match_score: number
 }
 
-const NICHE_SEARCH_TERMS: Record<string, string> = {
-  '1': 'gaming',
-  '2': 'tech',
-  '3': 'fitness',
-  '4': 'education',
-  '5': 'beauty',
-  '6': 'cooking',
-  '7': 'finance',
-  '8': 'travel',
-  '9': 'business',
-  '10': 'entertainment',
-  '11': 'diy',
-  '12': 'vlog',
-}
+// Phase 4 (2026-06-10) — the per-niche NICHE_SEARCH_TERMS map was deleted.
+// Every value in that map was identical to the slug itself, and lib/niches.ts
+// already owns the authoritative per-niche YouTube search phrase. Look it up
+// directly via getNicheBySlug(slug)?.searchQuery — one source of truth.
 
 // Find best competitors for a specific tier slot
 export async function findBestCompetitorsForTier(
@@ -52,7 +44,25 @@ export async function findBestCompetitorsForTier(
 
   console.log(`[matcher] Finding tier ${tier} competitors (${subsMin}–${subsMax} subs)`)
 
-  const searchQuery = userSubNiche?.sub_niche || NICHE_SEARCH_TERMS[userNicheId] || 'general'
+  // Prefer the sub-niche search term when available — it returns more
+  // relevant competitors than the broad niche query. Fall back to the
+  // canonical per-niche searchQuery in lib/niches.ts. If neither is available
+  // (unknown slug), log a warn and skip the search entirely rather than
+  // returning generic matches.
+  const nicheQuery = getNicheBySlug(userNicheId)?.searchQuery
+const subNicheQuery = userSubNiche?.sub_niche && userSubNiche.sub_niche !== 'other'
+  ? userSubNiche.sub_niche
+  : null
+const searchQuery = subNicheQuery || nicheQuery
+  if (!searchQuery) {
+    void logError({
+      route: 'lib/competitor-matcher/findBestCompetitorsForTier',
+      error: 'No search query available — unknown niche slug and no sub-niche',
+      details: { niche_id: userNicheId, tier },
+      severity: 'warn',
+    })
+    return []
+  }
 
   const url = new URL('https://www.googleapis.com/youtube/v3/search')
   url.searchParams.set('part', 'snippet')

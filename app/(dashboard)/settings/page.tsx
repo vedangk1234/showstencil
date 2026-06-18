@@ -6,6 +6,7 @@ import type { User } from '@/types'
 import NotificationSettings from '@/components/settings/NotificationSettings'
 import CancelSubscription from '@/components/settings/CancelSubscription'
 import DeleteAccount from '@/components/settings/DeleteAccount'
+import { getDisplayName } from '@/lib/niches'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -186,7 +187,7 @@ export default async function SettingsPage() {
 
       {/* Niche */}
       <Section title="Channel Analysis">
-        <Row label="Detected niche" value={user?.niche_id ? user.niche_id.charAt(0).toUpperCase() + user.niche_id.slice(1) : 'Not detected yet'} />
+        <Row label="Detected niche" value={user?.niche_id ? getDisplayName(user.niche_id) : 'Not detected yet'} />
         {user?.niche_detected_at && (
           <Row label="Detected on" value={fmtDate(user.niche_detected_at)} />
         )}

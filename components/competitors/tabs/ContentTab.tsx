@@ -1,5 +1,7 @@
 'use client'
 
+import { getDisplayName } from '@/lib/niches'
+
 interface UserVideoRow {
   duration_seconds: number | null
   published_at: string | null
@@ -11,21 +13,6 @@ interface ContentTabProps {
   competitorVideos: Record<string, unknown>[]
   userVideos: UserVideoRow[]
   nicheId: string | null
-}
-
-const NICHE_NAMES: Record<string, string> = {
-  finance: 'Finance',
-  tech: 'Tech',
-  gaming: 'Gaming',
-  cooking: 'Cooking',
-  fitness: 'Fitness',
-  beauty: 'Beauty',
-  travel: 'Travel',
-  education: 'Education',
-  business: 'Business',
-  entertainment: 'Entertainment',
-  diy: 'DIY',
-  vlog: 'Vlog',
 }
 
 function formatDuration(seconds: number | null): string {
@@ -118,7 +105,7 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
   const topDay: string | null = sortedDays.length > 0 ? sortedDays[0][0] : null
 
   const keywords = (competitor.sub_niche_keywords as string[]) || []
-  const nicheName = (nicheId && NICHE_NAMES[nicheId]) ?? 'this niche'
+  const nicheName = nicheId ? getDisplayName(nicheId) : 'this niche'
 
   return (
     <div>

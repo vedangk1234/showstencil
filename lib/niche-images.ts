@@ -1,21 +1,41 @@
-// Maps niche_id values to their image filenames in public/niche-images/
-// The "gaming" niche_id maps to the "gamind" folder (typo in folder name kept as-is).
+// Maps niche slugs to their stock image filenames in public/niche-images/.
+//
+// Phase 5 (Niche taxonomy v2): the map is now keyed on the NEW 31-slug
+// taxonomy (VALID_NICHE_SLUGS from lib/niches.ts). Only the 11 slugs that
+// existed under the old 12-niche taxonomy currently have image assets — the
+// remaining 20 new slugs return null / [] silently until assets are added.
+//
+// Folder names on disk in public/niche-images/ were NOT renamed during the
+// taxonomy remap (option (a) — fewer filesystem changes, less deploy risk).
+// Every new slug therefore needs a slug → folder name lookup in the
+// NEW_SLUG_TO_FOLDER table below.
+//
+// Note: both old slugs 'entertainment' and 'vlog' remap to the new slug
+// 'entertainment_comedy' (per supabase/migrations/20260609000000_niche_taxonomy_v2.sql).
+// Only one image set can live under that key — we keep the 'entertainment'
+// images. The 'vlog/' folder remains on disk but is no longer referenced.
 
-const VALID_NICHES = [
-  'finance', 'tech', 'gaming', 'cooking', 'fitness', 'beauty',
-  'travel', 'education', 'business', 'entertainment', 'diy', 'vlog',
-] as const
+import { isValidNicheSlug, type ValidNicheSlug } from './niches'
+import { logError } from './logger'
 
-type NicheId = (typeof VALID_NICHES)[number]
-
-// Folder name on disk (gaming → gamind due to original typo)
-function folderName(nicheId: string): string {
-  if (nicheId === 'gaming') return 'gamind'
-  return nicheId
+// Maps a NEW-taxonomy slug to its on-disk folder name in public/niche-images/.
+// Only slugs that currently have assets are listed; unlisted slugs return null/[].
+const NEW_SLUG_TO_FOLDER: Partial<Record<ValidNicheSlug, string>> = {
+  finance_crypto: 'finance',
+  tech_ai_software: 'tech',
+  gaming: 'gaming',
+  food_drink_cooking: 'cooking',
+  fitness: 'fitness',
+  beauty_makeup: 'beauty',
+  travel: 'travel',
+  education: 'education',
+  business_startups: 'business',
+  entertainment_comedy: 'entertainment',
+  home_diy: 'diy',
 }
 
-const NICHE_IMAGES: Record<NicheId, string[]> = {
-  finance: [
+const NICHE_IMAGES: Partial<Record<ValidNicheSlug, string[]>> = {
+  finance_crypto: [
     '089b92f2cdb9ff5365132e3c1b45db51.jpg',
     '10f503ae15e9526f9278a03520c146c1.jpg',
     '1bca4ff99161534a34fcd974952a89af.jpg',
@@ -30,7 +50,7 @@ const NICHE_IMAGES: Record<NicheId, string[]> = {
     'd567c0cb53b31d0d4a7c8ad55f77b43b.jpg',
     'e230340a9132184097d462340d624f55.jpg',
   ],
-  tech: [
+  tech_ai_software: [
     '0f8258cc071f1d33cd732d18d18ff705.jpg',
     '214a630219466a598ecb0e2e9940cfb9.jpg',
     '44876b554e3459f8e456fd9f4fb9b494.jpg',
@@ -60,7 +80,7 @@ const NICHE_IMAGES: Record<NicheId, string[]> = {
     'e031a9c428eb28c24ec1a30999691bab.jpg',
     'f83ecadb37afc2e280b2a584b4cc8dfa.jpg',
   ],
-  cooking: [
+  food_drink_cooking: [
     '296491102abc0bfdb526bc28891baf57.jpg',
     '2cfb6cf727a02746c1d4fa0d13c1c5ab.jpg',
     '3dc57d19eee9d7bde823aeef98fb6877.jpg',
@@ -90,7 +110,7 @@ const NICHE_IMAGES: Record<NicheId, string[]> = {
     'fa031e49d86468a00b31b123e5018640.jpg',
     'fec20b2d9751830c020718a52aa463b6.jpg',
   ],
-  beauty: [
+  beauty_makeup: [
     '163e042b2bf12875969781541f2ae4d8.jpg',
     '1d140b7d539f3ae8ea658d271eda0ceb.jpg',
     '362ff03354226fb63489bd21959d8927.jpg',
@@ -135,7 +155,7 @@ const NICHE_IMAGES: Record<NicheId, string[]> = {
     'f4a901227a265dd26f0cf883500bb94e.jpg',
     'f9aec2e5be0b5231409584aeed4cb501.jpg',
   ],
-  business: [
+  business_startups: [
     '0a4395c2e7186683e4cb66df162d54e0.jpg',
     '0ce513f4a00a15afc0ce7cdcd88def1c.jpg',
     '8c01235b6bb5bdf7e18e62c6f22fc928.jpg',
@@ -150,7 +170,7 @@ const NICHE_IMAGES: Record<NicheId, string[]> = {
     'e43ce04200036e007068b433d1c47e4b.jpg',
     'f263259f77605c1f62e5ff16b0b70d52.jpg',
   ],
-  entertainment: [
+  entertainment_comedy: [
     '0ebf4f2d9476b91d9a2c112b688a42a8.jpg',
     '15d296eada716243015f100f10995fe6.jpg',
     '4f24276cb65c2a2b4f6e512e350b35a1.jpg',
@@ -165,7 +185,7 @@ const NICHE_IMAGES: Record<NicheId, string[]> = {
     'd3fccaa61d055aef2cd329e5d2697458.jpg',
     'fb3d95c3b40f2de93c59251037fd1ba0.jpg',
   ],
-  diy: [
+  home_diy: [
     '00cc24411bce81db0d3a300adfefaf42.jpg',
     '09fd7eacb0ca74535de44f7fadf28de8.jpg',
     '1213bf6966a396ada402cce64b68b85e.jpg',
@@ -180,48 +200,61 @@ const NICHE_IMAGES: Record<NicheId, string[]> = {
     'dddc581827fecc56c81b8ee54203c2ed.jpg',
     'f825731834598441028f447c90458887.jpg',
   ],
-  vlog: [
-    '104a219facf9aa66a789964c9dbb1ee9.jpg',
-    '10acd819a2a222fa85b28c5eeb66ebfa.jpg',
-    '12020ff6fd4935dfbdd3f08967dd04be.jpg',
-    '1cc2269ed33a9be7082004d150d961f4.jpg',
-    '4c1913bca11f3a78f7deaf6df1d04695.jpg',
-    '556566be544c7c8bc95b2771ad574161.jpg',
-    '602514460a25f26b93ad0a4d62a6278a.jpg',
-    '6f495313544121b0f91c1dd6676dcd34.jpg',
-    '75c1ae8b79d3ae3bfdac9ae55bbf5ea0.jpg',
-    '9535282a34e0517655504da100d33f8d.jpg',
-    'a9e052c9e930bbab1b48ac9a0c04a853.jpg',
-    'c37265e12f730a32ea3a1df93dbd0b17.jpg',
-    'cf76e6aa531094863cd07a363f7598e0.jpg',
-  ],
-}
-
-function isValidNiche(nicheId: string): nicheId is NicheId {
-  return VALID_NICHES.includes(nicheId as NicheId)
 }
 
 /**
- * Returns the path for a single niche image by 1-based index.
- * Index is clamped to the available image count.
- * Falls back to 'finance' for unknown niche IDs.
+ * Returns the path for a single niche image by 1-based index, or null if the
+ * niche has no image assets yet. Index is clamped to the available image count.
+ *
+ * Behaviour:
+ *   - Valid slug with images       → image path string
+ *   - Valid new slug without images → null (silent — expected for new slugs)
+ *   - Invalid slug                  → null, with a warn-level error_logs entry
  */
-export function getNicheImage(nicheId: string, index: number): string {
-  const niche: NicheId = isValidNiche(nicheId) ? nicheId : 'finance'
-  const images = NICHE_IMAGES[niche]
+export function getNicheImage(nicheSlug: string, index: number): string | null {
+  if (!isValidNicheSlug(nicheSlug)) {
+    void logError({
+      route: 'lib/niche-images/getNicheImage',
+      error: `Unknown niche slug: "${nicheSlug}"`,
+      severity: 'warn',
+    })
+    return null
+  }
+  const images = NICHE_IMAGES[nicheSlug]
+  const folder = NEW_SLUG_TO_FOLDER[nicheSlug]
+  if (!images || !folder) return null
   const clamped = Math.max(0, Math.min(index - 1, images.length - 1))
-  return `/niche-images/${folderName(niche)}/${images[clamped]}`
+  return `/niche-images/${folder}/${images[clamped]}`
 }
 
 /**
- * Returns {count} image paths for the niche in a deterministic order based on seed.
- * Same seed always returns the same order — stable across page refreshes,
- * but changes when the user regenerates (new generated_at timestamp = new seed).
+ * Returns {count} image paths for the niche in a deterministic order based on
+ * seed. Same seed → same order, so the UI is stable across refreshes but
+ * changes when the user regenerates (new generated_at timestamp = new seed).
+ *
+ * Behaviour:
+ *   - Valid slug with images       → array of length {count}
+ *   - Valid new slug without images → [] (silent — expected for new slugs)
+ *   - Invalid slug                  → [], with a warn-level error_logs entry
  */
-export function getShuffledNicheImages(nicheId: string, count: number, seed: number): string[] {
-  const niche: NicheId = isValidNiche(nicheId) ? nicheId : 'finance'
-  const images = [...NICHE_IMAGES[niche]]
-  const folder = folderName(niche)
+export function getShuffledNicheImages(
+  nicheSlug: string,
+  count: number,
+  seed: number,
+): string[] {
+  if (!isValidNicheSlug(nicheSlug)) {
+    void logError({
+      route: 'lib/niche-images/getShuffledNicheImages',
+      error: `Unknown niche slug: "${nicheSlug}"`,
+      severity: 'warn',
+    })
+    return []
+  }
+  const sourceImages = NICHE_IMAGES[nicheSlug]
+  const folder = NEW_SLUG_TO_FOLDER[nicheSlug]
+  if (!sourceImages || !folder) return []
+
+  const images = [...sourceImages]
 
   // Fisher-Yates shuffle with seeded LCG random
   let s = seed

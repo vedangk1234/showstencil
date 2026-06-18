@@ -36,7 +36,6 @@ export async function GET(request: Request) {
     .from('users')
     .select('id')
     .eq('onboarding_completed', true)
-    .in('subscription_status', ['on_trial', 'active', 'past_due'])
     .not('youtube_access_token', 'is', null)
 
   if (error) {

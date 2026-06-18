@@ -54,7 +54,9 @@ async function run() {
     avgViewDurationSeconds: latestSnapshot.avg_view_duration_seconds ?? 0,
     uploadsPerMonth: 2, // not stored in snapshot — use known value for test
     subscriberCount: latestSnapshot.subscriber_count ?? 0,
-    nicheId: 'finance',
+    // Phase 9 (2026-06-09): legacy 'finance' slug replaced by 'finance_crypto'
+    // under the 31-niche taxonomy in lib/niches.ts.
+    nicheId: 'finance_crypto',
     recentVideoTitles: [], // not needed for gap scoring
   };
 

@@ -11,6 +11,7 @@
 
 import { createServiceClient } from '@/lib/supabase'
 import { logError } from '@/lib/logger'
+import { NICHE_WATCH_DURATION, DEFAULT_WATCH_DURATION } from '@/lib/gap-scorer'
 import type { ChannelOverview, VideoPerformanceItem, AudienceDemographics, TrafficSourceItem } from '@/lib/youtube-analytics'
 import type { CompetitorFullProfile, VideoDetail } from '@/lib/youtube-data'
 import type { User, ChannelSnapshot, Video, CompetitorMetrics, UserSettings, CompetitorSnapshot, CompetitorVideo, Insight, Idea, ThumbnailJob } from '@/types'
@@ -206,31 +207,90 @@ export async function saveVideoData(
     detailMap.set(d.videoId, d)
   }
 
-  const rows = analyticsVideos.map((av) => {
+  // Skip any analytics row whose Data API metadata is missing. The Analytics
+  // API (OAuth) sees private/unlisted/deleted history that the Data API
+  // (key-only) cannot return; getVideoDetails also silently drops Shorts
+  // (<61s), live streams, and made-for-kids content. In either case detail
+  // will be undefined and we must not write a half-null row — those poison
+  // niche detection, digest generation, and every other downstream consumer
+  // that joins on videos.title.
+  const rows: Array<{
+    user_id: string
+    youtube_video_id: string
+    title: string
+    published_at: string
+    duration_seconds: number
+    view_count: number
+    like_count: number
+    comment_count: number
+    share_count: number
+    ctr: number
+    avg_view_duration_seconds: number
+    retention_percentage: number
+    subscriber_gain: number
+    revenue_estimate: number
+    thumbnail_url: string | null
+    synced_at: string
+  }> = []
+  const skipped: Array<{ youtube_video_id: string; reason: string }> = []
+
+  for (const av of analyticsVideos) {
     const detail = detailMap.get(av.videoId)
-    return {
+    if (!detail || !detail.title || !detail.publishedAt) {
+      skipped.push({
+        youtube_video_id: av.videoId,
+        reason: !detail
+          ? 'Data API returned no metadata (likely private/unlisted/deleted/restricted, or filtered as Short/live/kids by getVideoDetails)'
+          : 'Data API returned an item but title or publishedAt was empty',
+      })
+      continue
+    }
+    rows.push({
       user_id: userId,
       youtube_video_id: av.videoId,
-      title: detail?.title ?? null,
-      published_at: detail?.publishedAt ?? null,
-      duration_seconds: detail?.duration ?? null,
+      title: detail.title,
+      published_at: detail.publishedAt,
+      duration_seconds: detail.duration,
       view_count: av.views,
-      like_count: detail?.likeCount ?? null,
-      comment_count: detail?.commentCount ?? null,
+      like_count: detail.likeCount,
+      comment_count: detail.commentCount,
       share_count: av.shares,
       ctr: av.ctr,
       avg_view_duration_seconds: Math.round(av.avgViewDurationSeconds),
       retention_percentage: av.avgViewPercentage,
       subscriber_gain: av.subscribersGained,
       revenue_estimate: av.estimatedRevenue,
-      thumbnail_url: detail?.thumbnailHighRes || detail?.thumbnailDefault || null,
+      thumbnail_url: detail.thumbnailHighRes || detail.thumbnailDefault || null,
       synced_at: new Date().toISOString(),
-    }
-  })
+    })
+  }
+
+  if (skipped.length > 0) {
+    console.warn(
+      `[db] saveVideoData skipped ${skipped.length} of ${analyticsVideos.length} row(s) with missing Data API metadata for user ${userId}`,
+    )
+    void logError({
+      userId,
+      route: 'lib/db/saveVideoData',
+      error: `Skipped ${skipped.length} video row(s) with missing Data API metadata`,
+      details: {
+        skipped_count: skipped.length,
+        total_analytics_videos: analyticsVideos.length,
+        skipped,
+      },
+      severity: 'warn',
+    })
+  }
+
+  if (rows.length === 0) return 0
 
   const videoIds = rows.map((r) => r.youtube_video_id)
 
-  // Delete existing records for these specific video IDs before re-inserting
+  // Narrow the delete to IDs we're successfully re-inserting. If the Data API
+  // temporarily failed to enrich an ID we previously had good data for, we
+  // preserve the prior row rather than nulling it out. A separate
+  // reconciliation pass (not in this fix) would be the right place to handle
+  // videos that have been genuinely deleted by the user.
   const { error: deleteError } = await supabase
     .from('videos')
     .delete()
@@ -239,6 +299,13 @@ export async function saveVideoData(
 
   if (deleteError) {
     console.error('[db] saveVideoData delete error:', deleteError.message)
+    void logError({
+      userId,
+      route: 'lib/db/saveVideoData',
+      error: `Delete failed: ${deleteError.message}`,
+      details: { row_count: rows.length },
+      severity: 'error',
+    })
     return 0
   }
 
@@ -246,6 +313,13 @@ export async function saveVideoData(
 
   if (insertError) {
     console.error('[db] saveVideoData insert error:', insertError.message)
+    void logError({
+      userId,
+      route: 'lib/db/saveVideoData',
+      error: `Insert failed: ${insertError.message}`,
+      details: { row_count: rows.length },
+      severity: 'error',
+    })
     return 0
   }
 
@@ -584,13 +658,9 @@ export async function getCompetitorMetricsFromDB(userId: string): Promise<Compet
 
   const nicheId: string = userData?.niche_id ?? ''
 
-  // Watch duration benchmark per niche (mirrors gap-scorer.ts)
-  const NICHE_WATCH_DURATION: Record<string, number> = {
-    finance: 720,
-    education: 720,
-    gaming: 480,
-  }
-  const watchDuration = NICHE_WATCH_DURATION[nicheId] ?? 360
+  // Watch duration benchmark per niche. Imported from gap-scorer.ts which owns
+  // the canonical 31-niche map — keep this lookup in lock-step with the scorer.
+  const watchDuration = NICHE_WATCH_DURATION[nicheId] ?? DEFAULT_WATCH_DURATION
 
   // Fetch active competitors — include upload_frequency_30d so we use the stored value
   const { data: competitors, error: compError } = await supabase

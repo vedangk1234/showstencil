@@ -470,12 +470,15 @@ async function runPhase3() {
       'Passive Income with Dividends',
     ]
     const result = await detectNiche(titles, [])
-    console.log(`         nicheId=${result.nicheId}, confidence=${result.confidence}`)
-    if (result.nicheId === 'finance' && result.confidence > 0.5) {
-      record('3.1', 'Niche detection', 'PASS', `niche=${result.nicheId}, confidence=${result.confidence}`)
+    // Phase 3 (2026-06-09): NicheResult.nicheId renamed to nicheSlug, and the legacy
+    // 'finance' bucket split into the 31-niche taxonomy. Personal finance titles now
+    // map to 'finance_crypto'.
+    console.log(`         nicheSlug=${result.nicheSlug}, confidence=${result.confidence}, source=${result.source}`)
+    if (result.nicheSlug === 'finance_crypto' && result.confidence > 0.5) {
+      record('3.1', 'Niche detection', 'PASS', `niche=${result.nicheSlug}, confidence=${result.confidence}`)
     } else {
       record('3.1', 'Niche detection', 'FAIL', undefined,
-        `Expected nicheId=finance confidence>0.5, got nicheId=${result.nicheId} confidence=${result.confidence}`)
+        `Expected nicheSlug=finance_crypto confidence>0.5, got nicheSlug=${result.nicheSlug} confidence=${result.confidence}`)
     }
   } catch (e: unknown) {
     record('3.1', 'Niche detection', 'FAIL', undefined, String(e))
@@ -497,7 +500,9 @@ async function runPhase3() {
         avgViewDurationSeconds: 420,
         uploadsPerMonth: 2,
         subscriberCount: 45000,
-        nicheId: 'finance',
+        // Phase 9 (2026-06-09): legacy 'finance' slug renamed to 'finance_crypto'
+        // under the 31-niche taxonomy in lib/niches.ts.
+        nicheId: 'finance_crypto',
         recentVideoTitles: [
           'How I Invested My First $1000',
           'Index Funds for Beginners',
@@ -530,17 +535,20 @@ async function runPhase3() {
   const step32Time = Date.now() - step32Start
 
   // 3.3 — Revenue benchmarks
+  // Phase 9 (2026-06-09): the niche benchmark table was migrated from 12
+  // categories to the 31-slug taxonomy. The legacy slug 'finance' is now
+  // 'finance_crypto', and the expected nicheCount is 31.
   try {
     const benchmarks = getNicheBenchmarks()
     const nicheCount = Object.keys(benchmarks).length
     const tier = getSubscriberTier(45000)
-    const potential = calculateRevenuePotential('finance', 45000, 8400, 2)
+    const potential = calculateRevenuePotential('finance_crypto', 45000, 8400, 2)
 
     console.log(`         ${nicheCount} niches loaded, tier=${tier}`)
     console.log(`         current=$${potential.currentMonthlyEstimate.toFixed(0)}/mo, benchmark=$${potential.benchmarkMonthlyEstimate.toFixed(0)}/mo, gap=$${potential.gapMonthly.toFixed(0)}/mo`)
 
     const allOk = (
-      nicheCount === 12 &&
+      nicheCount === 31 &&
       tier === 'tier2' &&
       potential.currentMonthlyEstimate >= 50 &&
       potential.currentMonthlyEstimate <= 300 &&
@@ -551,10 +559,10 @@ async function runPhase3() {
 
     if (allOk) {
       record('3.3', 'Revenue benchmarks', 'PASS',
-        `12 niches, tier=${tier}, gap=$${potential.gapMonthly.toFixed(0)}/mo`)
+        `${nicheCount} niches, tier=${tier}, gap=$${potential.gapMonthly.toFixed(0)}/mo`)
     } else {
       const issues = []
-      if (nicheCount !== 12) issues.push(`niches=${nicheCount}`)
+      if (nicheCount !== 31) issues.push(`niches=${nicheCount}`)
       if (tier !== 'tier2') issues.push(`tier=${tier}`)
       if (potential.currentMonthlyEstimate < 50 || potential.currentMonthlyEstimate > 300)
         issues.push(`current=$${potential.currentMonthlyEstimate}`)

@@ -37,7 +37,7 @@ export async function POST(request: Request) {
 
     const { data: user } = await supabase
       .from('users')
-      .select('id, youtube_channel_id, sub_niche')
+      .select('id, youtube_channel_id, sub_niche, niche_id, niche_description')
       .eq('id', userId)
       .single()
 
@@ -52,7 +52,15 @@ export async function POST(request: Request) {
       .order('published_at', { ascending: false })
       .limit(20)
 
-    if (!videos || videos.length < 3) {
+    // Phase 7: when the user has manually picked 'other' OR supplied a
+    // freeform niche_description (via the manual picker), feed the description
+    // into the sub-niche detector. The description is sufficient on its own,
+    // so the ≥ 3-video minimum is waived in that case. Otherwise we still
+    // need ≥ 3 video titles for the detector to have any signal.
+    const hasDescription =
+      typeof user.niche_description === 'string' && user.niche_description.trim().length > 0
+
+    if (!hasDescription && (!videos || videos.length < 3)) {
       return NextResponse.json(
         {
           error: 'Not enough videos to detect sub-niche',
@@ -63,7 +71,9 @@ export async function POST(request: Request) {
       )
     }
 
-    const result = await detectSubNiche(videos)
+    const result = await detectSubNiche(videos ?? [], {
+      nicheDescription: hasDescription ? user.niche_description : null,
+    })
 
     await supabase
       .from('users')

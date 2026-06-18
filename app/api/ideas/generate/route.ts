@@ -256,7 +256,20 @@ export async function POST(_req: Request) {
     // ── 6. Build prompt ────────────────────────────────────────────────────
     const ideaCount = plan === 'pro' ? 10 : plan === 'starter' ? 3 : 1
     const channelName = userData?.name ?? 'Your Channel'
-    const nicheId = userData?.niche_id ?? 'general'
+    // Display-only fallback used only for prompt assembly. NEVER written back
+    // to users.niche_id — this string just stops the Claude prompt from
+    // including "undefined" when a user somehow reaches this route without a
+    // detected niche. Log the data drift so it's visible.
+    if (!userData?.niche_id) {
+      void logError({
+        userId,
+        route: 'app/api/ideas/generate',
+        error: 'Idea generation invoked with null user.niche_id — using "unknown_niche" display fallback',
+        details: { user_id: userId },
+        severity: 'warn',
+      })
+    }
+    const nicheId = userData?.niche_id ?? 'unknown_niche'
     const subNiche = userData?.sub_niche ?? nicheId
     const subscriberCount = latestSnapshot?.subscriber_count?.toLocaleString() ?? 'unknown'
     const avgViewsPerVideo = latestSnapshot?.avg_views_per_video?.toLocaleString() ?? 'unknown'
@@ -288,7 +301,10 @@ export async function POST(_req: Request) {
                 : '  - No recent video data available'
 
           return (
-            `${c.channel_name} (Tier ${c.tier}, sub-niche: ${c.sub_niche || 'general'}, avg ${avgFmt} views/video):\n\n` +
+            // Display-only fallback for the prompt. Competitor sub-niche may be
+            // missing on freshly tracked channels — this is the prompt label,
+            // never written to the DB.
+            `${c.channel_name} (Tier ${c.tier}, sub-niche: ${c.sub_niche || 'unknown_sub_niche'}, avg ${avgFmt} views/video):\n\n` +
             `Their AI-generated insights:\n${insightLines}\n\n` +
             `Their proven winning videos (beating their own avg of ${avgFmt} by more than 30%):\n${winningLines}`
           )

@@ -1,7 +1,11 @@
 /**
  * scripts/seed-test-data.ts
- * Seeds Supabase with realistic test data for a finance YouTube creator.
+ * Seeds Supabase with realistic test data for a finance & crypto YouTube creator.
  * Fully idempotent — safe to run multiple times without creating duplicates.
+ *
+ * Phase 9 (2026-06-09): migrated from the legacy 12-niche slug set to the
+ * canonical 31-niche taxonomy in lib/niches.ts. The seeded niche is now
+ * 'finance_crypto'; channel-ID prefixes use the new slug.
  *
  * Run: npx tsx --env-file=.env.local scripts/seed-test-data.ts
  */
@@ -68,28 +72,32 @@ async function run() {
   const userId = user.id as string;
   console.log(`\nSeeding for: ${TEST_USER_EMAIL} (${userId})\n`);
 
-  // Ensure niche_id is exactly 'finance' (not a numeric id from an old detection run)
-  if (user.niche_id !== 'finance' || !user.sub_niche) {
+  // Ensure niche_id is exactly 'finance_crypto' (the canonical Phase-3 slug;
+  // the legacy 'finance' bucket was split into the 31-niche taxonomy and
+  // personal-finance content now lives under finance_crypto).
+  if (user.niche_id !== 'finance_crypto' || !user.sub_niche) {
     await supabase
       .from('users')
       .update({
-        niche_id: 'finance',
+        niche_id: 'finance_crypto',
         sub_niche: 'Personal Finance & Money Management',
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId);
-    console.log('✓ Set niche_id=finance + sub_niche on user');
+    console.log('✓ Set niche_id=finance_crypto + sub_niche on user');
   }
 
   // -------------------------------------------------------------------------
   // 2. Competitors — upsert 3 with correct tiers
   // -------------------------------------------------------------------------
 
-  // Define channel IDs as constants so we can reference them throughout
-  const SARAH_CHANNEL_ID = 'comp_finance_sarah';
-  const MARCUS_CHANNEL_ID = 'comp_money_marcus';
+  // Define channel IDs as constants so we can reference them throughout.
+  // Phase 9: synthetic channel-ID prefixes use the new slug 'finance_crypto'
+  // (the dominator ID is a UC-style YouTube ID and unaffected by the rename).
+  const SARAH_CHANNEL_ID = 'comp_finance_crypto_sarah';
+  const MARCUS_CHANNEL_ID = 'comp_finance_crypto_marcus';
   const DOMINATOR_CHANNEL_ID = 'UCwealthempire2400000xxx';
-  const OLD_SMART_CHANNEL_ID = 'comp_smart_money';
+  const OLD_SMART_CHANNEL_ID = 'comp_finance_crypto_smart_money';
 
   const now = new Date().toISOString();
 
@@ -616,7 +624,7 @@ async function run() {
   console.log('Test user');
   if (verifyUser) {
     console.log(`✓ Found: ${TEST_USER_EMAIL} (user_id: ${verifyUser.id})`);
-    console.log(verifyUser.niche_id === 'finance' ? '✓ niche_id: finance' : `❌ niche_id: ${verifyUser.niche_id} (expected: finance)`);
+    console.log(verifyUser.niche_id === 'finance_crypto' ? '✓ niche_id: finance_crypto' : `❌ niche_id: ${verifyUser.niche_id} (expected: finance_crypto)`);
     console.log(verifyUser.sub_niche ? `✓ sub_niche: ${verifyUser.sub_niche}` : '❌ sub_niche: null');
   } else {
     console.log('❌ User not found');
@@ -731,7 +739,7 @@ async function run() {
   // Determine overall pass/fail
   const checks = [
     !!verifyUser,
-    verifyUser?.niche_id === 'finance',
+    verifyUser?.niche_id === 'finance_crypto',
     !!verifyUser?.sub_niche,
     !!sarah, !!marcus, !!dominator,
     !!allHaveSubNiche, !!allHaveMetrics,

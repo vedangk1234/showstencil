@@ -182,6 +182,9 @@ export async function POST(req: NextRequest) {
     syncedAt: new Date().toISOString(),
     channelSnapshot: result.channelSnapshot,
     videosSynced: result.videosSynced,
+    // Phase 7: when detectNiche couldn't classify confidently, surface the
+    // flag so the dashboard can redirect to /onboarding (or the manual picker).
+    requiresManualSelection: result.requiresManualSelection ?? false,
     message: `Synced ${result.videosSynced} videos in ${elapsed}ms`,
   })
 }

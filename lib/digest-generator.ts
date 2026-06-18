@@ -397,6 +397,21 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
   // (bestVideos is top-10 by views and may not include all recent uploads.)
   const uploadsPerMonth = uploadsLast30d > 0 ? uploadsLast30d : bestVideos.length / 3;
 
+  // niche_id should always be populated by the time the digest cron runs (sync
+  // guarantees it). If we land here with a null slug, log a warn so the data
+  // drift is visible — but don't write the fallback string back to the DB.
+  // 'unknown_niche' is a *display-only* string used to keep downstream lookups
+  // (gap-scorer NICHE_CPM, prompt strings) from crashing on null.
+  if (!user.niche_id) {
+    void logError({
+      userId,
+      route: 'lib/digest-generator/generateDigest',
+      error: 'Digest run with null user.niche_id — using "unknown_niche" display fallback',
+      details: { user_id: userId },
+      severity: 'warn',
+    });
+  }
+
   const userMetrics = {
     avgViewsPerVideo,
     // videos.ctr is stored as a percentage (e.g. 2.86 = 2.86%); gap scorer expects decimal
@@ -404,7 +419,9 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
     avgViewDurationSeconds: avgWatchSeconds,
     uploadsPerMonth: Math.round(uploadsPerMonth * 10) / 10,
     subscriberCount: latestSnapshot?.subscriber_count ?? 0,
-    nicheId: user.niche_id ?? 'general',
+    // Display-only fallback. NEVER written back to users.niche_id — only used
+    // for downstream string lookups (CPM table) and prompt assembly.
+    nicheId: user.niche_id ?? 'unknown_niche',
     recentVideoTitles: bestVideos
       .slice(0, 10)
       .map((v) => v.title)
@@ -476,7 +493,9 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
 
   const context: DigestContext = {
     creatorName,
-    niche: user.niche_id ?? 'general',
+    // Display-only fallback for the prompt. The warn at the top of generateDigest
+    // already flagged the null niche_id; no need to re-log here.
+    niche: user.niche_id ?? 'unknown_niche',
     channelStats: {
       subscriberCount: latestSnapshot?.subscriber_count ?? 0,
       avgViewsPerVideo,
@@ -526,7 +545,8 @@ export async function generateDigest(userId: string): Promise<DigestResult> {
   const rawMarkdown = usedFallback
     ? generateFallbackDigest(
         creatorName,
-        user.niche_id ?? 'general',
+        // Display-only fallback — same rationale as the context.niche above.
+        user.niche_id ?? 'unknown_niche',
         gapScore.overallScore,
         gapScore.primaryBottleneck,
         gapScore.revenueGap.gapMonthly,
@@ -732,7 +752,7 @@ if (process.env.RUN_NICHE_TEST === 'true') {
     // -----------------------------------------------------------------
     const financeContext: DigestContext = {
       creatorName: 'MoneyClarity',
-      niche: 'finance',
+      niche: 'finance_crypto',
       channelStats: {
         subscriberCount: 45_000,
         avgViewsPerVideo: 8_400,
@@ -840,7 +860,7 @@ if (process.env.RUN_NICHE_TEST === 'true') {
     // -----------------------------------------------------------------
     const cookingContext: DigestContext = {
       creatorName: 'PlateIt Right',
-      niche: 'cooking',
+      niche: 'food_drink_cooking',
       channelStats: {
         subscriberCount: 22_000,
         avgViewsPerVideo: 11_200,

@@ -515,7 +515,7 @@ export function IdeasClient({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {activeIdeas.map((idea) => {
                 const globalIndex = ideas.indexOf(idea)
-                const src = imageUrls[globalIndex] ?? imageUrls[0]
+                const src = imageUrls[globalIndex] ?? imageUrls[0] ?? ''
                 const description = `Opportunity ${idea.opportunity_score}/100  ·  ${idea.suggested_duration_min}–${idea.suggested_duration_max} min`
 
                 return (
@@ -689,7 +689,7 @@ export function IdeasClient({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {doneIdeas.map((idea) => {
                     const globalIndex = ideas.indexOf(idea)
-                    const src = imageUrls[globalIndex] ?? imageUrls[0]
+                    const src = imageUrls[globalIndex] ?? imageUrls[0] ?? ''
                     const description = `Opportunity ${idea.opportunity_score}/100  ·  ${idea.suggested_duration_min}–${idea.suggested_duration_max} min`
 
                     return (

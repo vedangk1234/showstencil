@@ -218,12 +218,18 @@ export interface VideoIdea {
   hookDataPoint: string;
 }
 
-// Niche detection result (from Claude classification in niche-engine.ts)
+// Niche detection result (from Claude classification in niche-engine.ts).
+// Phase 3 (2026-06-09): migrated from the legacy 12-niche `nicheId`/`nicheName`
+// shape to a slug-based shape backed by the 31-niche taxonomy in lib/niches.ts.
+// `nicheSlug` is null when Claude could not classify confidently — in that case
+// `requiresManualSelection` is true and callers must surface the manual picker
+// rather than substituting a fallback niche.
 export interface NicheResult {
-  nicheId: string;       // one of the 12 valid niche IDs
-  nicheName: string;     // human-readable display name
-  confidence: number;    // 0–1 confidence score from Claude
-  reasoning: string;     // one-sentence explanation of the classification
+  nicheSlug: string | null;        // one of VALID_NICHE_SLUGS, or null when unclassified
+  confidence: number;              // 0.0–1.0 confidence score from Claude
+  reasoning: string;               // one-sentence explanation of the classification or non-classification
+  requiresManualSelection: boolean; // true when nicheSlug is null OR confidence is below the threshold
+  source: 'cache' | 'claude' | 'manual' | 'failure';
 }
 
 // Competitor candidate (from YouTube channel search in niche-engine.ts)

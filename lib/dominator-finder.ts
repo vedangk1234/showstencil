@@ -1,38 +1,61 @@
 import { detectSubNiche, calculateSubNicheSimilarity } from './sub-niche-detector'
 import type { SubNicheResult } from './sub-niche-detector'
+import {
+  isValidNicheSlug,
+  getNicheBySlug,
+  type ValidNicheSlug,
+} from './niches'
+import { logError } from './logger'
 
-// Niche-specific dominator matching rules
-const NICHE_DOMINATOR_RULES: Record<string, 'sub_niche' | 'broad'> = {
+// Niche-specific dominator matching rules.
+//
+// Phase 4 (2026-06-10) — keyed on all 31 canonical slugs. Record<ValidNicheSlug, …>
+// makes this map exhaustive at compile time: adding a niche to VALID_NICHE_SLUGS
+// without an entry here is a TypeScript error.
+//
+// - 'sub_niche' = the Dominator must match the user's specific sub-niche
+//   (vertical is too broad to share a single Dominator — gaming Minecraft
+//   creators and gaming Fortnite creators have nothing in common, so we
+//   require the channel-level sub-niche to overlap).
+// - 'broad'     = any large channel in the same top-level niche is a useful
+//   Dominator reference (the niche is coherent enough at the top level that
+//   a channel's tactics generalise — e.g. all finance creators benefit from
+//   watching the biggest finance channels regardless of crypto/RE/investing).
+const NICHE_DOMINATOR_RULES: Record<ValidNicheSlug, 'sub_niche' | 'broad'> = {
+  // Vertical-with-many-distinct-cultures → sub_niche match required
   gaming: 'sub_niche',
   fitness: 'sub_niche',
   education: 'sub_niche',
-  tech: 'sub_niche',
+  tech_ai_software: 'sub_niche',
+  music: 'sub_niche',
+  sports: 'sub_niche',
+  podcast: 'sub_niche',
+  product_reviews: 'sub_niche',
 
-  finance: 'broad',
-  beauty: 'broad',
+  // Coherent verticals → broad match works
+  finance_crypto: 'broad',
+  business_startups: 'broad',
+  sales_marketing: 'broad',
+  ecommerce: 'broad',
+  beauty_makeup: 'broad',
+  fashion: 'broad',
   travel: 'broad',
-  business: 'broad',
-  entertainment: 'broad',
-  diy: 'broad',
-  vlog: 'broad',
-  cooking: 'broad',
-  music: 'broad',
-  comedy: 'broad',
-}
-
-const NICHE_ID_TO_NAME: Record<string, string> = {
-  '1': 'gaming',
-  '2': 'tech',
-  '3': 'fitness',
-  '4': 'education',
-  '5': 'beauty',
-  '6': 'cooking',
-  '7': 'finance',
-  '8': 'travel',
-  '9': 'business',
-  '10': 'entertainment',
-  '11': 'diy',
-  '12': 'vlog',
+  entertainment_comedy: 'broad',
+  home_diy: 'broad',
+  food_drink_cooking: 'broad',
+  automotive: 'broad',
+  health: 'broad',
+  motivation_self_improvement: 'broad',
+  relationships_family: 'broad',
+  social_media: 'broad',
+  humanities: 'broad',
+  arts_culture: 'broad',
+  nature_outdoors: 'broad',
+  animals: 'broad',
+  magic_paranormal: 'broad',
+  video_essays: 'broad',
+  news_politics: 'broad',
+  news_politics_us: 'broad',
 }
 
 export interface DominatorCandidate {
@@ -57,13 +80,48 @@ export async function findDominatorsForUser(
     return []
   }
 
-  const nicheName = NICHE_ID_TO_NAME[userNicheId] || 'general'
-  const useSubNiche = NICHE_DOMINATOR_RULES[nicheName] === 'sub_niche'
+  // Phase 4: no 'general' fallback. A generic search query returns a Dominator
+  // who has nothing in common with the user's actual content, which is worse
+  // than no Dominator at all. Skip the user and surface the data issue.
+  if (!isValidNicheSlug(userNicheId)) {
+    console.warn(
+      `[dominator] Unknown niche_id "${userNicheId}" — skipping dominator assignment`,
+    )
+    void logError({
+      route: 'lib/dominator-finder/findDominatorsForUser',
+      error: 'Unknown niche_id — skipping dominator assignment',
+      details: { niche_id: userNicheId },
+      severity: 'warn',
+    })
+    return []
+  }
 
-  console.log(`[dominator] Searching ${nicheName}, use sub-niche: ${useSubNiche}`)
+  const nicheDef = getNicheBySlug(userNicheId)
+  if (!nicheDef) {
+    // isValidNicheSlug just passed, so this should never happen. Defensive log
+    // and skip rather than picking a generic fallback.
+    void logError({
+      route: 'lib/dominator-finder/findDominatorsForUser',
+      error: 'isValidNicheSlug passed but getNicheBySlug returned undefined',
+      details: { niche_id: userNicheId },
+      severity: 'error',
+    })
+    return []
+  }
 
+  const useSubNiche = NICHE_DOMINATOR_RULES[nicheDef.slug] === 'sub_niche'
+
+  console.log(
+    `[dominator] Searching ${nicheDef.slug} ("${nicheDef.searchQuery}"), use sub-niche: ${useSubNiche}`,
+  )
+
+  // Sub-niche search beats the canonical niche query for verticals with many
+  // distinct cultures (gaming, music, sports, etc.). Falls back to the
+  // canonical searchQuery when no sub-niche is set.
   const searchQuery =
-    useSubNiche && userSubNiche?.sub_niche ? userSubNiche.sub_niche : nicheName
+    useSubNiche && userSubNiche?.sub_niche && userSubNiche.sub_niche !== 'other'
+      ? userSubNiche.sub_niche
+      : nicheDef.searchQuery
 
   const candidates = await searchTopChannels(searchQuery, 50)
   if (candidates.length === 0) return []

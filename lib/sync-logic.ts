@@ -10,7 +10,7 @@
 
 import { getUser, saveChannelSnapshot, saveVideoData } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
-import { detectAndAssignCompetitors } from '@/lib/niche-engine'
+import { detectAndAssignCompetitors, detectNiche } from '@/lib/niche-engine'
 import { logError } from '@/lib/logger'
 import {
   getChannelOverview,
@@ -29,6 +29,10 @@ export interface SyncResult {
   httpStatus?: 400 | 401 | 502
   // Populated when a snapshot was written with partial/null data — never blocks success.
   snapshotNullFields?: string[]
+  // True when detectNiche ran and could not classify confidently. The /api/sync
+  // route forwards this in its 200 response so the dashboard can redirect to
+  // the manual picker UI on the next visit.
+  requiresManualSelection?: boolean
 }
 
 async function refreshAccessToken(
@@ -418,6 +422,84 @@ async function _syncUserChannelBody(userId: string): Promise<SyncResult> {
     }
   }
 
+  // ── 4b. Detect niche if missing ────────────────────────────────────────────
+  // Competitor auto-detection (step 6) requires niche_id. detectNiche calls
+  // Claude to classify the user's niche from recent video titles and writes
+  // niche_id to the DB on confidence > 0. Updates the in-memory user.niche_id
+  // on success so step 6 picks it up without a re-read.
+  // Never blocks the sync response — failures are logged and next sync retries.
+  let requiresManualSelection = false
+  if (!user.niche_id) {
+    try {
+      const supabase = createServiceClient()
+      const { data: recentVideos } = await supabase
+        .from('videos')
+        .select('title')
+        .eq('user_id', userId)
+        .not('title', 'is', null)
+        .order('published_at', { ascending: false })
+        .limit(20)
+
+      const titles = (recentVideos ?? [])
+        .map((v) => v.title)
+        .filter((t): t is string => typeof t === 'string' && t.length > 0)
+
+      if (titles.length === 0) {
+        console.info(`[sync] no video titles available for niche detection for user ${userId}`)
+        void logError({
+          userId,
+          route: '/api/sync',
+          error: 'no video titles available for niche detection',
+          details: { titles_count: 0, videos_synced: videosSynced },
+          severity: 'warn',
+        })
+      } else {
+        console.info(`[sync] niche_id missing — running detectNiche for user ${userId}`)
+        const nicheResult = await detectNiche(titles, [], userId)
+        // Phase 3: detectNiche no longer falls back to a default slug when uncertain.
+        // It returns nicheSlug=null and requiresManualSelection=true so that callers
+        // (eventually the manual-picker UI) can prompt the user instead of corrupting
+        // niche_id with a guess.
+        if (!nicheResult.requiresManualSelection && nicheResult.nicheSlug) {
+          console.info(`[sync] niche detected: "${nicheResult.nicheSlug}" (confidence: ${nicheResult.confidence}) for user ${userId}`)
+          user.niche_id = nicheResult.nicheSlug
+        } else {
+          // Phase 7: low-confidence classification leaves niche_id null and signals
+          // the caller (api/sync → dashboard) to surface the manual picker on the
+          // next visit. Severity is info-level here — this is an expected outcome,
+          // not an error; case 4 in the integration suite continues to assert the
+          // warn-level message is recorded below for visibility in error_logs.
+          requiresManualSelection = true
+          console.info(
+            `[sync] Sync for user ${userId}: niche detection low-confidence, manual selection will be required on next dashboard visit`,
+          )
+          void logError({
+            userId,
+            route: '/api/sync',
+            error: 'detectNiche could not classify confidently — no save, manual selection required',
+            details: {
+              titles_count: titles.length,
+              videos_synced: videosSynced,
+              confidence: nicheResult.confidence,
+              source: nicheResult.source,
+            },
+            severity: 'warn',
+          })
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(`[sync] niche detection failed for user ${userId}:`, err)
+      void logError({
+        userId,
+        route: '/api/sync',
+        error: `Niche detection failed: ${message}`,
+        details: { videos_synced: videosSynced, error_stack: err instanceof Error ? err.stack : undefined },
+        severity: 'error',
+      })
+    }
+  }
+
   // ── 5. Fire-and-forget sub-niche detection ─────────────────────────────────
   // Trigger only when videos exist and sub-niche has not yet been detected.
   // Never blocks the sync response.
@@ -488,5 +570,11 @@ async function _syncUserChannelBody(userId: string): Promise<SyncResult> {
     })
   }
 
-  return { success: true, channelSnapshot, videosSynced, snapshotNullFields: snapshotNullFields.length > 0 ? snapshotNullFields : undefined }
+  return {
+    success: true,
+    channelSnapshot,
+    videosSynced,
+    snapshotNullFields: snapshotNullFields.length > 0 ? snapshotNullFields : undefined,
+    requiresManualSelection: requiresManualSelection || undefined,
+  }
 }

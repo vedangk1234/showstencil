@@ -1,14 +1,15 @@
 import { config } from 'dotenv'
 config({ path: '.env.local', override: true })
 
+import { VALID_NICHE_SLUGS, getNicheBySlug, type ValidNicheSlug } from '../lib/niches'
+
 // ---------------------------------------------------------------------------
 // FILTERS — edit these before running
 // ---------------------------------------------------------------------------
-const CATEGORY =
-  'finance' as
-  | 'finance' | 'tech' | 'gaming' | 'cooking' | 'fitness'
-  | 'beauty' | 'travel' | 'education' | 'business'
-  | 'entertainment' | 'diy' | 'vlog'
+// Phase 9 (2026-06-09): CATEGORY accepts any of the 31 canonical niche slugs
+// from lib/niches.ts (single source of truth). The legacy 12-slug union was
+// replaced by the taxonomy migration.
+const CATEGORY: ValidNicheSlug = 'finance_crypto'
 
 const GENDER: 'male' | 'female' | 'any' = 'any'
 
@@ -28,20 +29,12 @@ if (!API_KEY) {
 
 const BASE_URL = 'https://www.googleapis.com/youtube/v3'
 
-const NICHE_QUERIES: Record<string, string> = {
-  finance:       'personal finance investing money tips',
-  tech:          'technology review gadgets',
-  gaming:        'gaming gameplay walkthrough',
-  cooking:       'cooking recipes food',
-  fitness:       'fitness workout exercise',
-  beauty:        'beauty makeup skincare tutorial',
-  travel:        'travel vlog adventure',
-  education:     'educational learning tutorial',
-  business:      'entrepreneur business growth strategy',
-  entertainment: 'entertainment funny videos',
-  diy:           'DIY crafts home improvement',
-  vlog:          'daily vlog lifestyle',
-}
+// Search queries come from the canonical taxonomy — each niche's `searchQuery`
+// field. Keeping the lookup map in sync with lib/niches.ts at build time means
+// we never drift out of step when new niches are added.
+const NICHE_QUERIES: Record<ValidNicheSlug, string> = Object.fromEntries(
+  VALID_NICHE_SLUGS.map((slug) => [slug, getNicheBySlug(slug)?.searchQuery ?? slug]),
+) as Record<ValidNicheSlug, string>
 
 interface ChannelItem {
   id: string
@@ -129,7 +122,7 @@ async function main() {
 
   const query = NICHE_QUERIES[CATEGORY]
   if (!query) {
-    console.error(`Unknown CATEGORY: '${CATEGORY}'. Must be one of: ${Object.keys(NICHE_QUERIES).join(', ')}`)
+    console.error(`Unknown CATEGORY: '${CATEGORY}'. Must be one of: ${VALID_NICHE_SLUGS.join(', ')}`)
     process.exit(1)
   }
 

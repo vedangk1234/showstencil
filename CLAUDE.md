@@ -159,6 +159,7 @@ CREATE TABLE users (
   token\_expires\_at TIMESTAMPTZ,
   niche\_id TEXT,
   niche\_detected\_at TIMESTAMPTZ,
+  niche\_description TEXT,                  -- user-supplied description (manual picker / "Other")
   sub\_niche TEXT,                          -- granular sub-niche detected by Claude
   sub\_niche\_keywords JSONB,               -- array of keyword strings
   sub\_niche\_confidence FLOAT,
@@ -853,12 +854,294 @@ const planLimits = {
 | `scripts/test-sync.ts` | ✅ | Calls POST /api/sync for the test user and logs timing + snapshot results |
 | `scripts/test-token-refresh.ts` | ✅ | Tests OAuth token refresh flow — uses stored refresh token, writes new access token to DB |
 | `scripts/update-competitor-thumbnails.ts` | ✅ | One-time script: populates missing channel_thumbnail on competitors rows via YouTube Data API |
+| `scripts/health-check.ts` | ✅ | Production invariant checker (read-only). 8 SQL invariants + 1 deferred (cron staleness — needs cron route instrumentation). Exit codes: 0=pass, 1=CRITICAL, 2=HIGH/WARN. Run: `npx tsx --env-file=.env.local scripts/health-check.ts` |
+| `scripts/integration/sync-pipeline.test.ts` | ✅ | 7 integration tests for `syncUserChannel()`. Real Supabase, mocked external APIs via `globalThis.fetch` interceptor. Test users use `@showstencil-test.invalid` for isolated cleanup. Covers: happy path with niche detection, niche-already-set (Claude not called), 0-video user, Claude confidence 0, expired-token-no-refresh, Analytics 500 graceful degradation, self-heal on second sync. Run: `npx tsx --env-file=.env.local scripts/integration/sync-pipeline.test.ts` |
+| `scripts/integration/mock-fetch.ts` | ✅ | Strict-mode `globalThis.fetch` interceptor with Supabase passthrough. Stock handlers for YouTube Analytics, YouTube Data (channels + videos), Anthropic, Google OAuth, sub-niche no-op. Used by sync-pipeline.test.ts only |
+| `scripts/integration/_audit-cleanup.ts` | ✅ | One-shot audit confirming no `@showstencil-test.invalid` users remain in prod after integration runs. Run: `npx tsx --env-file=.env.local scripts/integration/_audit-cleanup.ts` |
 
 ---
 
 ## What Is Built So Far
 
 > Update this section every Friday
+
+### Week 4 — Day 48 (2026-06-11) — niche taxonomy v2 (12 → 31) + manual-selection flow
+
+**Replaces the 12-niche legacy taxonomy with a 31-niche canonical taxonomy backed by a single source of truth (`lib/niches.ts`), removes the silent confidence-0 fallback that wrote a guessed niche to the DB, and adds an end-to-end manual-selection flow (NichePicker UI + /api/user/niche/manual + freeform niche_description column) for users whose channel can't be classified confidently. Impact: every niche-dependent surface (competitor auto-detection, sub-niche detection, dominator finder, gap scorer, digest, ideas, settings page, niche images) now reads from one slug allowlist; users in ambiguous niches are no longer silently misclassified as `'entertainment'`.**
+
+*tsc --noEmit: zero errors across all 9 phases.*
+
+---
+
+*Phase 1 — `lib/niches.ts` — NEW (canonical taxonomy):*
+* Exports `VALID_NICHE_SLUGS` (31 readonly tuple), `ValidNicheSlug` type, `NICHES` (full taxonomy with 400 sub-niches across all parents), `NicheDefinition`, `SubNiche` types, plus lookups: `getNicheBySlug`, `getSubNicheBySlug`, `getDisplayName`, `isValidNicheSlug`, `isNicheSlug`, `isSubNicheSlug`, `getAllNicheSlugs`, `getAllSubNicheSlugs`.
+* Every entry exposes `searchQuery` — the canonical YouTube search phrase used by `findCompetitors` and `findBestCompetitorsForTier`. Replaces every previous per-file hardcoded query map.
+* Slug rules applied uniformly: lowercase ASCII, underscores, apostrophes stripped, `&`/`and`/commas/slashes/hyphens collapse to `_`, US-specific niches suffix `_us`, parenthetical content dropped from slug (preserved in displayName). Sub-niches whose bare name would collide with another slug are parent-prefixed (e.g. `podcast → "Music"` becomes `podcast_music`).
+* `assertTaxonomyInvariants()` runs at module load and throws on: duplicate niche slug, duplicate sub-niche slug, sub-niche slug colliding with a top-level slug, parentSlug mismatch, or NICHES drift from VALID_NICHE_SLUGS.
+* Zero internal imports — the file is safely importable from anywhere in the project.
+
+*Phase 2 — `supabase/migrations/20260609000000_niche_taxonomy_v2.sql` — NEW (DB migration):*
+* Adds `users.niche_description TEXT` (nullable) for user-supplied free-text niche descriptions from the manual picker's "Other" branch.
+* Remaps 8 legacy slugs in `users.niche_id` to their new-taxonomy equivalents (table below).
+* Wipes legacy free-text `sub_niche` values from both `users` and `competitors` (the old detector returned arbitrary 2-5 word labels; the new taxonomy stores constrained slugs, so the existing values would never match). Sub-niches repopulate on next sync.
+
+| Legacy slug | New slug | Why |
+| --- | --- | --- |
+| `finance` | `finance_crypto` | Personal finance + crypto are commonly mixed on YouTube; one bucket reflects how creators index. |
+| `tech` | `tech_ai_software` | Modern tech vertical is dominated by AI + software + gadgets; renamed slug reflects scope. |
+| `gaming` | `gaming` | Already valid under new taxonomy — no remap. |
+| `cooking` | `food_drink_cooking` | Expanded scope (alcohol/drinks/mukbangs/food reviews). |
+| `fitness` | `fitness` | Already valid under new taxonomy — no remap. |
+| `beauty` | `beauty_makeup` | Slug renamed to match new displayName. |
+| `travel` | `travel` | Already valid under new taxonomy — no remap. |
+| `education` | `education` | Already valid under new taxonomy — no remap. |
+| `business` | `business_startups` | Expanded scope (VC/leadership/freelancing/productivity). |
+| `entertainment` | `entertainment_comedy` | Comedy is the dominant sub-vertical; renamed to match displayName. |
+| `diy` | `home_diy` | Expanded scope (gardening/interior design/homesteading). |
+| `vlog` | `entertainment_comedy` | Vlogs are now a sub-niche (`vlogs_daily_life`) under Entertainment & Comedy. The `sub_niche` column is wiped, so re-detection will assign the correct sub-niche on next sync. |
+
+*Phase 3 — `lib/niche-engine.ts` + `types/index.ts` — Claude detection rewritten:*
+* `NicheResult` interface rebuilt (`types/index.ts:227`): `nicheSlug: string | null`, `confidence: number`, `reasoning: string`, `requiresManualSelection: boolean`, `source: 'cache' | 'claude' | 'manual' | 'failure'`. The legacy `nicheId`/`nicheName` fields are gone.
+* `detectNiche()`: prompt rebuilt to enumerate all 31 slugs + per-slug one-line descriptions via `describeNiche(slug)`. Confidence calibration explicit in prompt (0.9+ unambiguous, 0.6–0.8 mostly-clear, <0.6 return null). Cache path now ignores stale slugs that aren't in the current taxonomy (warn-level `logError`) instead of trusting them.
+* `CONFIDENCE_THRESHOLD = 0.6`. **The silent confidence-0 / unknown-slug fallback to `'entertainment'` is removed entirely** — when Claude returns confidence below threshold OR an unknown slug, `detectNiche` returns `{ nicheSlug: null, requiresManualSelection: true }` and the DB is NOT written. The caller is responsible for surfacing the manual picker.
+* `NICHE_OTHER_SENTINEL = 'other'` exported. Stored in `users.niche_id` when the user picks "Other" in the picker.
+* `saveManualNicheSelection(userId, nicheSlug, { subNicheSlug, description })` — NEW, validated server-side: nicheSlug must be a valid taxonomy slug OR the `'other'` sentinel; subNicheSlug (if provided) must be a valid child of nicheSlug OR `'other'`; description ≥ 50 chars after trim is required when either is `'other'`. Writes `niche_id`, `sub_niche` (or null), `niche_description` (or null), and `niche_detected_at`. Returns boolean.
+* `VALID_NICHE_IDS` (legacy 12-slug union) retained for a single deprecation cycle — explicitly marked DO NOT USE; only competitor-matcher.ts and dominator-finder.ts still imported it during Phase 3 (both migrated in Phase 4).
+* Sync wiring (`lib/sync-logic.ts:459`, `app/api/sync/route.ts:185`): when `requiresManualSelection=true`, `niche_id` is left null and the flag is propagated up to the sync response so the dashboard can redirect to the picker. A warn-level `error_logs` entry is recorded for visibility.
+
+*Phase 4 — Library layer migrated to canonical slugs:*
+* `lib/competitor-matcher.ts` — `NICHE_SEARCH_TERMS` deleted. `findBestCompetitorsForTier` now reads the search query directly from `getNicheBySlug(slug)?.searchQuery` — one source of truth.
+* `lib/dominator-finder.ts` — `NICHE_ID_TO_NAME` deleted. `NICHE_DOMINATOR_RULES: Record<ValidNicheSlug, 'sub_niche' | 'broad'>` rebuilt for all 31 slugs; `Record<ValidNicheSlug, …>` makes the map exhaustive at compile time (adding a niche without an entry is a TS error). Vertical-with-many-distinct-cultures niches (gaming, fitness, education, tech_ai_software, music, sports, podcast, product_reviews) require sub-niche match; coherent verticals (everything else) use broad match.
+* `lib/revenue-benchmarks.ts` — benchmark table re-keyed by the 31 canonical slugs. Unknown slugs no longer throw; `getNicheBenchmarks(slug)` returns a mid-range default (CPM 5 / RPM 2.5) and logs a warn-level entry. New niches without real CPM data inherit reasonable defaults from the closest legacy niche, flagged as "estimated" in the file.
+* `lib/gap-scorer.ts` — niche benchmark lookups migrated to the 31-slug map. No revenue formula changes.
+
+*Phase 5 — `lib/niche-images.ts`:*
+* Keyed on the new 31-slug taxonomy. `NEW_SLUG_TO_FOLDER` maps the 11 slugs that currently have image assets to their pre-existing on-disk folder names (folders weren't renamed to reduce deploy risk). The other 20 new slugs return `null` / `[]` silently — niche image cards on the digest just don't render until assets are added. `'vlog'` legacy images are orphaned on disk (both `'entertainment'` and `'vlog'` remap to `entertainment_comedy`; only the `entertainment/` folder is referenced).
+
+*Phase 6 — `lib/sub-niche-detector.ts` + `app/api/users/detect-sub-niche/route.ts`:*
+* `detectSubNiche(videos, { nicheDescription })` — added optional `nicheDescription` option. When non-empty, the description is appended to the Claude prompt as a separate "creator described their channel as" block AND the ≥ 3-video minimum is waived (so users who picked 'Other' or supplied a description but haven't synced many videos still get a sub-niche).
+* `app/api/users/detect-sub-niche/route.ts` — reads `users.niche_description` in the same SELECT. When non-empty, passes through as `nicheDescription`. The minimum-3-videos guard now only fires when there's no description.
+
+*Phase 7 — Manual-picker UI + API:*
+* `components/onboarding/NichePicker.tsx` — NEW. Two cascading dropdowns: top-level niche (sorted alphabetically + literal "Other — describe below" option), then sub-niche (sorted alphabetically + "Other — describe below") only when a real top-level niche is chosen. Description textarea (3-5 sentence prompt + character counter) renders only when either dropdown is set to "Other". Submit disabled until: (1) top-level chosen, AND (2) either sub-niche chosen OR top-level is 'other', AND (3) when an "Other" branch was taken, description has ≥ 50 chars. Calls a parent-provided `onSubmit(selection)` that re-throws 4xx errors so the picker can display the validation message.
+* `app/api/user/niche/manual/route.ts` — NEW. Auth-gated POST. Validates: nicheSlug ∈ VALID_NICHE_SLUGS ∪ {'other'}; subNicheSlug ∈ children-of-nicheSlug ∪ {'other'} OR absent; description ≥ 50 chars when either branch is 'other', ≤ 2000 chars always. Calls `saveManualNicheSelection()`. Returns `{ success, nicheSlug, subNicheSlug, displayName }` with displayName resolved via the canonical taxonomy.
+* `components/onboarding/StepConfirmNiche.tsx` — rewritten. Three modes: `loading` (polls `/api/user/profile` every 1.5s × 20 attempts), `confirm-detected` (heading: "Based on your recent videos, you create *X* content. Is that right?" + "That's right →" / "Wrong niche" buttons), `picker` (renders NichePicker pre-filled with the detected slug when available, OR opened blank when polling timed out). The previous `'finance'` silent default and manual fallback dropdown are replaced entirely. Tap "Wrong niche" → picker mode.
+* `app/api/user/profile/route.ts` — GET extended with `niche_description`, `niche_confidence`, `niche_display_name`, `sub_niche_display_name`, `requires_manual_selection` (derived: true when `niche_id IS NULL`, OR `niche_id='other'` without description, OR `sub_niche_confidence < 0.6`). PATCH now accepts `niche_description` (string ≤ 2000 chars or null).
+
+*Phase 8 — UI surfaces aligned to new taxonomy:*
+* `app/(dashboard)/settings/page.tsx:190` — "Detected niche" row uses `getDisplayName(user.niche_id)` instead of `.charAt(0).toUpperCase()...`. Renders human-readable displayNames for all 31 niches and a clean "Other" label for the sentinel.
+* `components/competitors/tabs/ContentTab.tsx:108` — sub-niche explainer pulls niche displayName from `getDisplayName(nicheId)` instead of the legacy slug-with-first-letter-uppercased hack.
+
+*Phase 9 — Scripts + seed data:*
+* `scripts/seed-test-data.ts` — sets `niche_id='finance_crypto'` (was `'finance'`). Synthetic competitor channel IDs prefixed `comp_finance_crypto_*`. Verification block asserts the new slug.
+* `scripts/test-gap-scorer.ts` — test user metrics use `nicheId: 'finance_crypto'`.
+* `scripts/test-trend-alert.ts` — `channelId: 'comp_finance_crypto_sarah'`.
+* `scripts/find-creators.ts` — `CATEGORY: ValidNicheSlug` typed against the canonical export; legacy 12-slug union removed.
+* `scripts/test-everything.ts` — assertion banks updated (`niche_id` now expected to be a Phase-3 slug).
+
+---
+
+**Architecture: manual-selection flow end-to-end.** First sync runs `detectNiche()` against Claude. If `confidence ≥ 0.6` and the returned slug is in `VALID_NICHE_SLUGS`, niche is written and the user lands on the dashboard via Step 5 of onboarding. If `confidence < 0.6` OR Claude returns an unknown slug, **no DB write happens** — `requiresManualSelection: true` is set on the sync response. Step 3 of onboarding (`StepConfirmNiche`) polls `/api/user/profile`; the moment it sees `requires_manual_selection: true` it opens the NichePicker. The user picks a top-level niche (or "Other"), then a sub-niche (or "Other"), and supplies a 50–2000 char description when either is "Other". POST `/api/user/niche/manual` validates and writes `niche_id` + `sub_niche` + `niche_description`. Sub-niche detection then runs with the description as primary signal (the ≥ 3-video minimum is waived when a description exists), so newly-onboarded users with sparse video titles still get a useful sub-niche.
+
+`niche_description` is also fed into competitor matching and digest prompts as the substitute for a known niche slug when the user is on `niche_id='other'` — it's the contract that keeps every downstream surface useful for niches the taxonomy doesn't cover.
+
+---
+
+**New invariants in `scripts/health-check.ts`:**
+
+* **Invariant #1 (`users_with_videos_missing_niche`, CRITICAL) — cutoff widened from 2 hours to 7 days.** The manual-selection flow intentionally leaves `niche_id` NULL while the user sits in the picker. A 2-hour window would fire mid-picker. The 7-day window matches invariant #11 — past that point the user has abandoned the picker rather than just being slow, and NULL niche + synced videos is a real bug again.
+* **Invariant #11 (`users_stuck_in_manual_niche_selection`, HIGH) — NEW.** `niche_id IS NULL` AND `created_at < NOW() - 7 days` AND email not `@showstencil-test.invalid` AND ≥ 1 `channel_snapshots` row exists (proves first sync completed). HIGH because the account is functional but degraded — every niche-dependent surface is blocked until the user picks. Sample limit 50.
+* **Invariant #12 (`users_with_other_niche_no_description`, CRITICAL) — NEW.** `niche_id = 'other'` AND `niche_description IS NULL OR LENGTH(niche_description) < 50`. CRITICAL because every niche-dependent downstream surface (competitor matching, digest prompts, idea generation) leans on the description as the substitute for a known slug. The 50-char minimum is enforced by `/api/user/niche/manual`; this check verifies the contract holds in storage.
+
+---
+
+**Migration notes (run once in Supabase SQL editor):**
+
+Order matters — Phase 9 application code reads the new slugs, so the migration must run BEFORE the Phase 1–8 deploy. The Phase 7 manual-picker API reads `niche_description`, so the column must exist before it's hit.
+
+*Pre-flight dry run (verify the remap will hit the expected rows):*
+```sql
+-- 1. Confirm distinct legacy slugs in production
+SELECT niche_id, COUNT(*) AS n
+FROM   public.users
+GROUP  BY niche_id
+ORDER  BY n DESC;
+-- Expected to show some mix of: finance, tech, cooking, beauty, business,
+-- entertainment, diy, vlog, and any of the already-valid slugs
+-- (gaming, fitness, travel, education).
+
+-- 2. Count users that will be remapped vs. left alone
+SELECT
+  COUNT(*) FILTER (WHERE niche_id IN
+    ('finance','tech','cooking','beauty','business','entertainment','diy','vlog'))  AS will_remap,
+  COUNT(*) FILTER (WHERE niche_id IN
+    ('gaming','fitness','travel','education'))                                       AS already_valid,
+  COUNT(*) FILTER (WHERE niche_id IS NULL)                                           AS null_niche,
+  COUNT(*) FILTER (WHERE niche_id NOT IN
+    ('finance','tech','cooking','beauty','business','entertainment','diy','vlog',
+     'gaming','fitness','travel','education') AND niche_id IS NOT NULL)              AS unknown_slugs
+FROM public.users;
+-- unknown_slugs should be 0; if not, investigate before running the migration.
+
+-- 3. Inspect sub_niche values about to be wiped
+SELECT COUNT(*) FROM public.users WHERE sub_niche IS NOT NULL;
+SELECT COUNT(*) FROM public.competitors WHERE sub_niche IS NOT NULL;
+```
+
+*Run the migration:*
+```sql
+-- Apply supabase/migrations/20260609000000_niche_taxonomy_v2.sql in full.
+-- The file is idempotent (ADD COLUMN IF NOT EXISTS + targeted UPDATEs).
+```
+
+*Post-deploy verification:*
+```sql
+-- 1. niche_description column exists and is nullable
+SELECT column_name, data_type, is_nullable
+FROM   information_schema.columns
+WHERE  table_schema='public' AND table_name='users' AND column_name='niche_description';
+
+-- 2. No legacy slugs remain in users.niche_id
+SELECT niche_id, COUNT(*) FROM public.users
+WHERE  niche_id IN ('finance','tech','cooking','beauty','business','entertainment','diy','vlog')
+GROUP  BY niche_id;
+-- Expected: 0 rows.
+
+-- 3. All non-null niche_ids are in the new taxonomy (or 'other')
+SELECT niche_id, COUNT(*) FROM public.users
+WHERE  niche_id IS NOT NULL
+GROUP  BY niche_id ORDER BY 1;
+-- Every row must be a slug from VALID_NICHE_SLUGS or 'other'.
+
+-- 4. sub_niche columns are wiped (will repopulate over the next 24h via sync + cron)
+SELECT COUNT(*) FROM public.users        WHERE sub_niche IS NOT NULL;  -- expected 0
+SELECT COUNT(*) FROM public.competitors  WHERE sub_niche IS NOT NULL;  -- expected 0
+
+-- 5. Run health-check.ts to confirm invariants #1, #11, #12 pass on the new slugs
+-- npx tsx --env-file=.env.local scripts/health-check.ts
+```
+
+Sub-niches will be NULL across the board for ~24h after the migration. The daily `/api/cron/sub-niche-detection` route + the in-line sub-niche detection on every sync repopulate them under the new taxonomy.
+
+---
+
+**Explicitly NOT done in this expansion (logged for future phases):**
+
+* **Niche image assets for the 20 new slugs.** `lib/niche-images.ts` returns `null` / `[]` for `animals`, `arts_culture`, `automotive`, `ecommerce`, `fashion`, `health`, `humanities`, `magic_paranormal`, `motivation_self_improvement`, `music`, `nature_outdoors`, `news_politics`, `news_politics_us`, `podcast`, `product_reviews`, `relationships_family`, `sales_marketing`, `social_media`, `sports`, `video_essays`. Digest emails and idea cards for users in these niches show no thumbnail until assets are added under `public/niche-images/<folder>/` and wired into the `NEW_SLUG_TO_FOLDER` map.
+* **Niche-specific dominator-rule tuning.** `NICHE_DOMINATOR_RULES` in `lib/dominator-finder.ts` uses a coarse `sub_niche` vs `broad` toggle per niche, picked with reasonable defaults (vertical-with-distinct-cultures → sub_niche; coherent verticals → broad). Some new niches may benefit from finer-grained rules; revisit after first ~50 production users in each new niche so there's real data to calibrate against.
+* **Niche-specific CPM / RPM tuning.** `lib/revenue-benchmarks.ts` uses seed data — values for the 11 legacy-derived niches are real; values for the 20 brand-new niches are estimates inherited from the closest legacy neighbour. Revenue-gap dollar amounts shown in the digest for users in those niches should be treated as ballpark until benchmark data is collected from real CPM dashboards.
+* **Niche-specific Claude prompt examples.** `app/api/ideas/generate/route.ts` and `lib/digest-generator.ts` use generic example titles in their system prompts across all 31 niches. Per-niche example pools (e.g. real Personal Finance hook templates vs. real Gaming hook templates) would lift Claude output quality but require curation work per niche.
+
+---
+
+*Files touched:*
+
+| File | Phase | Change |
+| --- | --- | --- |
+| `lib/niches.ts` | 1 | NEW — canonical 31-niche taxonomy + 400 sub-niches + runtime invariant check. |
+| `supabase/migrations/20260609000000_niche_taxonomy_v2.sql` | 2 | NEW — adds `users.niche_description`, remaps 8 legacy slugs, wipes legacy sub_niche values. |
+| `lib/niche-engine.ts` | 3 | Claude prompt rebuilt for 31 niches; confidence-0 fallback removed; `NICHE_OTHER_SENTINEL` exported; `saveManualNicheSelection()` added. |
+| `types/index.ts` | 3 | `NicheResult` rebuilt (nicheSlug/null + requiresManualSelection). |
+| `lib/sync-logic.ts` | 3 | Skips DB write on requiresManualSelection; propagates flag up via sync response. |
+| `app/api/sync/route.ts` | 3 | Returns `requiresManualSelection` in JSON response. |
+| `lib/competitor-matcher.ts` | 4 | NICHE_SEARCH_TERMS deleted; reads searchQuery from `getNicheBySlug()`. |
+| `lib/dominator-finder.ts` | 4 | NICHE_ID_TO_NAME deleted; rules re-keyed on `Record<ValidNicheSlug, …>`. |
+| `lib/revenue-benchmarks.ts` | 4 | Re-keyed on 31 slugs; unknown-slug fallback returns defaults instead of throwing. |
+| `lib/gap-scorer.ts` | 4 | Niche benchmark lookups migrated to 31-slug map. |
+| `lib/niche-images.ts` | 5 | Re-keyed on 31 slugs; folder names preserved via `NEW_SLUG_TO_FOLDER`; missing assets return null silently. |
+| `lib/sub-niche-detector.ts` | 6 | Optional `nicheDescription` option; ≥ 3-video minimum waived when description provided. |
+| `app/api/users/detect-sub-niche/route.ts` | 6 | Reads `niche_description`; feeds it to detector; waives the minimum-3 guard accordingly. |
+| `components/onboarding/NichePicker.tsx` | 7 | NEW — cascading top-level / sub-niche dropdowns + "Other" textarea + char counter. |
+| `app/api/user/niche/manual/route.ts` | 7 | NEW — auth + validation + `saveManualNicheSelection()`. |
+| `components/onboarding/StepConfirmNiche.tsx` | 7 | Rewritten — three modes (loading / confirm-detected / picker); silent `'finance'` default removed. |
+| `app/api/user/profile/route.ts` | 7 | GET returns display names + `requires_manual_selection`; PATCH accepts `niche_description`. |
+| `app/(dashboard)/settings/page.tsx` | 8 | Detected-niche row uses `getDisplayName()`. |
+| `components/competitors/tabs/ContentTab.tsx` | 8 | Niche display label uses `getDisplayName()`. |
+| `scripts/seed-test-data.ts` | 9 | Sets `niche_id='finance_crypto'`; channel ID prefix updated. |
+| `scripts/test-gap-scorer.ts` | 9 | `nicheId: 'finance_crypto'`. |
+| `scripts/test-trend-alert.ts` | 9 | Channel ID prefix updated. |
+| `scripts/find-creators.ts` | 9 | `ValidNicheSlug` import from `lib/niches.ts`; legacy union removed. |
+| `scripts/test-everything.ts` | 9 | Assertion banks aligned to Phase-3 slugs. |
+| `scripts/health-check.ts` | 9 | Invariant #1 cutoff widened to 7 days; invariants #11 and #12 added. |
+
+---
+
+### Week 4 — Day 47 (2026-06-09)
+
+**Fixed two latent bugs in dominator-finder.ts and competitor-matcher.ts where NICHE_ID_TO_NAME and NICHE_SEARCH_TERMS used numeric '1'..'12' keys that never matched string niche_ids — both maps always fell through to 'general' fallback, silently bypassing all niche-specific dominator rules and competitor search terms.**
+
+*tsc --noEmit: zero errors.*
+
+---
+
+*Root cause:* Production `niche_id` values are string slugs (`'finance'`, `'tech'`, `'gaming'`, etc.) emitted by `detectNiche` in `lib/niche-engine.ts` and validated against the `VALID_NICHE_IDS` allowlist. Both `NICHE_ID_TO_NAME` in `lib/dominator-finder.ts` and `NICHE_SEARCH_TERMS` in `lib/competitor-matcher.ts` were keyed by numeric strings `'1'..'12'`. A lookup like `NICHE_ID_TO_NAME['finance']` returned `undefined` and the `|| 'general'` fallback fired on every call. The behavioural consequences were silent: `findDominatorsForUser` used the generic `'general'` query and bypassed the sub_niche vs broad-niche rule in `NICHE_DOMINATOR_RULES` for every user; `findBestCompetitorsForTier` searched YouTube for the literal term `'general'` instead of a niche-specific term whenever a user lacked a sub_niche.
+
+*`lib/niche-engine.ts` — MODIFIED:*
+* `VALID_NICHE_IDS` and `ValidNicheId` type promoted from `const`/local-type to `export const`/`export type` so other lib files can use the authoritative niche allowlist directly. No behaviour change inside niche-engine.ts.
+
+*`lib/dominator-finder.ts` — MODIFIED:*
+* Added `import { VALID_NICHE_IDS, type ValidNicheId } from './niche-engine'`.
+* `NICHE_ID_TO_NAME` retyped from `Record<string, string>` to `Record<ValidNicheId, string>`. Keys changed from `'1'..'12'` to the 12 niche slugs. Each slug maps to itself (identity) — preserves existing downstream behaviour where `nicheName` is fed back into the slug-keyed `NICHE_DOMINATOR_RULES` and into the YouTube search query. The `Record<ValidNicheId, …>` type forces the map to stay exhaustive — adding a new niche to `VALID_NICHE_IDS` without an entry here is now a compile error.
+* Added local `isValidNicheId(id: string): id is ValidNicheId` type guard.
+* Lookup site: `NICHE_ID_TO_NAME[userNicheId] || 'general'` → `isValidNicheId(userNicheId) ? NICHE_ID_TO_NAME[userNicheId] : 'general'`. Same fallback semantics, but now a real cache hit when `userNicheId` is a known slug instead of always missing.
+
+*`lib/competitor-matcher.ts` — MODIFIED:*
+* Same import added.
+* `NICHE_SEARCH_TERMS` retyped from `Record<string, string>` to `Record<ValidNicheId, string>`. Keys changed from `'1'..'12'` to the 12 niche slugs. Values retained as the bare slugs (matches what the original numeric-key values were before they became unreachable).
+* Added local `isValidNicheId` type guard.
+* Lookup site rewritten so the sub_niche-first preference and `'general'` fallback are preserved, but the niche term is now reachable when `userSubNiche?.sub_niche` is absent.
+
+*No other logic changed.* `NICHE_DOMINATOR_RULES` in dominator-finder.ts (which is already correctly keyed by slugs and contains entries for `'music'` and `'comedy'` that are not in `VALID_NICHE_IDS`) was left untouched per the "key types only" scope.
+
+*No test fixtures assert the previous `'general'` fallback.* Grep confirmed the only other `'general'` references are independent fallbacks in `lib/digest-generator.ts` and `app/api/ideas/generate/route.ts` on `user.niche_id` and `sub_niche` — unrelated to the two faulty maps.
+
+---
+
+### Week 4 — Day 46 (2026-06-08)
+
+**Fix null-title video rows — `saveVideoData` skips rows whose Data API metadata is missing**
+
+*tsc --noEmit: zero errors.*
+
+---
+
+*Root cause:* `lib/db.ts` `saveVideoData` iterated every Analytics-returned video and wrote a row regardless of whether `getVideoDetails` had returned matching metadata. When the Data API omitted an ID (private/unlisted/deleted/restricted via the public key context, or silently filtered by `lib/youtube-data.ts:459` because the video is a Short/livestream/kids), the row was still inserted with `title=NULL` and `published_at=NULL` but real `view_count` from the Analytics API. 13 such rows had accumulated in production — 10 for one Brand Account user (real views, no titles) and 3 isolated `view_count=1` rows (the literal `1` came straight from the Analytics API for low-view videos, not from any fallback). The Day 45 niche-detection self-heal correctly skipped these users because their `videos.title` rows were unusable.
+
+*`lib/db.ts` — MODIFIED (`saveVideoData`):*
+* Replaced the unconditional `.map()` with a `for` loop that skips any row where `detailMap.get(av.videoId)` is undefined or where `detail.title`/`detail.publishedAt` is empty. Skipped rows are collected with a reason string and reported via a single warn-level `logError` call (`route: 'lib/db/saveVideoData'`, `details.skipped: [{youtube_video_id, reason}, ...]`).
+* Removed every `?? null` fallback on metadata fields — the row type now requires non-null `title`, `published_at`, `duration_seconds`, `like_count`, `comment_count`. The only nullable field is `thumbnail_url` (falls back to `null` when both `thumbnailHighRes` and `thumbnailDefault` are empty strings).
+* DELETE narrowed from `analyticsVideos.map(...)` to `rows.map(...)` — only IDs we're about to re-insert get cleared. Comment above the delete explains the trade-off: if the Data API temporarily fails to enrich an ID we previously had good data for, the prior row is preserved rather than nulled out. A separate reconciliation pass (not in this fix) would be the right place to handle videos genuinely deleted by the user.
+* Failed DELETE / INSERT now also log to `error_logs` (severity `'error'`) with `details.row_count`.
+
+*`scripts/integration/mock-fetch.ts` — MODIFIED:*
+* `youtubeVideosHandler` now accepts an optional `missingIds?: string[]`. IDs in this set are filtered out of the response `items[]` array entirely — mirrors the real Data API behaviour when an ID is private/deleted/restricted (omitted, never null-placeholder).
+
+*`scripts/integration/sync-pipeline.test.ts` — MODIFIED (case 8 added):*
+* `case8_videoMetadataMissingSkipsRow` — 3 input video IDs from Analytics, Data API omits the middle one via `missingIds: ['vid_metadata_b']`. Five assertions: `result.videosSynced === 2`, exactly 2 video rows in the DB, zero rows with null title/published_at, a warn-level `error_logs` entry from `lib/db/saveVideoData` exists, and the missing ID `vid_metadata_b` appears verbatim in the log's `error_details` JSON. Surviving IDs are also checked via a `deepEqual` against `['vid_metadata_a', 'vid_metadata_c']`.
+
+*`scripts/health-check.ts` — MODIFIED (invariant #10 added):*
+* `checkVideoRowsMissingMetadata` — CRITICAL severity. Queries `videos` for `title IS NULL OR published_at IS NULL`, ordered by `synced_at DESC`. Sample limit 50. Post-fix this count must always be zero; non-zero exits the script with code 1 so the regression class is monitored going forward.
+
+*Cleanup query (run once after deploy, manually in Supabase SQL editor):*
+```sql
+-- DRY RUN — confirm exactly 13 rows match before deleting
+SELECT v.id, v.user_id, u.email, v.youtube_video_id, v.view_count, v.synced_at
+FROM   public.videos v
+JOIN   public.users  u ON u.id = v.user_id
+WHERE  v.title IS NULL
+    OR v.published_at IS NULL
+ORDER  BY v.synced_at;
+
+-- DELETE — once the dry run is verified
+DELETE FROM public.videos
+WHERE title IS NULL
+   OR published_at IS NULL;
+-- expected: 13 rows
+```
+
+After this delete runs, `health-check.ts` invariant #1 (`users_with_videos_missing_niche`) should also drop because the stilllifemotion user's 10 null-title rows blocked Day 45 niche detection from finding usable titles.
+
+---
 
 ### Week 4 — Day 44 (2026-05-14)
 

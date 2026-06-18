@@ -1,8 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-})
+// Constructed lazily on the first call rather than at module load. The
+// Anthropic SDK captures its fetch implementation at construction time —
+// constructing here at load would lock in the real fetch and bypass the
+// mock-fetch interceptor used by the integration tests.
+function getAnthropic(): Anthropic {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+}
 
 export interface SubNicheResult {
   sub_niche: string
@@ -10,27 +14,51 @@ export interface SubNicheResult {
   confidence: number
 }
 
-// Detect sub-niche from video titles/descriptions
+/**
+ * Detect a channel's sub-niche from video titles + optionally a user-supplied
+ * niche description.
+ *
+ * The description input is used by /api/users/detect-sub-niche when the user
+ * has manually selected `niche_id = 'other'` (or provided a freeform niche
+ * description while picking a real niche). The description is appended to the
+ * Claude prompt and is sufficient on its own — i.e. the ≥ 3-video minimum is
+ * waived when a non-empty description is provided, so newly-onboarded users
+ * who haven't synced enough videos yet still get a sub-niche result.
+ */
 export async function detectSubNiche(
   videos: Array<{ title: string; description?: string | null }>,
+  options: { nicheDescription?: string | null } = {},
 ): Promise<SubNicheResult> {
-  if (!videos || videos.length < 3) {
+  const nicheDescription =
+    typeof options.nicheDescription === 'string' ? options.nicheDescription.trim() : ''
+  const hasDescription = nicheDescription.length > 0
+  const videoCount = videos?.length ?? 0
+
+  // Without a description, fall back to the original ≥ 3-video minimum.
+  if (!hasDescription && videoCount < 3) {
     return { sub_niche: 'General', keywords: [], confidence: 0 }
   }
 
-  const recentVideos = videos.slice(0, 20)
+  const recentVideos = (videos ?? []).slice(0, 20)
 
-  const videoList = recentVideos
-    .map(
-      (v, i) =>
-        `${i + 1}. "${v.title}"${v.description ? ` - ${v.description.slice(0, 150)}` : ''}`,
-    )
-    .join('\n')
+  const videoList =
+    recentVideos.length === 0
+      ? '(no video titles available)'
+      : recentVideos
+          .map(
+            (v, i) =>
+              `${i + 1}. "${v.title}"${v.description ? ` - ${v.description.slice(0, 150)}` : ''}`,
+          )
+          .join('\n')
 
-  const prompt = `Analyze these YouTube video titles and identify the channel's PRIMARY sub-niche focus.
+  const descriptionBlock = hasDescription
+    ? `\n\nThe creator described their channel as:\n"${nicheDescription.slice(0, 1500)}"\n\nUse this description as the primary signal when video titles are sparse or ambiguous.`
+    : ''
+
+  const prompt = `Analyze these YouTube video titles${hasDescription ? ' and the creator\'s own description' : ''} and identify the channel's PRIMARY sub-niche focus.
 
 Videos:
-${videoList}
+${videoList}${descriptionBlock}
 
 A sub-niche is a granular specialization within a broader niche. Examples:
 - Finance → "Credit Card Rewards & Travel Hacking"
@@ -54,7 +82,7 @@ Where:
 Return ONLY the JSON object, nothing else.`
 
   try {
-    const response = await anthropic.messages.create({
+    const response = await getAnthropic().messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 500,
       messages: [{ role: 'user', content: prompt }],

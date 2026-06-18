@@ -22,32 +22,98 @@ import type {
 
 // ---------------------------------------------------------------------------
 // CPM benchmarks (USD, used for revenue estimation)
+//
+// Phase 4 (2026-06-10) — keyed on the 31-niche taxonomy in lib/niches.ts.
+// Values are the lower bound of each niche's CPM range (see
+// lib/revenue-benchmarks.ts for the full ranges and rationale). Keeping these
+// keyed by string (not ValidNicheSlug) so the lookup degrades gracefully on
+// stale slugs — DEFAULT_CPM is used when no match is found.
 // ---------------------------------------------------------------------------
 
 const NICHE_CPM: Record<string, number> = {
-  finance: 18,
-  business: 15,
-  education: 12,
-  tech: 10,
-  beauty: 9,
-  fitness: 8,
-  cooking: 7,
-  travel: 6,
-  diy: 6,
-  gaming: 4,
-  entertainment: 3,
-  vlog: 3,
+  finance_crypto: 15,
+  business_startups: 12,
+  sales_marketing: 10,
+  ecommerce: 10,
+  education: 10,
+  health: 9,
+  tech_ai_software: 8,
+  beauty_makeup: 8,
+  fashion: 7,
+  automotive: 7,
+  product_reviews: 7,
+  motivation_self_improvement: 7,
+  fitness: 6,
+  humanities: 6,
+  social_media: 6,
+  news_politics: 5,
+  news_politics_us: 5,
+  podcast: 5,
+  food_drink_cooking: 5,
+  home_diy: 5,
+  relationships_family: 5,
+  nature_outdoors: 5,
+  arts_culture: 4,
+  travel: 4,
+  video_essays: 4,
+  sports: 4,
+  animals: 4,
+  music: 3,
+  gaming: 3,
+  magic_paranormal: 3,
+  entertainment_comedy: 2,
 };
 
-const DEFAULT_CPM = 5;
+export const DEFAULT_CPM = 5;
 
-// Watch time estimates per niche (seconds) — used when public data doesn't include duration
-const NICHE_WATCH_DURATION: Record<string, number> = {
-  finance: 720,
+// ---------------------------------------------------------------------------
+// Watch time estimates per niche (seconds)
+//
+// Used by buildCompetitorMetrics when public Data API responses don't include
+// duration (some channels hide it or return zero). Also imported by lib/db.ts
+// — gap-scorer.ts is the single source of truth for this map.
+// ---------------------------------------------------------------------------
+
+export const NICHE_WATCH_DURATION: Record<string, number> = {
+  // Long-form / lecture-style — viewers come to learn or sit through analysis
+  finance_crypto: 720,
+  business_startups: 720,
   education: 720,
+  humanities: 720,
+  health: 720,
+  motivation_self_improvement: 720,
+  video_essays: 720,
+  news_politics: 720,
+  news_politics_us: 720,
+  podcast: 720,
+  // Medium-length / tutorial-style
+  tech_ai_software: 540,
+  sales_marketing: 540,
+  ecommerce: 540,
+  arts_culture: 540,
+  social_media: 540,
+  // Watch-along / play-through
   gaming: 480,
+  automotive: 480,
+  sports: 480,
+  music: 480,
+  // Short-form / how-to / lifestyle
+  food_drink_cooking: 360,
+  fitness: 360,
+  beauty_makeup: 360,
+  fashion: 360,
+  home_diy: 360,
+  product_reviews: 360,
+  travel: 360,
+  relationships_family: 360,
+  nature_outdoors: 360,
+  animals: 360,
+  magic_paranormal: 360,
+  // Snackable
+  entertainment_comedy: 240,
 };
-const DEFAULT_WATCH_DURATION = 360;
+
+export const DEFAULT_WATCH_DURATION = 360;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
