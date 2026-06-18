@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { createServiceClient } from '@/lib/supabase'
 
 // Constructed lazily on the first call rather than at module load. The
 // Anthropic SDK captures its fetch implementation at construction time —
@@ -109,6 +110,73 @@ Return ONLY the JSON object, nothing else.`
     console.error('[sub-niche] Detection failed:', error)
     return { sub_niche: 'General', keywords: [], confidence: 0 }
   }
+}
+
+export type DetectAndSaveSubNicheResult =
+  | { status: 'ok'; result: SubNicheResult }
+  | { status: 'user_not_found' }
+  | { status: 'insufficient_videos'; current: number }
+
+/**
+ * Fetch a user's recent videos, run sub-niche detection, and persist the result
+ * to the users row. Mirrors the niche-detection flow (detectNiche +
+ * saveDetectedNiche) so it can be called directly in-process from sync-logic
+ * instead of via a self-HTTP request to the detect-sub-niche route.
+ *
+ * Contains no HTTP/auth logic — callers resolve the userId themselves.
+ *
+ * Guard (unchanged): when the user has supplied a non-empty niche_description
+ * the ≥ 3-video minimum is waived; otherwise ≥ 3 videos are required.
+ */
+export async function detectAndSaveSubNiche(
+  userId: string,
+): Promise<DetectAndSaveSubNicheResult> {
+  const supabase = createServiceClient()
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('id, youtube_channel_id, sub_niche, niche_id, niche_description')
+    .eq('id', userId)
+    .single()
+
+  if (!user) {
+    return { status: 'user_not_found' }
+  }
+
+  const { data: videos } = await supabase
+    .from('videos')
+    .select('title, description')
+    .eq('user_id', user.id)
+    .order('published_at', { ascending: false })
+    .limit(20)
+
+  // Phase 7: when the user has manually picked 'other' OR supplied a
+  // freeform niche_description (via the manual picker), feed the description
+  // into the sub-niche detector. The description is sufficient on its own,
+  // so the ≥ 3-video minimum is waived in that case. Otherwise we still
+  // need ≥ 3 video titles for the detector to have any signal.
+  const hasDescription =
+    typeof user.niche_description === 'string' && user.niche_description.trim().length > 0
+
+  if (!hasDescription && (!videos || videos.length < 3)) {
+    return { status: 'insufficient_videos', current: videos?.length ?? 0 }
+  }
+
+  const result = await detectSubNiche(videos ?? [], {
+    nicheDescription: hasDescription ? user.niche_description : null,
+  })
+
+  await supabase
+    .from('users')
+    .update({
+      sub_niche: result.sub_niche,
+      sub_niche_keywords: result.keywords,
+      sub_niche_confidence: result.confidence,
+      sub_niche_detected_at: new Date().toISOString(),
+    })
+    .eq('id', user.id)
+
+  return { status: 'ok', result }
 }
 
 // Calculate similarity between two sub-niches (0-1 score)

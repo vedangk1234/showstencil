@@ -11,6 +11,7 @@
 import { getUser, saveChannelSnapshot, saveVideoData } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
 import { detectAndAssignCompetitors, detectNiche } from '@/lib/niche-engine'
+import { detectAndSaveSubNiche } from '@/lib/sub-niche-detector'
 import { logError } from '@/lib/logger'
 import {
   getChannelOverview,
@@ -500,20 +501,30 @@ async function _syncUserChannelBody(userId: string): Promise<SyncResult> {
     }
   }
 
-  // ── 5. Fire-and-forget sub-niche detection ─────────────────────────────────
+  // ── 5. Sub-niche detection ──────────────────────────────────────────────────
   // Trigger only when videos exist and sub-niche has not yet been detected.
-  // Never blocks the sync response.
+  // Called directly in-process (awaited, mirroring niche detection above)
+  // rather than via a self-HTTP POST to the detect-sub-niche route — the
+  // previous self-HTTP call defaulted to http://localhost:3000 and failed
+  // silently on Vercel, so sub_niche was never populated in production.
+  // Awaiting (not fire-and-forget) guarantees completion: a detached promise
+  // would be killed when the serverless function returns its response.
   if (videosSynced > 0) {
     const freshUser = await getUser(userId)
     if (!freshUser?.sub_niche) {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-      fetch(`${appUrl}/api/users/detect-sub-niche`, {
-        method: 'POST',
-        headers: {
-          'x-cron-user-id': userId,
-          'x-cron-secret': process.env.CRON_SECRET ?? '',
-        },
-      }).catch((err) => console.error('[sync] Sub-niche detection trigger failed:', err))
+      try {
+        await detectAndSaveSubNiche(userId)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(`[sync] Sub-niche detection failed for user ${userId}:`, err)
+        void logError({
+          userId,
+          route: '/api/sync',
+          error: `Sub-niche detection failed: ${message}`,
+          details: { videos_synced: videosSynced, error_stack: err instanceof Error ? err.stack : undefined },
+          severity: 'warn',
+        })
+      }
     }
   }
 

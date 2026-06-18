@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
-import { detectSubNiche } from '@/lib/sub-niche-detector'
+import { detectAndSaveSubNiche } from '@/lib/sub-niche-detector'
 
 export async function POST(request: Request) {
   try {
@@ -35,57 +35,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const { data: user } = await supabase
-      .from('users')
-      .select('id, youtube_channel_id, sub_niche, niche_id, niche_description')
-      .eq('id', userId)
-      .single()
+    // Video fetch + ≥3-video/niche_description guard + detectSubNiche + users-row
+    // update all live in detectAndSaveSubNiche so sync-logic can call the same
+    // path directly in-process. This route stays a thin auth wrapper.
+    const outcome = await detectAndSaveSubNiche(userId)
 
-    if (!user) {
+    if (outcome.status === 'user_not_found') {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const { data: videos } = await supabase
-      .from('videos')
-      .select('title, description')
-      .eq('user_id', user.id)
-      .order('published_at', { ascending: false })
-      .limit(20)
-
-    // Phase 7: when the user has manually picked 'other' OR supplied a
-    // freeform niche_description (via the manual picker), feed the description
-    // into the sub-niche detector. The description is sufficient on its own,
-    // so the ≥ 3-video minimum is waived in that case. Otherwise we still
-    // need ≥ 3 video titles for the detector to have any signal.
-    const hasDescription =
-      typeof user.niche_description === 'string' && user.niche_description.trim().length > 0
-
-    if (!hasDescription && (!videos || videos.length < 3)) {
+    if (outcome.status === 'insufficient_videos') {
       return NextResponse.json(
         {
           error: 'Not enough videos to detect sub-niche',
           minimum_required: 3,
-          current: videos?.length ?? 0,
+          current: outcome.current,
         },
         { status: 400 },
       )
     }
 
-    const result = await detectSubNiche(videos ?? [], {
-      nicheDescription: hasDescription ? user.niche_description : null,
-    })
-
-    await supabase
-      .from('users')
-      .update({
-        sub_niche: result.sub_niche,
-        sub_niche_keywords: result.keywords,
-        sub_niche_confidence: result.confidence,
-        sub_niche_detected_at: new Date().toISOString(),
-      })
-      .eq('id', user.id)
-
-    return NextResponse.json({ success: true, ...result })
+    return NextResponse.json({ success: true, ...outcome.result })
   } catch (error: unknown) {
     console.error('[detect-sub-niche] Error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
