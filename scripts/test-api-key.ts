@@ -13,7 +13,7 @@ const client = new Anthropic({ apiKey: key })
 async function test() {
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 10,
       messages: [{ role: 'user', content: 'Say hi' }]
     })
