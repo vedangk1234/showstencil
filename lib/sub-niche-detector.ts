@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase'
+import { logError } from '@/lib/logger'
 
 // Constructed lazily on the first call rather than at module load. The
 // Anthropic SDK captures its fetch implementation at construction time —
@@ -143,12 +144,26 @@ export async function detectAndSaveSubNiche(
     return { status: 'user_not_found' }
   }
 
-  const { data: videos } = await supabase
+  const { data: videos, error: videosError } = await supabase
     .from('videos')
-    .select('title, description')
+    .select('title')
     .eq('user_id', user.id)
     .order('published_at', { ascending: false })
     .limit(20)
+
+  // Capture the previously-discarded query error. A failure here (missing
+  // column, RLS, type mismatch) would silently degrade `videos` to null and
+  // masquerade as `insufficient_videos` below — log it loudly instead.
+  if (videosError) {
+    console.error('[sub-niche] video fetch failed:', videosError.message)
+    void logError({
+      userId,
+      route: 'lib/sub-niche-detector/detectAndSaveSubNiche',
+      error: videosError.message,
+      details: { error_code: videosError.code },
+      severity: 'warn',
+    })
+  }
 
   // Phase 7: when the user has manually picked 'other' OR supplied a
   // freeform niche_description (via the manual picker), feed the description
@@ -166,7 +181,7 @@ export async function detectAndSaveSubNiche(
     nicheDescription: hasDescription ? user.niche_description : null,
   })
 
-  await supabase
+  const { error: updateError } = await supabase
     .from('users')
     .update({
       sub_niche: result.sub_niche,
@@ -175,6 +190,19 @@ export async function detectAndSaveSubNiche(
       sub_niche_detected_at: new Date().toISOString(),
     })
     .eq('id', user.id)
+
+  // Capture the previously-discarded update result so an RLS/type/constraint
+  // failure logs instead of silently no-op-ing while we still return 'ok'.
+  if (updateError) {
+    console.error('[sub-niche] users update failed:', updateError.message)
+    void logError({
+      userId,
+      route: 'lib/sub-niche-detector/detectAndSaveSubNiche',
+      error: updateError.message,
+      details: { error_code: updateError.code },
+      severity: 'warn',
+    })
+  }
 
   return { status: 'ok', result }
 }
