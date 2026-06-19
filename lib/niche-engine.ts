@@ -1296,22 +1296,6 @@ export async function detectAndAssignCompetitors(
       severity: 'warn',
     });
   }
-
-  // Fire-and-forget: trigger refresh-data immediately so videos, metrics, and snapshots
-  // populate for all new competitors without waiting for the 3am cron.
-  // Never blocks the sync response — errors are logged only.
-  if (succeeded > 0) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
-    const cronSecret = process.env.CRON_SECRET ?? '';
-    fetch(`${appUrl}/api/cron/refresh-data`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${cronSecret}` },
-    }).then((res) => {
-      console.log(`[niche-engine] Immediate competitor sync triggered: ${res.status}`);
-    }).catch((err) => {
-      console.error(`[niche-engine] Failed to trigger immediate competitor sync:`, err);
-    });
-  }
 }
 
 // TEST — remove before prod
