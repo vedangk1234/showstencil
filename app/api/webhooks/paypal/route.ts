@@ -11,8 +11,10 @@ import * as Sentry from '@sentry/nextjs'
 import {
   getUserByPayPalSubscriptionId,
   updateUserSubscription,
+  recordWebhookEvent,
 } from '@/lib/db'
 import { verifyWebhookSignature, getPlanFromPayPalPlanId, getSubscriptionDetails } from '@/lib/paypal'
+import { enforceCompetitorLimit } from '@/lib/plan-limits'
 import { logError } from '@/lib/logger'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
@@ -34,24 +36,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       'paypal-transmission-time': req.headers.get('paypal-transmission-time'),
     }
 
-    const isSandbox = process.env.PAYPAL_MODE === 'sandbox'
-    if (!isSandbox) {
-      const isValid = await verifyWebhookSignature(headers, rawBody)
-      if (!isValid) {
-        console.error('[paypal-webhook] Signature verification failed')
-        void logError({
-          route: 'api/webhooks/paypal',
-          error: 'Signature verification failed',
-          details: {
-            transmission_id: headers['paypal-transmission-id'],
-            auth_algo: headers['paypal-auth-algo'],
-          },
-          severity: 'warn',
-        })
-        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-      }
-    } else {
-      console.log('[paypal-webhook] Sandbox mode — skipping signature verification')
+    // Always verify — PayPal supports webhook signature verification in both sandbox
+    // and live (each environment has its own PAYPAL_WEBHOOK_ID). Never skip: skipping
+    // in sandbox left an unauthenticated path, and the old mode branch was part of the
+    // PAYPAL_MODE-literal drift. Requires PAYPAL_WEBHOOK_ID to be set for the active mode.
+    const isValid = await verifyWebhookSignature(headers, rawBody)
+    if (!isValid) {
+      console.error('[paypal-webhook] Signature verification failed')
+      void logError({
+        route: 'api/webhooks/paypal',
+        error: 'Signature verification failed',
+        details: {
+          transmission_id: headers['paypal-transmission-id'],
+          auth_algo: headers['paypal-auth-algo'],
+        },
+        severity: 'warn',
+      })
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
 
     let event: Record<string, unknown>
@@ -69,10 +70,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const eventType = event.event_type as string | undefined
     const resource = event.resource as Record<string, unknown> | undefined
+    const eventId = event.id as string | undefined
 
     if (!eventType || !resource) {
       console.error('[paypal-webhook] Missing event_type or resource')
       return NextResponse.json({ received: true })
+    }
+
+    // Idempotency: record the event id first; a duplicate/replayed delivery is
+    // acknowledged without re-applying the state change (e.g. a replayed EXPIRED
+    // after a re-activation must not downgrade a paying user).
+    if (eventId) {
+      const { isNew } = await recordWebhookEvent(eventId, eventType)
+      if (!isNew) {
+        console.log(`[paypal-webhook] Duplicate event ${eventId} (${eventType}) — skipping`)
+        return NextResponse.json({ received: true, duplicate: true })
+      }
     }
 
     console.log(`[paypal-webhook] Received event: ${eventType}`)
@@ -103,6 +116,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       const ok = await updateUserSubscription(customId, {
         paypal_subscription_id: subscriptionId,
+        pending_paypal_subscription_id: null, // clear the in-flight marker
         subscription_status: 'active',
         subscription_plan: plan,
         current_period_end: nextBillingTime,
@@ -182,6 +196,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         console.error(`[paypal-webhook] Failed to expire subscription for user ${user.id}`)
       } else {
         console.log(`[paypal-webhook] EXPIRED: user ${user.id} downgraded to free`)
+        // Free plan allows fewer competitors — deactivate the excess.
+        await enforceCompetitorLimit(user.id)
       }
     }
 
@@ -237,27 +253,59 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // -------------------------------------------------------------------------
-    // BILLING.SUBSCRIPTION.RE-ACTIVATED
-    // PayPal retried the failed payment and succeeded — restore active status.
-    // custom_id is the userId set at subscription creation (same as ACTIVATED).
-    // Plan and subscription ID are already set; only status needs updating.
+    // BILLING.SUBSCRIPTION.UPDATED
+    // Fires when a subscription's plan changes (e.g. a Pro→Starter downgrade via
+    // the revise API). Resolve the new plan from resource.plan_id and, if it changed,
+    // update subscription_plan and prune competitors above the new plan's limit.
     // -------------------------------------------------------------------------
-    else if (eventType === 'BILLING.SUBSCRIPTION.RE-ACTIVATED') {
-      const customId = (resource.custom_id as string | null) ?? null
+    else if (eventType === 'BILLING.SUBSCRIPTION.UPDATED') {
+      const subscriptionId = String(resource.id)
+      const planId = resource.plan_id ? String(resource.plan_id) : null
+      const plan = planId ? getPlanFromPayPalPlanId(planId) : null
 
-      if (!customId) {
-        console.error('[paypal-webhook] RE-ACTIVATED: no custom_id (user_id) in resource')
+      const user = await getUserByPayPalSubscriptionId(subscriptionId)
+      if (!user) {
+        console.error(`[paypal-webhook] UPDATED: no user found for sub ${subscriptionId}`)
         return NextResponse.json({ received: true })
       }
 
-      const ok = await updateUserSubscription(customId, {
+      if (plan && plan !== user.subscription_plan) {
+        const ok = await updateUserSubscription(user.id, { subscription_plan: plan })
+        if (!ok) {
+          console.error(`[paypal-webhook] Failed to update plan for user ${user.id}`)
+        } else {
+          console.log(`[paypal-webhook] UPDATED: user ${user.id} plan → ${plan}`)
+          // Downgrade may put the user over the new plan's competitor limit.
+          await enforceCompetitorLimit(user.id)
+        }
+      } else {
+        console.log(`[paypal-webhook] UPDATED: no plan change for user ${user.id}`)
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // BILLING.SUBSCRIPTION.RE-ACTIVATED
+    // PayPal retried the failed payment and succeeded — restore active status.
+    // Look up by subscription id (resource.id) — PayPal does not reliably include
+    // custom_id on re-activation events, so the old custom_id lookup silently no-op'd.
+    // -------------------------------------------------------------------------
+    else if (eventType === 'BILLING.SUBSCRIPTION.RE-ACTIVATED') {
+      const subscriptionId = String(resource.id)
+
+      const user = await getUserByPayPalSubscriptionId(subscriptionId)
+      if (!user) {
+        console.error(`[paypal-webhook] RE-ACTIVATED: no user found for sub ${subscriptionId}`)
+        return NextResponse.json({ received: true })
+      }
+
+      const ok = await updateUserSubscription(user.id, {
         subscription_status: 'active',
       })
 
       if (!ok) {
-        console.error(`[paypal-webhook] Failed to re-activate subscription for user ${customId}`)
+        console.error(`[paypal-webhook] Failed to re-activate subscription for user ${user.id}`)
       } else {
-        console.log(`[paypal-webhook] RE-ACTIVATED: user ${customId}`)
+        console.log(`[paypal-webhook] RE-ACTIVATED: user ${user.id}`)
       }
     }
 
