@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/nextjs'
 import { createServiceClient } from '@/lib/supabase'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
 import { getCachedInsights } from '@/lib/db'
+import { checkRateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logger'
 
 export async function POST(request: Request) {
@@ -20,6 +21,14 @@ export async function POST(request: Request) {
 
     const supabase = createServiceClient()
     const userId = session.user.id
+
+    // Rate limit — insight generation calls Claude; cap abuse.
+    if (!(await checkRateLimit(userId, 'competitors/insights'))) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait a moment and try again.' },
+        { status: 429 },
+      )
+    }
 
     // Verify ownership BEFORE checking the cache — prevents IDOR where any
     // authenticated user could read cached insights for a competitor they don't own.

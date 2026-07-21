@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
+import { assertCron } from '@/lib/cron-auth'
 import { createServiceClient } from '@/lib/supabase'
 import { deleteThumbnailFromStorage } from '@/lib/thumbnail-storage'
 import { logError } from '@/lib/logger'
 
 // Runs daily at 2 AM UTC — purges expired searched_channels_cache rows
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = assertCron(request)
+  if (denied) return denied
 
   const supabase = createServiceClient()
 
@@ -82,6 +81,29 @@ export async function GET(request: Request) {
       route: 'api/cron/cache-cleanup',
       error: 'Failed to delete old thumbnail_jobs rows',
       details: { supabaseError: jobsErr.message },
+      severity: 'error',
+    })
+  }
+
+  // Reap stuck thumbnail jobs: anything still 'pending'/'processing' after 30 minutes
+  // is never completing (the after() closure died). Flip to 'failed' so the client
+  // stops polling — runs before the 24h delete above removes them entirely.
+  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000)
+  const { count: reapedJobs, error: reapErr } = await supabase
+    .from('thumbnail_jobs')
+    .update(
+      { status: 'failed', error_message: 'Timed out — generation did not complete.', completed_at: new Date().toISOString() },
+      { count: 'exact' },
+    )
+    .in('status', ['pending', 'processing'])
+    .lt('created_at', thirtyMinAgo.toISOString())
+
+  if (reapErr) {
+    console.error('[cron/cache-cleanup] stuck job reap error:', reapErr)
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to reap stuck thumbnail_jobs',
+      details: { supabaseError: reapErr.message },
       severity: 'error',
     })
   }
@@ -216,6 +238,7 @@ export async function GET(request: Request) {
     deleted_history_rows: deletedHistory ?? 0,
     deleted_competitor_rows: deletedCompetitors ?? 0,
     deleted_thumbnail_jobs: deletedJobs ?? 0,
+    reaped_stuck_jobs: reapedJobs ?? 0,
     deleted_thumbnails: deletedThumbnails,
     ...(new Date().getUTCDay() === 1 && {
       insights_wiped: insightsWiped,

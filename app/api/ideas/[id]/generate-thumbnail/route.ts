@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
-import { canGenerateThumbnail } from '@/lib/access'
+import { reserveThumbnail, releaseThumbnail } from '@/lib/access'
 import { createThumbnailJob, updateThumbnailJob } from '@/lib/db'
+import { checkRateLimit } from '@/lib/rate-limit'
 import { generateThumbnail } from '@/lib/gemini-image'
 import { uploadThumbnail } from '@/lib/thumbnail-storage'
 import { padToSixteenNine } from '@/lib/image-utils'
 import { logError } from '@/lib/logger'
+
+// ~2MB decoded ceiling on the incoming photo (base64 length ≈ 4/3 × decoded bytes).
+const MAX_PHOTO_DECODED_BYTES = 2 * 1024 * 1024
 
 type PhotoSource = 'camera' | 'upload' | 'google_profile' | 'no_photo'
 
@@ -44,19 +48,29 @@ export async function POST(
     return NextResponse.json({ thumbnail_url: idea.thumbnail_image_url, cached: true })
   }
 
-  // Plan gate + quota check
-  const quota = await canGenerateThumbnail(userId)
-  if (!quota.allowed) {
-    const resetDate = quota.quotaResetAt
-      ? new Date(quota.quotaResetAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
-      : null
-    const errorMsg =
-      quota.reason === 'upgrade_required'
-        ? 'Upgrade to Starter to generate thumbnails.'
-        : `You've used all ${quota.quotaLimit} thumbnails this month.${resetDate ? ` Resets ${resetDate}.` : ''}`
+  // In-flight guard: if a generation is already pending for this idea, return that
+  // job instead of starting a second one (two rapid POSTs would both reserve quota
+  // and both call Gemini). Return the existing job without consuming rate/quota.
+  const { data: pendingJob } = await supabase
+    .from('thumbnail_jobs')
+    .select('id')
+    .eq('idea_id', ideaId)
+    .eq('user_id', userId)
+    .in('status', ['pending', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (pendingJob) {
+    return NextResponse.json({ job_id: pendingJob.id, pending: true })
+  }
+
+  // Rate limit (per-user, per-endpoint) — protects Gemini spend from scripted loops.
+  const withinLimit = await checkRateLimit(userId, 'ideas/generate-thumbnail')
+  if (!withinLimit) {
     return NextResponse.json(
-      { error: errorMsg, reason: quota.reason, quotaUsed: quota.quotaUsed, quotaLimit: quota.quotaLimit, quotaResetAt: quota.quotaResetAt },
-      { status: 403 },
+      { error: 'Too many requests. Please wait a moment and try again.' },
+      { status: 429 },
     )
   }
 
@@ -75,6 +89,34 @@ export async function POST(
   }
   if ((photo_source === 'camera' || photo_source === 'upload') && !photo_data) {
     return NextResponse.json({ error: 'photo_data is required for camera and upload sources' }, { status: 400 })
+  }
+
+  // Body-size cap: reject oversized inline photos before touching Gemini.
+  if (photo_data) {
+    const decodedBytes = Math.floor((photo_data.length * 3) / 4)
+    if (decodedBytes > MAX_PHOTO_DECODED_BYTES) {
+      return NextResponse.json(
+        { error: 'Photo is too large. Please use an image under 2MB.' },
+        { status: 413 },
+      )
+    }
+  }
+
+  // Atomic quota reservation (plan gate + under-limit increment in one RPC). Released
+  // in the background closure if generation fails, so a failure never burns quota.
+  const quota = await reserveThumbnail(userId)
+  if (!quota.allowed) {
+    const resetDate = quota.quotaResetAt
+      ? new Date(quota.quotaResetAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+      : null
+    const errorMsg =
+      quota.reason === 'upgrade_required'
+        ? 'Upgrade to Starter to generate thumbnails.'
+        : `You've used all ${quota.quotaLimit} thumbnails this month.${resetDate ? ` Resets ${resetDate}.` : ''}`
+    return NextResponse.json(
+      { error: errorMsg, reason: quota.reason, quotaUsed: quota.quotaUsed, quotaLimit: quota.quotaLimit, quotaResetAt: quota.quotaResetAt },
+      { status: 403 },
+    )
   }
 
   // For google_profile: fetch and convert to base64 server-side
@@ -108,6 +150,7 @@ export async function POST(
   // Create the job row (returns immediately)
   const jobId = await createThumbnailJob({ userId, ideaId })
   if (!jobId) {
+    await releaseThumbnail(userId) // refund the reservation we just took
     void logError({ userId, route: 'api/ideas/[id]/generate-thumbnail', error: 'Failed to create thumbnail job', details: { idea_id: ideaId } })
     return NextResponse.json({ error: 'Failed to create thumbnail job' }, { status: 500 })
   }
@@ -115,7 +158,6 @@ export async function POST(
   // Capture all needed values for the background closure
   const ideaTitle = idea.title as string
   const thumbnailBrief = idea.thumbnail_description as string
-  const quotaUsed = quota.quotaUsed
   const capturedPhotoBase64 = resolvedPhotoBase64
   const capturedPhotoIsDefault = photoIsDefault
   const capturedPhotoSource = photo_source
@@ -132,6 +174,7 @@ export async function POST(
 
       if ('error' in result) {
         console.error('[generate-thumbnail] Gemini error:', result.error)
+        await releaseThumbnail(userId) // refund — generation failed
         await updateThumbnailJob(jobId, { status: 'failed', error_message: result.error })
         return
       }
@@ -142,11 +185,13 @@ export async function POST(
       const publicUrl = await uploadThumbnail({ userId, ideaId, imageBase64: paddedBase64 })
 
       if (!publicUrl) {
+        await releaseThumbnail(userId) // refund — upload failed
         await updateThumbnailJob(jobId, { status: 'failed', error_message: 'Failed to upload generated image.' })
         return
       }
 
-      // Persist thumbnail fields on the idea
+      // Persist thumbnail fields on the idea. Quota was already reserved atomically
+      // up-front (reserveThumbnail) — no manual increment here.
       await supabase
         .from('ideas')
         .update({
@@ -156,16 +201,11 @@ export async function POST(
         })
         .eq('id', ideaId)
 
-      // Increment quota counter
-      await supabase
-        .from('users')
-        .update({ thumbnails_generated_this_month: quotaUsed + 1 })
-        .eq('id', userId)
-
       await updateThumbnailJob(jobId, { status: 'completed', thumbnail_url: publicUrl })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unexpected error'
       console.error('[generate-thumbnail] after() error:', msg)
+      await releaseThumbnail(userId) // refund — unexpected failure
       await updateThumbnailJob(jobId, { status: 'failed', error_message: msg })
     }
   })

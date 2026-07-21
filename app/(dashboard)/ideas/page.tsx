@@ -37,22 +37,25 @@ export default async function IdeasPage() {
   try {
     const supabase = createServiceClient()
 
-    // Load plan info, niche, recent ideas, thumbnail quota, and refresh flag in parallel
-    const [userRow, ideas, ideaLimit, thumbnailQuota, ideasRefreshAvailable] = await Promise.all([
-      supabase
-        .from('users')
-        .select('subscription_status, subscription_plan, trial_ends_at, niche_id')
-        .eq('id', userId)
-        .single()
-        .then((r) => r.data),
-      getRecentIdeasBatch(userId),
-      getIdeaLimit(userId),
-      canGenerateThumbnail(userId),
-      getIdeasRefreshAvailable(userId),
-    ])
+    // Resolve the plan ONCE, then pass it into the gate helpers so they don't each
+    // re-query it (getIdeaLimit + canGenerateThumbnail both accept a prefetched plan).
+    const userRow = await supabase
+      .from('users')
+      .select('subscription_status, subscription_plan, trial_ends_at, niche_id')
+      .eq('id', userId)
+      .single()
+      .then((r) => r.data)
 
     const plan = resolvePlan(userRow)
     const nicheId = userRow?.niche_id ?? 'finance'
+
+    // Load recent ideas, limits, thumbnail quota, and refresh flag in parallel
+    const [ideas, ideaLimit, thumbnailQuota, ideasRefreshAvailable] = await Promise.all([
+      getRecentIdeasBatch(userId),
+      getIdeaLimit(userId, plan),
+      canGenerateThumbnail(userId, plan),
+      getIdeasRefreshAvailable(userId),
+    ])
 
     // Google profile photo from session (set by NextAuth from Google OAuth)
     const googleProfilePhotoUrl = (session.user.image as string | null | undefined) ?? null

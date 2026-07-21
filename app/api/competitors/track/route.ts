@@ -7,6 +7,8 @@ import { calculateSubNicheSimilarity } from '@/lib/sub-niche-detector'
 import { getCompetitorFullProfile } from '@/lib/youtube-data'
 import { updateCompetitorMetrics, saveCompetitorSnapshot } from '@/lib/db'
 import { calculateCompetitorMetrics } from '@/lib/competitor-metrics'
+import { upsertCompetitorVideos } from '@/lib/db-videos'
+import { checkRateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logger'
 
 export async function POST(request: Request) {
@@ -14,6 +16,14 @@ export async function POST(request: Request) {
     const session = await auth()
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Rate limit — track fetches a full YouTube profile (quota) + runs detection.
+    if (!(await checkRateLimit(session.user.id, 'competitors/track'))) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait a moment and try again.' },
+        { status: 429 },
+      )
     }
 
     const { channel_id } = await request.json()
@@ -270,17 +280,11 @@ export async function POST(request: Request) {
       })
 
       if (videoRows.length > 0) {
-        console.log('[track] Inserting', videoRows.length, 'videos for competitor', competitorId)
-        // Delete any existing videos first (no unique constraint on competitor_id,youtube_video_id)
-        await supabase.from('competitor_videos').delete().eq('competitor_id', competitorId)
-        const { error: videoError } = await supabase
-          .from('competitor_videos')
-          .insert(videoRows)
-        if (videoError) {
-          console.error('[track] Failed to insert competitor videos:', videoError.message)
-        } else {
-          console.log('[track] Videos inserted successfully')
-        }
+        // Upsert on the (competitor_id, youtube_video_id) unique constraint.
+        await upsertCompetitorVideos(competitorId, videoRows, {
+          route: 'api/competitors/track',
+          userId: session.user.id,
+        })
       }
 
       const metrics = calculateCompetitorMetrics(videoRows, fullProfile.channel.videoCount)
