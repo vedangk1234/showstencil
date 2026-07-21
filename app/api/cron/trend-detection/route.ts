@@ -16,16 +16,16 @@
  */
 
 import { NextResponse } from 'next/server'
+import { assertCron } from '@/lib/cron-auth'
 import { createServiceClient } from '@/lib/supabase'
 import { getRecentVideos, getVideoDetails } from '@/lib/youtube-data'
+import { upsertCompetitorVideos, type CompetitorVideoUpsertRow } from '@/lib/db-videos'
 import { logError } from '@/lib/logger'
 
 export async function GET(request: Request) {
   // ── Auth check ─────────────────────────────────────────────────────────────
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = assertCron(request)
+  if (denied) return denied
 
   const supabase = createServiceClient()
 
@@ -97,6 +97,7 @@ export async function GET(request: Request) {
 
       const now = Date.now()
 
+      const videoRows: CompetitorVideoUpsertRow[] = []
       for (const summary of summaries) {
         const detail = detailMap.get(summary.videoId)
         if (!detail) continue
@@ -111,38 +112,30 @@ export async function GET(request: Request) {
 
         if (isViral) viralVideosFound++
 
-        // Upsert into competitor_videos — update if row exists, insert if not
-        const { error: upsertError } = await supabase
-          .from('competitor_videos')
-          .upsert(
-            {
-              competitor_id: competitor.id,
-              youtube_video_id: summary.videoId,
-              title: detail.title,
-              published_at: summary.publishedAt,
-              view_count: detail.viewCount,
-              like_count: detail.likeCount,
-              comment_count: detail.commentCount,
-              duration_seconds: detail.duration,
-              thumbnail_url: detail.thumbnailHighRes || detail.thumbnailDefault || null,
-              velocity_score: Math.round(velocity * 100) / 100,
-              performance_vs_avg:
-                channelAvgViews > 0
-                  ? Math.round((detail.viewCount / channelAvgViews) * 100) / 100
-                  : null,
-              is_viral: isViral,
-              synced_at: new Date().toISOString(),
-            },
-            { onConflict: 'competitor_id,youtube_video_id' },
-          )
-
-        if (upsertError) {
-          console.error(
-            `[cron/trend-detection] Upsert error for video ${summary.videoId}:`,
-            upsertError.message,
-          )
-        }
+        videoRows.push({
+          competitor_id: competitor.id,
+          youtube_video_id: summary.videoId,
+          title: detail.title,
+          published_at: summary.publishedAt,
+          view_count: detail.viewCount,
+          like_count: detail.likeCount,
+          comment_count: detail.commentCount,
+          duration_seconds: detail.duration,
+          thumbnail_url: detail.thumbnailHighRes || detail.thumbnailDefault || null,
+          velocity_score: Math.round(velocity * 100) / 100,
+          performance_vs_avg:
+            channelAvgViews > 0
+              ? Math.round((detail.viewCount / channelAvgViews) * 100) / 100
+              : null,
+          is_viral: isViral,
+          synced_at: new Date().toISOString(),
+        })
       }
+
+      // Single batched upsert per competitor (shared helper, checks + logs errors).
+      await upsertCompetitorVideos(competitor.id, videoRows, {
+        route: 'cron/trend-detection',
+      })
 
       channelsChecked++
       console.log(
