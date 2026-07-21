@@ -22,7 +22,7 @@ Currently the download button opens the image in a new tab / full screen instead
 YouTube thumbnails must be 16:9 ratio (1280x720px). The current Gemini output is square (1:1). This means if a user puts it on YouTube it will be cropped or letterboxed. Fix: either prompt Gemini with explicit 1280x720 or 16:9 instructions, or post-process the image to crop/pad to 16:9 before showing it to the user. Until fixed, add a warning label under the thumbnail: "Note: resize to 1280×720 before uploading to YouTube."
 
 PAYMENTS
-[ ] Switch PayPal from sandbox to live mode (set PAYPAL_MODE=live in Vercel)
+[ ] Switch PayPal from sandbox to live mode (set PAYPAL_MODE=live in Vercel — canonical values are exactly 'live' | 'sandbox'; any other value now fails boot via validateEnv)
 [ ] Complete PayPal business account verification if not done
 [ ] Run scripts/create-paypal-plans.ts against live PayPal to create real plan IDs
 [ ] Update PAYPAL_STARTER_PLAN_ID and PAYPAL_PRO_PLAN_ID in Vercel env vars
