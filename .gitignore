@@ -37,6 +37,11 @@ yarn-error.log*
 .env.local
 !.env.example
 
+# unused root drop-ins (marketing images + niche source text; real assets live in public/)
+/Niche.txt
+/ShowStencilInstagramViralVidoesTemplate.png
+/ShowStencilLogo.jpg
+
 # vercel
 .vercel
 
