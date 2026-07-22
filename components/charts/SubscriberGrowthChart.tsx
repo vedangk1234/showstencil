@@ -30,7 +30,7 @@ function entityColor(competitor: Competitor): string {
 }
 
 function tierLabel(competitor: Competitor): string {
-  if (competitor.is_dominator) return 'Dominator'
+  if (competitor.is_dominator) return 'Top Performer'
   if (!competitor.is_auto_detected) return 'Manual'
   return `Tier ${competitor.tier}`
 }

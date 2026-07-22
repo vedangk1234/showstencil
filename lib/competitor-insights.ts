@@ -3,6 +3,7 @@ import type { Insight } from '@/types'
 import { createServiceClient } from '@/lib/supabase'
 import { saveCompetitorInsights } from '@/lib/db'
 import { sanitizeForPrompt, MAX_CHANNEL_NAME_LEN, MAX_VIDEO_TITLE_LEN } from '@/lib/utils'
+import { AI_COMPLIANCE_GUARDRAILS } from '@/lib/ai-guardrails'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -470,6 +471,7 @@ Generate exactly 6-8 insights. No more, no less.
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 3500,
+      system: AI_COMPLIANCE_GUARDRAILS,
       messages: [{ role: 'user', content: prompt }],
     })
 

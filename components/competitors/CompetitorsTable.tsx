@@ -115,7 +115,7 @@ export function CompetitorsTable({ competitors, user, planLimits, lockedUntil, l
           { key: 'all', label: `All (${counts.all})` },
           { key: 'tier1', label: `Tier 1 (${counts.tier1})` },
           { key: 'tier2', label: `Tier 2 (${counts.tier2})` },
-          { key: 'dominator', label: `Dominator (${counts.dominator})` },
+          { key: 'dominator', label: `Top Performer (${counts.dominator})` },
         ] as const).map(({ key, label }) => (
           <button
             key={key}
@@ -290,7 +290,7 @@ function EmptyState({ filter }: { filter: FilterType }) {
   const label =
     filter === 'tier1' ? 'Tier 1' :
     filter === 'tier2' ? 'Tier 2' :
-    filter === 'dominator' ? 'Dominator' :
+    filter === 'dominator' ? 'Top Performer' :
     null
 
   if (filter === 'all') {

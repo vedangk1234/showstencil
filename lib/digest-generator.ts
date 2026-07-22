@@ -28,6 +28,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createServiceClient } from '@/lib/supabase';
 import { getUser, getChannelSnapshots, getVideos, getWorstVideos, getCompetitorMetricsFromDB, countVideosLast30Days } from '@/lib/db';
 import { calculateGapScore } from '@/lib/gap-scorer';
+import { AI_COMPLIANCE_GUARDRAILS } from '@/lib/ai-guardrails';
 import { getTrendingInNiche, findUncoveredTopics } from '@/lib/trend-detector';
 import { sendWeeklyDigest } from '@/lib/email';
 import { logError } from '@/lib/logger';
@@ -317,7 +318,7 @@ For each idea, use this exact format:
       model: 'claude-sonnet-4-6',
       max_tokens: 1500,
       temperature: 0.7,
-      system: systemPrompt,
+      system: `${systemPrompt}\n\n${AI_COMPLIANCE_GUARDRAILS}`,
       messages: [{ role: 'user', content: userPrompt }],
     });
 

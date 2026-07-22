@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase'
 import { logError } from '@/lib/logger'
+import { AI_COMPLIANCE_GUARDRAILS } from '@/lib/ai-guardrails'
 
 // Constructed lazily on the first call rather than at module load. The
 // Anthropic SDK captures its fetch implementation at construction time —
@@ -87,6 +88,7 @@ Return ONLY the JSON object, nothing else.`
     const response = await getAnthropic().messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 500,
+      system: AI_COMPLIANCE_GUARDRAILS,
       messages: [{ role: 'user', content: prompt }],
     })
 

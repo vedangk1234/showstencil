@@ -537,7 +537,7 @@ export default function LandingPage() {
                 <div className="step-meta">
                   <span className="chip">Niche detection</span>
                   <span className="chip">Competitor tracking</span>
-                  <span className="chip on">Tier 1 · Tier 2 · Dominator</span>
+                  <span className="chip on">Tier 1 · Tier 2 · Top Performer</span>
                 </div>
               </div>
             </div>

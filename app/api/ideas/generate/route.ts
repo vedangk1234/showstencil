@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase'
 import Anthropic from '@anthropic-ai/sdk'
 import * as Sentry from '@sentry/nextjs'
 import { generateAndCacheInsightsForCompetitor } from '@/lib/competitor-insights'
+import { AI_COMPLIANCE_GUARDRAILS } from '@/lib/ai-guardrails'
 import { deleteAllUserThumbnails, setIdeasRefreshAvailable } from '@/lib/db'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { sanitizeForPrompt, MAX_CHANNEL_NAME_LEN, MAX_VIDEO_TITLE_LEN } from '@/lib/utils'
@@ -407,7 +408,7 @@ Respond in this exact JSON structure with no text before or after:
       model: 'claude-sonnet-4-6',
       max_tokens: 5000, // bumped from 3500 — hook_2 + hook_3 per idea adds ~150-200 output tokens each
       temperature: 0.7,
-      system: systemPrompt,
+      system: `${systemPrompt}\n\n${AI_COMPLIANCE_GUARDRAILS}`,
       messages: [{ role: 'user', content: userPrompt }],
     })
 

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality } from '@google/genai'
+import { AI_COMPLIANCE_GUARDRAILS } from '@/lib/ai-guardrails'
 
 export interface GenerateThumbnailParams {
   userPhotoBase64: string | null
@@ -53,7 +54,9 @@ DESIGN REQUIREMENTS:
 - Vibrant, intentional, professional — avoid generic stock-photo aesthetics
 - Avoid: cluttered backgrounds, tiny text, weak contrast, distorted faces
 
-OUTPUT: Generate one final YouTube thumbnail image matching the brief above.`
+OUTPUT: Generate one final YouTube thumbnail image matching the brief above.
+
+${AI_COMPLIANCE_GUARDRAILS}`
 
   const parts: Part[] = []
 

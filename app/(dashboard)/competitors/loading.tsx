@@ -20,7 +20,7 @@ export default function CompetitorsLoading() {
 
       {/* Filter tabs */}
       <div className="flex gap-2">
-        {['All', 'Tier 1', 'Tier 2', 'Dominator'].map((t) => (
+        {['All', 'Tier 1', 'Tier 2', 'Top Performer'].map((t) => (
           <Skel key={t} className="h-7 w-20 rounded-full" />
         ))}
       </div>
