@@ -9,6 +9,14 @@
  * calculateRevenuePotential and getBenchmarkComparison fall back to a generic
  * mid-range default (CPM 5 / RPM 2.5) and log a warn-level entry, so a stale
  * or third-party slug never crashes a UI render.
+ *
+ * ⚠️ COMPLIANCE (YouTube API Terms III.E.4h): these figures are external market
+ * assumptions (industry CPM/RPM, sponsorship rates, niche-average views), NOT
+ * YouTube API data. This module is currently NOT wired to any user-facing surface
+ * (referenced only by scripts/ and the inline tests below). Do NOT surface any
+ * value from here in the product without visibly disclosing it as a ShowStencil
+ * estimate derived from industry assumptions — never present it as a YouTube
+ * metric or combine it with API data as though it were one.
  */
 
 import type { ValidNicheSlug } from './niches';
