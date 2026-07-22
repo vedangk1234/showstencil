@@ -121,6 +121,43 @@ export default function TermsPage() {
           ← Back to settings
         </Link>
         <div
+          style={{
+            border: '1px solid #27272a',
+            background: '#111113',
+            borderRadius: 8,
+            padding: '16px 20px',
+            marginBottom: 32,
+            fontSize: 14,
+            lineHeight: 1.6,
+            color: '#d1d5db',
+          }}
+        >
+          <strong style={{ color: '#ffffff', display: 'block', marginBottom: 6 }}>
+            YouTube API Services
+          </strong>
+          ShowStencil uses YouTube API Services. By using ShowStencil, you agree
+          to be bound by the{' '}
+          <a
+            href="https://www.youtube.com/t/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#60a5fa', textDecoration: 'underline' }}
+          >
+            YouTube Terms of Service
+          </a>
+          . Your use of Google/YouTube data through ShowStencil is also governed
+          by the{' '}
+          <a
+            href="https://policies.google.com/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#60a5fa', textDecoration: 'underline' }}
+          >
+            Google Privacy Policy
+          </a>
+          .
+        </div>
+        <div
           id="terms-content"
           dangerouslySetInnerHTML={{ __html: termlyHtml }}
         />
