@@ -140,6 +140,121 @@ export async function GET(request: Request) {
     deletedThumbnails++
   }
 
+  // ── YouTube token & data lifecycle (Terms III.E.4 a–g) ────────────────────
+  const now = Date.now()
+  const thirtyDaysAgoIso = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const ninetyDaysAgoIso = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString()
+  // 36 months ≈ retention ceiling for statistical snapshots (accepted amendment).
+  const thirtySixMonthsAgo = new Date(now)
+  thirtySixMonthsAgo.setMonth(thirtySixMonthsAgo.getMonth() - 36)
+  const thirtySixMonthsAgoIso = thirtySixMonthsAgo.toISOString()
+
+  // (1) Revoked users: 30 days after a user revoked access (invalid_grant on
+  //     refresh → youtube_revoked_at stamped), purge all their YouTube-derived
+  //     data. The account row is kept (tokens are already null); only derived
+  //     data is deleted. Idempotent — re-runs delete nothing once purged.
+  let purgedRevokedUsers = 0
+  const { data: revokedUsers, error: revokedErr } = await supabase
+    .from('users')
+    .select('id')
+    .not('youtube_revoked_at', 'is', null)
+    .lt('youtube_revoked_at', thirtyDaysAgoIso)
+
+  if (revokedErr) {
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to query revoked users for data purge',
+      details: { supabaseError: revokedErr.message },
+      severity: 'error',
+    })
+  }
+
+  for (const u of revokedUsers ?? []) {
+    const uid = u.id as string
+    try {
+      const { data: compRows } = await supabase
+        .from('competitors')
+        .select('id')
+        .eq('user_id', uid)
+      const compIds = (compRows ?? []).map((c) => c.id)
+      if (compIds.length > 0) {
+        await supabase.from('competitor_videos').delete().in('competitor_id', compIds)
+        await supabase.from('competitor_snapshots').delete().in('competitor_id', compIds)
+      }
+      await supabase.from('competitors').delete().eq('user_id', uid)
+      await supabase.from('channel_snapshots').delete().eq('user_id', uid)
+      await supabase.from('videos').delete().eq('user_id', uid)
+      await supabase.from('gap_scores').delete().eq('user_id', uid)
+      await supabase.from('digests').delete().eq('user_id', uid)
+      await supabase.from('trends').delete().eq('user_id', uid)
+      purgedRevokedUsers++
+    } catch (err) {
+      void logError({
+        userId: uid,
+        route: 'api/cron/cache-cleanup',
+        error: 'Failed to purge revoked user YouTube-derived data',
+        details: { supabaseError: err instanceof Error ? err.message : String(err) },
+        severity: 'error',
+      })
+    }
+  }
+
+  // (2) Inactive users: 90+ days since last active → null tokens so background
+  //     sync stops. Account + data are kept; the user re-consents on return.
+  //     Rows with a null last_active_at (never recorded) are intentionally not
+  //     matched, so this never fires on users we simply have no signal for.
+  const { count: deactivatedTokens, error: inactiveErr } = await supabase
+    .from('users')
+    .update(
+      {
+        youtube_access_token: null,
+        youtube_refresh_token: null,
+        token_expires_at: null,
+        updated_at: new Date().toISOString(),
+      },
+      { count: 'exact' },
+    )
+    .not('last_active_at', 'is', null)
+    .lt('last_active_at', ninetyDaysAgoIso)
+    .not('youtube_access_token', 'is', null)
+
+  if (inactiveErr) {
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to null tokens for inactive users',
+      details: { supabaseError: inactiveErr.message },
+      severity: 'error',
+    })
+  }
+
+  // (3) Stale competitor metadata safety net: refresh crons re-sync active
+  //     competitors well within 30 days (synced_at is refreshed on each upsert),
+  //     so anything older than 30 days is orphaned/stale — delete it.
+  const { count: deletedStaleVideos, error: staleVidErr } = await supabase
+    .from('competitor_videos')
+    .delete({ count: 'exact' })
+    .lt('synced_at', thirtyDaysAgoIso)
+
+  if (staleVidErr) {
+    void logError({
+      route: 'api/cron/cache-cleanup',
+      error: 'Failed to delete stale competitor_videos rows',
+      details: { supabaseError: staleVidErr.message },
+      severity: 'error',
+    })
+  }
+
+  // (4) Statistical snapshots retained up to 36 months, then deleted.
+  const { count: deletedOldCompSnapshots } = await supabase
+    .from('competitor_snapshots')
+    .delete({ count: 'exact' })
+    .lt('created_at', thirtySixMonthsAgoIso)
+
+  const { count: deletedOldChannelSnapshots } = await supabase
+    .from('channel_snapshots')
+    .delete({ count: 'exact' })
+    .lt('created_at', thirtySixMonthsAgoIso)
+
   // ── Monday-only: wipe competitor insights cache + enable ideas refresh ────
   // Runs only on Mondays so users get fresh competitor-data-driven insights
   // and the Generate Ideas button re-enables once per week.
@@ -240,6 +355,11 @@ export async function GET(request: Request) {
     deleted_thumbnail_jobs: deletedJobs ?? 0,
     reaped_stuck_jobs: reapedJobs ?? 0,
     deleted_thumbnails: deletedThumbnails,
+    purged_revoked_users: purgedRevokedUsers,
+    deactivated_inactive_tokens: deactivatedTokens ?? 0,
+    deleted_stale_competitor_videos: deletedStaleVideos ?? 0,
+    deleted_old_competitor_snapshots: deletedOldCompSnapshots ?? 0,
+    deleted_old_channel_snapshots: deletedOldChannelSnapshots ?? 0,
     ...(new Date().getUTCDay() === 1 && {
       insights_wiped: insightsWiped,
       users_ideas_enabled: usersEnabled,
