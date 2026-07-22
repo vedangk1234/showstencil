@@ -94,7 +94,7 @@ function parseSections(content: string): { header: string; body: string }[] {
 // ─── Competitor helpers ───────────────────────────────────────────────────────
 
 function tierBadgeLabel(tier: number | null, isDominator: boolean): string {
-  if (isDominator || tier === 3) return 'Dominator'
+  if (isDominator || tier === 3) return 'Top Performer'
   if (tier === 2) return 'Tier 2'
   return 'Tier 1'
 }
@@ -268,6 +268,13 @@ function ExpandedDigest({
           <MetricCell label="Uploads/mo" value={km.uploadsPerMonth.toFixed(1)} />
         )}
       </div>
+      {(km.overallGapScore != null || (km.revenueGap != null && km.revenueGap > 0)) && (
+        <p className="font-mono text-[10px] text-zinc-600 -mt-6 leading-snug">
+          Gap Score and Revenue Gap are calculated by ShowStencil from YouTube API
+          data and are not YouTube metrics. Revenue Gap is a ShowStencil estimate
+          using industry CPM assumptions — not YouTube data or a Google-approved figure.
+        </p>
+      )}
 
       {/* Sections with competitor block injected and ideas removed */}
       {sectionElements}

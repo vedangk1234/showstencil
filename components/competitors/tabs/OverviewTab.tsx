@@ -46,7 +46,8 @@ const NOT_PUBLIC = (
       Not publicly available
     </div>
     <div style={{ color: '#333333', fontSize: 10, fontFamily: 'monospace', marginTop: 2 }}>
-      YouTube doesn&apos;t expose this for other channels
+      YouTube doesn&apos;t expose this for other channels. ShowStencil uses a
+      niche-based estimate for scoring only — not a YouTube metric.
     </div>
   </div>
 )
@@ -200,7 +201,7 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
         </span>
       ),
       gap: null,
-      note: 'Videos with 3× normal velocity in first 48h',
+      note: 'Videos with 3× normal velocity in first 48h · ShowStencil analysis',
     },
   ]
 
@@ -282,6 +283,11 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
           </div>
         ))}
       </div>
+
+      <p style={{ color: '#444444', fontSize: 10, fontFamily: 'monospace', marginTop: 10, lineHeight: 1.5 }}>
+        The &ldquo;Gap&rdquo; column and the viral count are calculated by
+        ShowStencil from YouTube API data — they are not YouTube metrics.
+      </p>
     </div>
   )
 }
