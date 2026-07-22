@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { createServiceClient } from '@/lib/supabase'
+import { upsertCompetitorVideos } from '@/lib/db-videos'
 import { logError } from '@/lib/logger'
 
 function parseDuration(duration: string): number {
@@ -85,18 +86,11 @@ export async function POST(
       }
     })
 
-    const { error } = await supabase
-      .from('competitor_videos')
-      .upsert(videos, { onConflict: 'youtube_video_id' })
-
-    if (error) {
-      console.error('[competitors/[id]/sync] DB error:', error.message)
-      void logError({
-        userId: session.user.id,
-        route: 'api/competitors/[id]/sync',
-        error: error.message,
-        details: { competitor_id: id, channel_name: competitor.channel_name },
-      })
+    const { ok } = await upsertCompetitorVideos(id, videos, {
+      route: 'api/competitors/[id]/sync',
+      userId: session.user.id,
+    })
+    if (!ok) {
       return NextResponse.json({ error: 'Failed to save videos' }, { status: 500 })
     }
 

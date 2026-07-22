@@ -86,6 +86,54 @@ export async function canAddAutoCompetitor(
   return { allowed: true }
 }
 
+/**
+ * Enforce the plan's total-competitor limit by deactivating the excess.
+ *
+ * Called when a user's plan drops (Pro→Starter downgrade activating, or expiry to free)
+ * so a downgraded user does not keep paying less while crons still sync their full former
+ * competitor set. Keeps the oldest-added `totalCompetitors` active competitors and sets
+ * `is_active = false` on the rest (never deletes — a re-upgrade can reactivate them; and
+ * crons already filter on is_active=true). Idempotent: a no-op when already within limit.
+ *
+ * @returns number of competitors deactivated.
+ */
+export async function enforceCompetitorLimit(userId: string): Promise<number> {
+  const supabase = createServiceClient()
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('subscription_plan')
+    .eq('id', userId)
+    .single()
+
+  const limit = getPlanLimits(user?.subscription_plan).totalCompetitors
+
+  const { data: active, error } = await supabase
+    .from('competitors')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+
+  if (error || !active || active.length <= limit) return 0
+
+  const excessIds = active.slice(limit).map((c) => c.id)
+  const { error: updateError } = await supabase
+    .from('competitors')
+    .update({ is_active: false })
+    .in('id', excessIds)
+
+  if (updateError) {
+    console.error('[plan-limits] enforceCompetitorLimit deactivate error:', updateError.message)
+    return 0
+  }
+
+  console.log(
+    `[plan-limits] enforceCompetitorLimit: deactivated ${excessIds.length} competitor(s) for user ${userId} (limit ${limit})`,
+  )
+  return excessIds.length
+}
+
 // Searches are now unlimited — only tracking (adding as competitor) is quota-gated.
 export async function canSearchThisMonth(
   _userId: string,

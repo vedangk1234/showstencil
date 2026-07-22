@@ -7,23 +7,48 @@
 
 import { logError } from '@/lib/logger'
 
+/**
+ * Single source of truth for PayPal environment selection.
+ *
+ * PAYPAL_MODE has exactly two valid values: 'live' | 'sandbox' (matching
+ * .env.example and the deferred.md runbook). Previously three files compared it
+ * against three different literals ('production', 'live', 'sandbox'), so no single
+ * env value made create/cancel, downgrade, and webhook-verify agree. Everything now
+ * routes through isLivePaypal() / getPaypalBaseUrl().
+ *
+ * Throws on any other value so a typo fails loudly instead of silently routing real
+ * subscriptions to sandbox.
+ */
+export function isLivePaypal(): boolean {
+  const mode = process.env.PAYPAL_MODE
+  if (mode !== 'live' && mode !== 'sandbox') {
+    throw new Error(`PAYPAL_MODE must be 'live' or 'sandbox', got '${mode ?? '(unset)'}'`)
+  }
+  return mode === 'live'
+}
+
 // Read at request time so Vercel env var changes take effect without redeploy.
-function getBaseUrl(): string {
-  return process.env.PAYPAL_MODE === 'production'
-    ? 'https://api-m.paypal.com'
-    : 'https://api-m.sandbox.paypal.com'
+export function getPaypalBaseUrl(): string {
+  return isLivePaypal() ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com'
 }
 
 // ---------------------------------------------------------------------------
 // OAuth token
 // ---------------------------------------------------------------------------
 
+// In-module OAuth token cache. PayPal client-credentials tokens live ~9h; we reuse
+// the token until 5 minutes before expiry instead of minting a fresh one per call.
+let cachedToken: { token: string; expiresAtMs: number } | null = null
+const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000
+
 export async function getAccessToken(): Promise<string> {
+  if (cachedToken && cachedToken.expiresAtMs - TOKEN_REFRESH_SKEW_MS > Date.now()) {
+    return cachedToken.token
+  }
+
   const clientId = process.env.PAYPAL_CLIENT_ID
   const secret = process.env.PAYPAL_SECRET
-  const base = getBaseUrl()
-
-  console.log('[paypal/getAccessToken] PAYPAL_MODE:', process.env.PAYPAL_MODE ?? 'not set', '→ base URL:', base, '| clientId:', clientId ? `${clientId.slice(0, 8)}…` : 'MISSING', '| secret:', secret ? 'set' : 'MISSING')
+  const base = getPaypalBaseUrl()
 
   if (!clientId || !secret) {
     void logError({
@@ -55,8 +80,9 @@ export async function getAccessToken(): Promise<string> {
     throw new Error(`PayPal OAuth failed (${res.status}): ${body}`)
   }
 
-  const data = (await res.json()) as { access_token: string }
-  console.log('[paypal/getAccessToken] token obtained successfully')
+  const data = (await res.json()) as { access_token: string; expires_in?: number }
+  const ttlMs = (data.expires_in ?? 32400) * 1000 // default 9h if PayPal omits it
+  cachedToken = { token: data.access_token, expiresAtMs: Date.now() + ttlMs }
   return data.access_token
 }
 
@@ -94,9 +120,8 @@ export async function createSubscription(
     },
   }
 
-  console.log('[paypal/createSubscription] POST', `${getBaseUrl()}/v1/billing/subscriptions`, JSON.stringify(requestBody))
-
-  const res = await fetch(`${getBaseUrl()}/v1/billing/subscriptions`, {
+  // Do not log requestBody — it contains the subscriber email + user id.
+  const res = await fetch(`${getPaypalBaseUrl()}/v1/billing/subscriptions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -142,7 +167,7 @@ export async function cancelSubscription(
   const token = await getAccessToken()
 
   const res = await fetch(
-    `${getBaseUrl()}/v1/billing/subscriptions/${subscriptionId}/cancel`,
+    `${getPaypalBaseUrl()}/v1/billing/subscriptions/${subscriptionId}/cancel`,
     {
       method: 'POST',
       headers: {
@@ -177,6 +202,7 @@ export interface PayPalSubscription {
   subscriber: {
     email_address: string | null
   } | null
+  links?: Array<{ rel: string; href: string }>
 }
 
 export async function getSubscriptionDetails(
@@ -185,7 +211,7 @@ export async function getSubscriptionDetails(
   const token = await getAccessToken()
 
   const res = await fetch(
-    `${getBaseUrl()}/v1/billing/subscriptions/${subscriptionId}`,
+    `${getPaypalBaseUrl()}/v1/billing/subscriptions/${subscriptionId}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     }
@@ -236,19 +262,10 @@ export async function verifyWebhookSignature(
     webhook_event: JSON.parse(body),
   }
 
-  console.log('[paypal/verify] Sending verification request to', `${getBaseUrl()}/v1/notifications/verify-webhook-signature`)
-  console.log('[paypal/verify] Headers received:', {
-    'paypal-auth-algo': headers['paypal-auth-algo'],
-    'paypal-cert-url': headers['paypal-cert-url'],
-    'paypal-transmission-id': headers['paypal-transmission-id'],
-    'paypal-transmission-sig': headers['paypal-transmission-sig'] ? `${headers['paypal-transmission-sig'].slice(0, 20)}…` : null,
-    'paypal-transmission-time': headers['paypal-transmission-time'],
-  })
-  console.log('[paypal/verify] webhook_id being used:', webhookId)
-
+  // Do not log verification headers / signatures / webhook id.
   try {
     const res = await fetch(
-      `${getBaseUrl()}/v1/notifications/verify-webhook-signature`,
+      `${getPaypalBaseUrl()}/v1/notifications/verify-webhook-signature`,
       {
         method: 'POST',
         headers: {
@@ -260,8 +277,6 @@ export async function verifyWebhookSignature(
     )
 
     const responseText = await res.text()
-    console.log('[paypal/verify] PayPal verification API response status:', res.status)
-    console.log('[paypal/verify] PayPal verification API response body:', responseText)
 
     if (!res.ok) {
       console.error('[paypal/verify] PayPal verification API returned non-2xx:', res.status, responseText)
@@ -282,7 +297,6 @@ export async function verifyWebhookSignature(
       return false
     }
 
-    console.log('[paypal/verify] verification_status:', data.verification_status)
     return data.verification_status === 'SUCCESS'
   } catch (err) {
     console.error('[paypal/verify] Exception during verification fetch:', err)

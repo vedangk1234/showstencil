@@ -21,9 +21,11 @@ export interface User {
   subscription_status: SubscriptionStatus;
   subscription_plan: PlanType;
   paypal_subscription_id: string | null;
+  pending_paypal_subscription_id: string | null;
   trial_ends_at: string | null;
   current_period_end: string | null;
   onboarding_completed: boolean;
+  last_active_at: string | null;
   thumbnails_generated_this_month: number;
   thumbnails_quota_reset_at: string | null;
   created_at: string;

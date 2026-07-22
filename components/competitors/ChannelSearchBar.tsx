@@ -119,7 +119,7 @@ export function ChannelSearchBar({ planLimits, plan, lockedUntil, lockedChannelN
 
   const tierLabel =
     result?.tier === 3
-      ? 'Dominator'
+      ? 'Top Performer'
       : result?.tier === 2
       ? 'Tier 2 · Aspirational'
       : 'Tier 1 · Similar'

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { assertCron } from '@/lib/cron-auth'
 import { createServiceClient } from '@/lib/supabase'
 import { findDominatorsForUser } from '@/lib/dominator-finder'
 import { logError } from '@/lib/logger'
@@ -7,10 +8,8 @@ import { logError } from '@/lib/logger'
 // Once assigned, the dominator is never replaced by this cron — their data is updated daily
 // by /api/cron/refresh-data like any other competitor.
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = assertCron(request)
+  if (denied) return denied
 
   const supabase = createServiceClient()
 
@@ -83,9 +82,11 @@ export async function GET(request: Request) {
         continue
       }
 
-      // Insert new dominators (no deactivation of existing — there are none)
+      // Insert new dominators (no deactivation of existing — there are none).
+      // Upserts on competitors_user_channel_unique (user_id, youtube_channel_id),
+      // codified in migration 20260721000000. The error is checked, not swallowed.
       for (const dom of dominators) {
-        await supabase.from('competitors').upsert(
+        const { error: upsertErr } = await supabase.from('competitors').upsert(
           {
             user_id: user.id,
             youtube_channel_id: dom.channelId,
@@ -104,6 +105,21 @@ export async function GET(request: Request) {
           },
           { onConflict: 'user_id,youtube_channel_id' },
         )
+
+        if (upsertErr) {
+          console.error(
+            `[cron/dominator-refresh] competitors upsert error for user ${user.id}:`,
+            upsertErr.message,
+          )
+          void logError({
+            userId: user.id,
+            route: 'api/cron/dominator-refresh',
+            error: `competitors upsert failed: ${upsertErr.message}`,
+            details: { channel_id: dom.channelId, supabase_code: upsertErr.code ?? null },
+            severity: 'error',
+          })
+          continue
+        }
 
         // Record in dominator_history
         await supabase

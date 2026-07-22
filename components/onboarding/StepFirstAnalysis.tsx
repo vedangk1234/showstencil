@@ -218,6 +218,9 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
           <div className="text-zinc-500 text-xs font-mono">
             higher = more opportunity vs your niche
           </div>
+          <div className="text-zinc-600 text-[10px] font-mono mt-2">
+            Calculated by ShowStencil — not a YouTube metric
+          </div>
         </div>
       )}
 

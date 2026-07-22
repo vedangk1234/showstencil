@@ -25,7 +25,7 @@ function formatSubs(n: number | null): string {
 
 function tierLabel(c: CompetitorRow): { label: string; color: string } {
   if (c.is_dominator || c.tier === 3) {
-    return { label: 'Dominator', color: 'text-amber-400 border-amber-400/40 bg-amber-400/10' }
+    return { label: 'Top Performer', color: 'text-amber-400 border-amber-400/40 bg-amber-400/10' }
   }
   if (c.tier === 2) {
     return { label: 'Tier 2', color: 'text-purple-400 border-purple-400/40 bg-purple-400/10' }

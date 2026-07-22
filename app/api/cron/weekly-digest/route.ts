@@ -10,16 +10,15 @@
  */
 
 import { NextResponse } from 'next/server'
+import { assertCron } from '@/lib/cron-auth'
 import { createServiceClient } from '@/lib/supabase'
 import { generateDigest } from '@/lib/digest-generator'
 import { logError } from '@/lib/logger'
 
 export async function GET(request: Request) {
   // ── Auth check ─────────────────────────────────────────────────────────────
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = assertCron(request)
+  if (denied) return denied
 
   const supabase = createServiceClient()
 

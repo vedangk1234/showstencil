@@ -43,6 +43,108 @@ export default function PrivacyPage() {
         >
           ← Back to settings
         </Link>
+        <section
+          style={{
+            border: '1px solid #27272a',
+            background: '#111113',
+            borderRadius: 8,
+            padding: '20px 24px',
+            marginBottom: 32,
+            fontSize: 14,
+            lineHeight: 1.7,
+            color: '#d1d5db',
+          }}
+        >
+          <h2 style={{ color: '#ffffff', fontSize: 19, fontWeight: 700, marginBottom: 12 }}>
+            YouTube API Services
+          </h2>
+          <p style={{ marginBottom: 12 }}>
+            ShowStencil uses{' '}
+            <a
+              href="https://developers.google.com/youtube"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#60a5fa', textDecoration: 'underline' }}
+            >
+              YouTube API Services
+            </a>
+            . By using ShowStencil you agree to be bound by the{' '}
+            <a
+              href="https://www.youtube.com/t/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#60a5fa', textDecoration: 'underline' }}
+            >
+              YouTube Terms of Service
+            </a>
+            , and your data is handled in accordance with the{' '}
+            <a
+              href="https://policies.google.com/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#60a5fa', textDecoration: 'underline' }}
+            >
+              Google Privacy Policy
+            </a>
+            .
+          </p>
+          <p style={{ marginBottom: 8, color: '#ffffff', fontWeight: 600 }}>
+            YouTube data we access
+          </p>
+          <ul style={{ listStyle: 'disc', paddingLeft: 20, marginBottom: 12 }}>
+            <li>
+              Your own YouTube channel analytics and statistics (views, watch time,
+              subscribers, revenue estimates and other performance metrics for the
+              channel you connect).
+            </li>
+            <li>
+              Metadata for videos on your channel (titles, descriptions, thumbnails,
+              publish dates and public statistics).
+            </li>
+            <li>
+              Publicly available data about competitor channels and their videos that
+              we identify in your niche (public channel and video statistics and
+              metadata only — never their private analytics).
+            </li>
+          </ul>
+          <p style={{ marginBottom: 8, color: '#ffffff', fontWeight: 600 }}>
+            How long we store it
+          </p>
+          <p style={{ marginBottom: 12 }}>
+            We store YouTube API data only as long as needed to provide the Service.
+            Competitor video and channel metadata is refreshed and replaced on an
+            ongoing basis and stale copies are removed within 30 days. Statistical
+            snapshots used to show trends over time are retained for up to 36 months.
+            If you disconnect your channel, revoke access, or your account is inactive
+            for an extended period, we delete the associated YouTube-derived data as
+            described below.
+          </p>
+          <p style={{ marginBottom: 8, color: '#ffffff', fontWeight: 600 }}>
+            How to revoke access
+          </p>
+          <p>
+            You can revoke ShowStencil&apos;s access to your Google/YouTube account at
+            any time through your{' '}
+            <a
+              href="https://myaccount.google.com/permissions"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#60a5fa', textDecoration: 'underline' }}
+            >
+              Google Account security settings
+            </a>
+            . You may also delete your ShowStencil account (and all associated YouTube
+            data) from your{' '}
+            <a
+              href="/settings"
+              style={{ color: '#60a5fa', textDecoration: 'underline' }}
+            >
+              account settings
+            </a>
+            . Revoking access stops all future data collection and triggers deletion of
+            your stored YouTube-derived data.
+          </p>
+        </section>
         <div
           dangerouslySetInnerHTML={{ __html: termlyHtml }}
         />

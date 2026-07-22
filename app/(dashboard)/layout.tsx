@@ -3,6 +3,8 @@ import { auth } from '@/auth'
 import { redirect } from 'next/navigation'
 import Image from 'next/image'
 import { getUser } from '@/lib/db'
+import { createServiceClient } from '@/lib/supabase'
+import { logError } from '@/lib/logger'
 import { SyncProvider } from '@/components/sync-context'
 import SidebarNav from '@/components/dashboard/SidebarNav'
 import SignOutButton from '@/components/dashboard/SignOutButton'
@@ -18,6 +20,24 @@ export default async function DashboardLayout({
   const user = await getUser(session.user.id)
 
   if (!user) redirect('/login')
+
+  // Stamp last_active_at so background sync + token retention only apply to
+  // users who still actively use the app (YouTube ToS III.E.4). Non-blocking:
+  // failures are logged and never break page render.
+  try {
+    const supabase = createServiceClient()
+    await supabase
+      .from('users')
+      .update({ last_active_at: new Date().toISOString() })
+      .eq('id', session.user.id)
+  } catch (err) {
+    void logError({
+      userId: session.user.id,
+      route: 'app/(dashboard)/layout',
+      error: err instanceof Error ? err.message : String(err),
+      severity: 'warn',
+    })
+  }
 
   if (!user.onboarding_completed) redirect('/onboarding')
 

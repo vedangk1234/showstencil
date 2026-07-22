@@ -63,6 +63,29 @@ async function refreshAccessToken(
     if (!res.ok || !data.access_token) {
       const errorBody = data.error_description ?? data.error ?? 'unknown'
       console.error(`[sync] Token refresh failed: ${errorBody}`)
+
+      // `invalid_grant` means the user revoked ShowStencil's access (or the grant
+      // expired). This is terminal — retrying daily will never succeed. Null the
+      // stored tokens so no further sync attempts fire, and stamp youtube_revoked_at
+      // so the daily cache-cleanup cron purges this user's YouTube-derived data
+      // within 30 days. Compliance: YouTube API Services Terms III.E.4(a-g).
+      const isRevoked = data.error === 'invalid_grant'
+      if (isRevoked) {
+        const supabase = createServiceClient()
+        await supabase
+          .from('users')
+          .update({
+            youtube_access_token: null,
+            youtube_refresh_token: null,
+            token_expires_at: null,
+            youtube_revoked_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId)
+          .is('youtube_revoked_at', null) // don't overwrite an earlier revocation timestamp
+        console.warn(`[sync] User ${userId} revoked access (invalid_grant) — tokens cleared, data purge scheduled`)
+      }
+
       void logError({
         userId,
         route: 'lib/sync-logic/refreshAccessToken',
@@ -72,8 +95,9 @@ async function refreshAccessToken(
           has_refresh_token: true,
           http_status: httpStatus,
           refresh_error: String(errorBody).slice(0, 500),
+          revoked: isRevoked,
         },
-        severity: 'error',
+        severity: isRevoked ? 'warn' : 'error',
       })
       return null
     }

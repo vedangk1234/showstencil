@@ -15,6 +15,7 @@ import {
 import BlackholeLoader from '@/components/BlackholeLoader'
 import { useSyncStatus } from '@/components/sync-context'
 import SubscriberGrowthChart from '@/components/charts/SubscriberGrowthChart'
+import MetricDisclosure, { type MetricDisclosureVariant } from '@/components/MetricDisclosure'
 import type {
   User,
   ChannelSnapshot,
@@ -413,6 +414,7 @@ export default function DashboardClient({
               <div className="font-mono text-[11px] text-stencil-ink3 max-w-[24ch]">
                 higher = bigger opportunity vs. your niche
               </div>
+              <MetricDisclosure variant="score" className="max-w-[28ch] mt-[2px]" />
             </div>
 
             {gapRows.length > 0 && (
@@ -432,6 +434,7 @@ export default function DashboardClient({
                     <span className="text-right text-stencil-ink font-medium">{row.score}</span>
                   </div>
                 ))}
+                <MetricDisclosure variant="score" className="mt-[4px]" />
               </div>
             )}
           </div>
@@ -484,8 +487,9 @@ export default function DashboardClient({
           delta={revDelta >= 0 ? `▲ ${fmtMoney(revDelta)}` : `▼ ${fmtMoney(Math.abs(revDelta))}`}
           up={revDelta >= 0}
           context={gapScore?.estimated_revenue_gap != null && gapScore.estimated_revenue_gap > 0
-            ? `${fmtMoney(gapScore.estimated_revenue_gap)}/mo gap to niche`
+            ? `${fmtMoney(gapScore.estimated_revenue_gap)}/mo gap · ShowStencil CPM estimate`
             : undefined}
+          disclosure="youtubeEstimate"
         />
       </div>
 
@@ -716,8 +720,8 @@ function Pill({ children }: { children: React.ReactNode }) {
 }
 
 function Metric({
-  k, v, unit, delta, up, context,
-}: { k: string; v: string; unit?: string; delta: string; up: boolean; context?: string }) {
+  k, v, unit, delta, up, context, disclosure,
+}: { k: string; v: string; unit?: string; delta: string; up: boolean; context?: string; disclosure?: MetricDisclosureVariant }) {
   return (
     <div className="p-[16px_18px] border-r border-stencil-line flex flex-col gap-[6px]">
       <Eyebrow>{k}</Eyebrow>
@@ -735,6 +739,7 @@ function Metric({
           {context}
         </div>
       )}
+      {disclosure && <MetricDisclosure variant={disclosure} className="mt-[2px]" />}
     </div>
   )
 }

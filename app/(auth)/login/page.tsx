@@ -37,6 +37,19 @@ export default function LoginPage() {
             We request read-only access to your YouTube channel and analytics.
             We never post or change anything on your behalf.
           </p>
+
+          <p className="mt-3 text-center text-xs text-zinc-500 leading-relaxed">
+            ShowStencil uses YouTube API Services. By continuing you agree to the{' '}
+            <a
+              href="https://www.youtube.com/t/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-400 hover:text-white underline transition-colors"
+            >
+              YouTube Terms of Service
+            </a>
+            .
+          </p>
         </div>
 
         <p className="mt-6 text-center text-xs text-zinc-600">

@@ -61,20 +61,17 @@ export async function saveChannelSnapshot(
   const supabase = createServiceClient()
   const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD UTC
 
-  // Preserve fields that come from seeded/Data-API data, not the Analytics API
+  // Preserve fields that come from seeded/Data-API data, not the Analytics API.
+  // We read the existing row to merge, then upsert on the (user_id, snapshot_date)
+  // unique constraint (channel_snapshots_user_date_unique, migration 20260721000000).
+  // Upsert (not delete+insert) so a concurrent manual sync racing the cron can never
+  // leave a window with no row for today, nor create a duplicate row.
   const { data: existing } = await supabase
     .from('channel_snapshots')
     .select('subscriber_count, videos_count, avg_views_per_video, avg_ctr, avg_view_duration_seconds, avg_like_ratio, rpm, momentum_score, estimated_monthly_revenue')
     .eq('user_id', userId)
     .eq('snapshot_date', today)
     .maybeSingle()
-
-  // Delete existing snapshot for today before inserting fresh data
-  await supabase
-    .from('channel_snapshots')
-    .delete()
-    .eq('user_id', userId)
-    .eq('snapshot_date', today)
 
   const estimatedMonthlyRevenue = data.estimatedRevenue > 0
     ? data.estimatedRevenue / 3
@@ -116,7 +113,7 @@ export async function saveChannelSnapshot(
 
   let insertError: { message: string; code?: string } | null = null
   try {
-    const { error } = await supabase.from('channel_snapshots').insert({
+    const { error } = await supabase.from('channel_snapshots').upsert({
       user_id: userId,
       snapshot_date: today,
       // subscriber_count comes from the YouTube Data API (getChannelStats), not the Analytics API.
@@ -136,7 +133,7 @@ export async function saveChannelSnapshot(
       age_gender_breakdown: extras?.demographics?.ageGender ?? null,
       top_countries: extras?.demographics?.topCountries ?? null,
       traffic_sources: extras?.trafficSources?.length ? extras.trafficSources : null,
-    })
+    }, { onConflict: 'user_id,snapshot_date' })
     insertError = error
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -787,6 +784,7 @@ export async function updateUserSubscription(
   userId: string,
   data: {
     paypal_subscription_id?: string
+    pending_paypal_subscription_id?: string | null
     subscription_status?: string
     subscription_plan?: string
     trial_ends_at?: string | null
@@ -806,6 +804,38 @@ export async function updateUserSubscription(
   }
 
   return true
+}
+
+// ---------------------------------------------------------------------------
+// recordWebhookEvent — PayPal webhook idempotency
+// ---------------------------------------------------------------------------
+
+/**
+ * Records a PayPal webhook event id in paypal_webhook_events.
+ * Returns { isNew: true } if this event has not been seen before (caller should
+ * process it), or { isNew: false } if it is a duplicate/replay (caller should skip).
+ *
+ * Insert-first pattern: a unique-violation (23505) on the event_id primary key means
+ * we've already processed this delivery. Any other DB error is treated as "new" so a
+ * transient logging failure never silently drops a real event (fail-open on the dedup,
+ * since the individual handlers are themselves idempotent-ish state sets).
+ */
+export async function recordWebhookEvent(
+  eventId: string,
+  eventType: string | null,
+): Promise<{ isNew: boolean }> {
+  const supabase = createServiceClient()
+  const { error } = await supabase
+    .from('paypal_webhook_events')
+    .insert({ event_id: eventId, event_type: eventType })
+
+  if (error) {
+    if (error.code === '23505') {
+      return { isNew: false }
+    }
+    console.error('[db] recordWebhookEvent error:', error.message)
+  }
+  return { isNew: true }
 }
 
 // ---------------------------------------------------------------------------

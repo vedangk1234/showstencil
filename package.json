@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "echo \"No automated test runner wired yet. See docs/testing.md — the integration suite currently targets prod Supabase and must be pointed at a branch/local instance first.\" && exit 1",
     "find-youtuber": "npx tsx --env-file=.env.local scripts/find-youtuber.ts"
   },
   "dependencies": {
@@ -15,7 +16,6 @@
     "@google/genai": "^1.51.0",
     "@react-email/components": "^1.0.12",
     "@sentry/nextjs": "^10.51.0",
-    "@stripe/stripe-js": "^9.1.0",
     "@supabase/supabase-js": "^2.103.0",
     "@vercel/analytics": "^2.0.1",
     "clsx": "^2.1.1",
@@ -28,7 +28,6 @@
     "recharts": "^3.8.1",
     "resend": "^6.10.0",
     "sharp": "^0.34.5",
-    "stripe": "^22.0.1",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
@@ -36,7 +35,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/sharp": "^0.31.1",
     "babel-plugin-react-compiler": "1.0.0",
     "dotenv-cli": "^11.0.0",
     "eslint": "^9",

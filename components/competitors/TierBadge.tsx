@@ -18,7 +18,7 @@ export function TierBadge({ tier, isDominator }: TierBadgeProps) {
         fontFamily: 'var(--font-geist-mono, monospace)',
         letterSpacing: '0.05em',
       }}>
-        Dominator
+        Top Performer
       </span>
     )
   }

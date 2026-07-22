@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
+import { assertCron } from '@/lib/cron-auth'
 import { createServiceClient } from '@/lib/supabase'
 import { detectSubNiche } from '@/lib/sub-niche-detector'
 import { logError } from '@/lib/logger'
 
 // Runs daily at 5 AM UTC — detects/refreshes sub-niche for users missing it
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = assertCron(request)
+  if (denied) return denied
 
   const supabase = createServiceClient()
 

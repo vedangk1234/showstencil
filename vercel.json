@@ -1,36 +1,48 @@
 {
   "crons": [
     {
-      "path": "/api/cron/weekly-digest",
-      "schedule": "0 9 * * 1"
+      "path": "/api/cron/cache-cleanup",
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/cron/refresh-data",
       "schedule": "0 3 * * *"
     },
     {
-      "path": "/api/cron/trend-detection",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/cache-cleanup",
-      "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/sub-niche-detection",
-      "schedule": "0 5 * * *"
+      "path": "/api/cron/user-sync",
+      "schedule": "30 3 * * *"
     },
     {
       "path": "/api/cron/dominator-refresh",
       "schedule": "0 4 * * *"
     },
     {
-      "path": "/api/cron/user-sync",
-      "schedule": "0 3 * * *"
+      "path": "/api/cron/sub-niche-detection",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/trend-detection",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-digest",
+      "schedule": "0 9 * * 1"
     }
   ],
   "functions": {
     "app/api/ideas/[id]/generate-thumbnail/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/user-sync/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/refresh-data/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/trend-detection/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/dominator-refresh/route.ts": {
       "maxDuration": 60
     }
   }

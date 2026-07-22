@@ -155,9 +155,20 @@ export function CompetitorAnalysis({
             />
           </div>
           {(competitor.sub_niche as string | null) && matchLabel && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#555555', fontSize: 12, fontFamily: 'monospace' }}>
-                {competitor.sub_niche as string}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  color: '#a78bfa',
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  background: '#120a28',
+                  border: '1px solid #3a1d6e',
+                  borderRadius: 3,
+                  padding: '2px 7px',
+                }}
+                title="ShowStencil sub-niche analysis — not a YouTube category"
+              >
+                ShowStencil sub-niche: {competitor.sub_niche as string}
               </span>
               <span
                 style={{

@@ -16,9 +16,16 @@
  */
 
 import { NextResponse } from 'next/server'
+import { assertCron } from '@/lib/cron-auth'
 import { createServiceClient } from '@/lib/supabase'
 import { saveCompetitorSnapshot, updateCompetitorMetrics, getRecentCompetitorVideos } from '@/lib/db'
-import { logError } from '@/lib/logger'
+import { upsertCompetitorVideos } from '@/lib/db-videos'
+import { logError, logSyncAttempt } from '@/lib/logger'
+
+// Bounded-batch tuning, sized for the 60s maxDuration (vercel.json). Users beyond
+// BATCH_LIMIT, or reached after TIME_BUDGET_MS, are counted as skipped (not killed).
+const BATCH_LIMIT = 25
+const TIME_BUDGET_MS = 50_000
 
 function parseDuration(duration: string): number {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
@@ -72,7 +79,6 @@ function calculateCompetitorMetrics(
 }
 
 async function syncCompetitorVideos(
-  supabase: ReturnType<typeof createServiceClient>,
   competitorId: string,
   youtubeChannelId: string,
 ): Promise<{ success: boolean; count: number; subscriberCount: number | null; totalViews: number | null }> {
@@ -151,12 +157,10 @@ async function syncCompetitorVideos(
       }
     })
 
-    const { error } = await supabase
-      .from('competitor_videos')
-      .upsert(videos, { onConflict: 'competitor_id,youtube_video_id' })
-
-    if (error) {
-      console.error(`[syncCompetitorVideos] Upsert error for ${competitorId}:`, error.message)
+    const { ok } = await upsertCompetitorVideos(competitorId, videos, {
+      route: 'api/cron/refresh-data',
+    })
+    if (!ok) {
       return { success: false, count: 0, subscriberCount, totalViews }
     }
 
@@ -171,10 +175,8 @@ export async function GET(request: Request) {
   const startMs = Date.now()
 
   // ── Auth check ─────────────────────────────────────────────────────────────
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = assertCron(request)
+  if (denied) return denied
 
   const supabase = createServiceClient()
   console.log('[cron/refresh-data] Starting daily refresh')
@@ -186,6 +188,8 @@ export async function GET(request: Request) {
     .eq('onboarding_completed', true)
     .in('subscription_status', ['on_trial', 'active', 'past_due'])
     .not('youtube_access_token', 'is', null)
+    .order('id', { ascending: true })
+    .limit(BATCH_LIMIT)
 
   if (error) {
     console.error('[cron/refresh-data] Failed to load users:', error.message)
@@ -197,11 +201,23 @@ export async function GET(request: Request) {
   }
 
   const userList = users ?? []
-  console.log(`[cron/refresh-data] Found ${userList.length} active users`)
+  console.log(`[cron/refresh-data] Loaded ${userList.length} users (batch limit ${BATCH_LIMIT})`)
 
   let totalSnapshotsWritten = 0
+  let processedUsers = 0
+  let skippedUsers = 0
 
   for (const user of userList) {
+    // Stop cleanly before the function deadline so a partial run is visible.
+    if (Date.now() - startMs > TIME_BUDGET_MS) {
+      skippedUsers = userList.length - processedUsers
+      console.warn(
+        `[cron/refresh-data] Time budget reached after ${processedUsers} users — skipping remaining ${skippedUsers}`,
+      )
+      break
+    }
+    processedUsers++
+
     // ── Competitor data sync ──────────────────────────────────────────────────
     // Uses YouTube DATA API (public, no OAuth). Always runs regardless of Block 1.
     // Each competitor has its own try/catch — one failure never blocks others.
@@ -228,7 +244,7 @@ export async function GET(request: Request) {
             return
           }
 
-          const syncResult = await syncCompetitorVideos(supabase, comp.id, comp.youtube_channel_id)
+          const syncResult = await syncCompetitorVideos(comp.id, comp.youtube_channel_id)
 
           if (!syncResult.success) {
             console.warn(`[cron/refresh-data]   ${comp.channel_name}: sync failed — skipping snapshot`)
@@ -306,10 +322,21 @@ export async function GET(request: Request) {
   }
 
   const elapsed = Date.now() - startMs
-  console.log(`[cron/refresh-data] Completed in ${elapsed}ms — snapshots: ${totalSnapshotsWritten}`)
+  console.log(
+    `[cron/refresh-data] Completed in ${elapsed}ms — processed: ${processedUsers}, skipped: ${skippedUsers}, snapshots: ${totalSnapshotsWritten}`,
+  )
+
+  // Summary row in sync_logs so a partial/deadline-truncated run is visible in the DB.
+  void logSyncAttempt({
+    status: 200,
+    durationMs: elapsed,
+    message: `[cron/refresh-data] loaded=${userList.length} processed=${processedUsers} skipped=${skippedUsers} snapshots_written=${totalSnapshotsWritten}`,
+  })
 
   return NextResponse.json({
-    processed: userList.length,
+    processed: processedUsers,
+    loaded: userList.length,
+    skipped: skippedUsers,
     snapshots_written: totalSnapshotsWritten,
     elapsed_ms: elapsed,
   })

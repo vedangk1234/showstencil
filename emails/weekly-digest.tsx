@@ -68,7 +68,7 @@ function gapScoreColor(score: number): string {
 }
 
 function emailTierLabel(tier: number | null, isDominator: boolean): string {
-  if (isDominator || tier === 3) return 'Dominator'
+  if (isDominator || tier === 3) return 'Top Performer'
   if (tier === 2) return 'Tier 2'
   return 'Tier 1'
 }
@@ -190,6 +190,13 @@ export function WeeklyDigestEmail({
                 </Section>
               </Column>
             </Row>
+
+            <Text style={disclosureNoteStyle}>
+              The gap score and competitor averages are calculated by ShowStencil
+              from YouTube API data and are not YouTube metrics. The revenue gap is
+              a ShowStencil estimate using industry CPM assumptions — not YouTube
+              data or a Google-approved figure.
+            </Text>
           </Section>
 
           <Hr style={hrStyle} />
@@ -260,6 +267,12 @@ export function WeeklyDigestEmail({
             >
               Terms of Use
             </Link>
+
+            <Text style={footerDisclosureStyle}>
+              Scores and estimates are calculated by ShowStencil from YouTube API
+              data and are not YouTube metrics. ShowStencil uses YouTube API
+              Services.
+            </Text>
 
             <Text style={footerSmallStyle}>ShowStencil · Pune, India</Text>
           </Section>
@@ -389,6 +402,20 @@ const metricDeltaStyle: React.CSSProperties = {
   color: '#6b7280',
   fontSize: '11px',
   margin: '0',
+}
+
+const disclosureNoteStyle: React.CSSProperties = {
+  color: '#9ca3af',
+  fontSize: '10px',
+  lineHeight: '1.5',
+  margin: '16px 0 0',
+}
+
+const footerDisclosureStyle: React.CSSProperties = {
+  color: '#9ca3af',
+  fontSize: '10px',
+  lineHeight: '1.5',
+  margin: '0 0 14px',
 }
 
 // Competitor cards
