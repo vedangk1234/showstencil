@@ -25,7 +25,11 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const rawBody = await req.text()
+    // Capture the raw bytes: the signature is verified against a CRC32 of the
+    // exact received body, so we must not re-serialize it. Decode a UTF-8 copy
+    // for the JSON.parse downstream.
+    const rawBodyBuf = Buffer.from(await req.arrayBuffer())
+    const rawBody = rawBodyBuf.toString('utf8')
 
     // Verify PayPal webhook signature
     const headers: Record<string, string | null> = {
@@ -36,22 +40,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       'paypal-transmission-time': req.headers.get('paypal-transmission-time'),
     }
 
-    // Always verify — PayPal supports webhook signature verification in both sandbox
-    // and live (each environment has its own PAYPAL_WEBHOOK_ID). Never skip: skipping
-    // in sandbox left an unauthenticated path, and the old mode branch was part of the
-    // PAYPAL_MODE-literal drift. Requires PAYPAL_WEBHOOK_ID to be set for the active mode.
-    const isValid = await verifyWebhookSignature(headers, rawBody)
-    if (!isValid) {
-      console.error('[paypal-webhook] Signature verification failed')
+    // Always verify — signatures are checked locally against the PayPal signing
+    // cert (RSA-SHA256), so both sandbox and live are covered by the same code
+    // path (each environment has its own PAYPAL_WEBHOOK_ID). Fail closed: any
+    // non-ok result returns 401. The reason distinguishes forgery
+    // (signature_mismatch) from config/infra failures so alerting can see the
+    // difference — a broken cert fetch or missing webhook id must not look like
+    // a scanner probing the endpoint.
+    const verifyResult = await verifyWebhookSignature(headers, rawBodyBuf)
+    if (!verifyResult.ok) {
+      const { reason } = verifyResult
+      console.error(`[paypal-webhook] Signature verification failed: ${reason}`)
       void logError({
         route: 'api/webhooks/paypal',
-        error: 'Signature verification failed',
+        error: `Signature verification failed: ${reason}`,
         details: {
+          reason,
           transmission_id: headers['paypal-transmission-id'],
           auth_algo: headers['paypal-auth-algo'],
         },
         severity: 'warn',
       })
+      // signature_mismatch is expected noise (scanners, bad actors) — do not page
+      // on it. Every other reason is a config/infrastructure fault we must see.
+      if (reason !== 'signature_mismatch') {
+        Sentry.captureMessage(`PayPal webhook verification failed: ${reason}`, {
+          level: 'error',
+          tags: { route: 'webhooks/paypal', reason },
+        })
+      }
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
 
