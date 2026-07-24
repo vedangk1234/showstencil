@@ -5,6 +5,7 @@
  * All operations switch between sandbox and live based on PAYPAL_MODE env var.
  */
 
+import crypto from 'node:crypto'
 import { logError } from '@/lib/logger'
 
 /**
@@ -226,86 +227,140 @@ export async function getSubscriptionDetails(
 }
 
 // ---------------------------------------------------------------------------
-// Verify webhook signature
+// Verify webhook signature (local RSA-SHA256)
+//
+// PayPal signs each webhook so it can be verified without a runtime call to
+// /v1/notifications/verify-webhook-signature. The signed string is:
+//
+//   transmissionId | transmissionTime | webhookId | crc32(rawBody)
+//
+// verified against the RSA public key in the X.509 cert served at the URL in
+// the paypal-cert-url header. Verifying locally removes the OAuth + verify-API
+// dependency from the payments-critical path.
 // ---------------------------------------------------------------------------
+
+/** Discriminated verification result. The handler 401s on any !ok. */
+export type WebhookVerifyResult =
+  | { ok: true }
+  | {
+      ok: false
+      reason:
+        | 'missing_webhook_id'
+        | 'missing_headers'
+        | 'bad_cert_url'
+        | 'cert_fetch_failed'
+        | 'signature_mismatch'
+    }
+
+// CRC32 (IEEE 802.3, polynomial 0xEDB88320) — table-based, computed inline to
+// avoid adding a dependency to the payments path. Returned UNSIGNED (>>> 0).
+const CRC32_TABLE: Uint32Array = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    }
+    table[n] = c >>> 0
+  }
+  return table
+})()
+
+/** Unsigned 32-bit CRC32 over the exact bytes given. crc32("123456789") === 3421780262. */
+export function crc32Unsigned(buf: Buffer): number {
+  let crc = 0xffffffff
+  for (let i = 0; i < buf.length; i++) {
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ buf[i]) & 0xff]
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+/**
+ * SECURITY CRITICAL. Only fetch a cert URL that is HTTPS and lives on paypal.com
+ * or a paypal.com subdomain. The leading dot in '.paypal.com' matters:
+ * 'evilpaypal.com'.endsWith('paypal.com') is true, but it does NOT end with
+ * '.paypal.com'. Without this guard an attacker supplies their own cert URL and
+ * signs a forged event that verifies against their own key.
+ */
+export function isValidPaypalCertUrl(rawUrl: string): boolean {
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'https:') return false
+  const host = url.hostname.toLowerCase()
+  return host === 'paypal.com' || host.endsWith('.paypal.com')
+}
+
+// In-module PEM cache keyed by cert URL. PayPal rotates signing certs rarely, so
+// the same handful of URLs recur; the bounded map caps memory and evicts oldest.
+const CERT_CACHE_MAX = 16
+const certCache = new Map<string, string>()
+
+async function fetchCertPem(certUrl: string): Promise<string | null> {
+  const cached = certCache.get(certUrl)
+  if (cached) return cached
+
+  try {
+    const res = await fetch(certUrl)
+    if (!res.ok) return null
+    const pem = await res.text()
+    if (!pem.includes('BEGIN CERTIFICATE')) return null
+
+    // Bound the cache — evict the oldest entry (insertion order) when full.
+    if (certCache.size >= CERT_CACHE_MAX) {
+      const oldest = certCache.keys().next().value
+      if (oldest !== undefined) certCache.delete(oldest)
+    }
+    certCache.set(certUrl, pem)
+    return pem
+  } catch {
+    return null
+  }
+}
 
 export async function verifyWebhookSignature(
   headers: Record<string, string | null>,
-  body: string
-): Promise<boolean> {
+  rawBody: Buffer
+): Promise<WebhookVerifyResult> {
   const webhookId = process.env.PAYPAL_WEBHOOK_ID
   if (!webhookId) {
-    console.warn('[paypal/verify] PAYPAL_WEBHOOK_ID not set — skipping verification')
-    return false
+    return { ok: false, reason: 'missing_webhook_id' }
   }
 
-  let token: string
+  const transmissionId = headers['paypal-transmission-id']
+  const transmissionTime = headers['paypal-transmission-time']
+  const transmissionSig = headers['paypal-transmission-sig']
+  const certUrl = headers['paypal-cert-url']
+
+  if (!transmissionId || !transmissionTime || !transmissionSig || !certUrl) {
+    return { ok: false, reason: 'missing_headers' }
+  }
+
+  if (!isValidPaypalCertUrl(certUrl)) {
+    return { ok: false, reason: 'bad_cert_url' }
+  }
+
+  const certPem = await fetchCertPem(certUrl)
+  if (!certPem) {
+    return { ok: false, reason: 'cert_fetch_failed' }
+  }
+
+  // crc32 over the EXACT received bytes — re-serializing JSON would change them.
+  const signedString = `${transmissionId}|${transmissionTime}|${webhookId}|${crc32Unsigned(rawBody)}`
+
   try {
-    token = await getAccessToken()
-  } catch (err) {
-    console.error('[paypal/verify] Failed to get access token for webhook verification:', err)
-    void logError({
-      route: 'lib/paypal/verifyWebhookSignature',
-      error: err instanceof Error ? err.message : String(err),
-      details: { step: 'getAccessToken' },
-    })
-    return false
-  }
-
-  const verifyPayload = {
-    auth_algo: headers['paypal-auth-algo'],
-    cert_url: headers['paypal-cert-url'],
-    transmission_id: headers['paypal-transmission-id'],
-    transmission_sig: headers['paypal-transmission-sig'],
-    transmission_time: headers['paypal-transmission-time'],
-    webhook_id: webhookId,
-    webhook_event: JSON.parse(body),
-  }
-
-  // Do not log verification headers / signatures / webhook id.
-  try {
-    const res = await fetch(
-      `${getPaypalBaseUrl()}/v1/notifications/verify-webhook-signature`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(verifyPayload),
-      }
-    )
-
-    const responseText = await res.text()
-
-    if (!res.ok) {
-      console.error('[paypal/verify] PayPal verification API returned non-2xx:', res.status, responseText)
-      void logError({
-        route: 'lib/paypal/verifyWebhookSignature',
-        error: `PayPal verification API returned ${res.status}`,
-        details: { status: res.status, body: responseText.slice(0, 500) },
-        severity: 'warn',
-      })
-      return false
-    }
-
-    let data: { verification_status: string }
-    try {
-      data = JSON.parse(responseText)
-    } catch {
-      console.error('[paypal/verify] Failed to parse verification response as JSON:', responseText)
-      return false
-    }
-
-    return data.verification_status === 'SUCCESS'
-  } catch (err) {
-    console.error('[paypal/verify] Exception during verification fetch:', err)
-    void logError({
-      route: 'lib/paypal/verifyWebhookSignature',
-      error: err instanceof Error ? err.message : String(err),
-      details: { step: 'verifyFetch', error_stack: err instanceof Error ? err.stack : undefined },
-    })
-    return false
+    const verifier = crypto.createVerify('RSA-SHA256')
+    verifier.update(signedString)
+    verifier.end()
+    // Node accepts a PEM X.509 cert directly as the key argument.
+    const valid = verifier.verify(certPem, transmissionSig, 'base64')
+    return valid ? { ok: true } : { ok: false, reason: 'signature_mismatch' }
+  } catch {
+    // A malformed cert or signature lands here — treat as a mismatch, not a crash.
+    return { ok: false, reason: 'signature_mismatch' }
   }
 }
 
