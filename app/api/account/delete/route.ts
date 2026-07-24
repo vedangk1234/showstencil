@@ -11,14 +11,26 @@ export async function POST() {
   }
   const userId = session.user.id
 
+  // ── M5 DIAGNOSTIC LOGGING ONLY — no logic change ──────────────────────────
+  // Distinguishes: (A) stale/wrong session id, vs the service-role/anon runtime
+  // explanation, vs a third cause. Remove after the diagnosis is settled.
+  console.log('[M5-DELETE-DIAG] session.user.id =', userId)
+  console.log('[M5-DELETE-DIAG] SUPABASE_SERVICE_ROLE_KEY present =', !!process.env.SUPABASE_SERVICE_ROLE_KEY)
+
   const supabase = createServiceClient()
 
   // Get user to check subscription status
-  const { data: user } = await supabase
+  const { data: user, error: guardReadError } = await supabase
     .from('users')
     .select('paypal_subscription_id, subscription_status, youtube_access_token')
     .eq('id', userId)
     .single()
+
+  // ── M5 DIAGNOSTIC LOGGING ONLY — no logic change ──────────────────────────
+  // `guardReadError` is captured purely to log the error the handler otherwise
+  // ignores; control flow below is unchanged (it still only reads `user`).
+  console.log('[M5-DELETE-DIAG] guard read → user =', user === null ? 'NULL' : 'POPULATED')
+  console.log('[M5-DELETE-DIAG] guard read → error =', guardReadError ? JSON.stringify(guardReadError) : 'none')
 
   // Cancel the PayPal subscription for ANY subscription that isn't already dead.
   // Checking the LOCAL status only (the old behaviour) left a past_due/suspended sub
