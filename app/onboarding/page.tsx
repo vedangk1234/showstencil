@@ -39,9 +39,13 @@ function OnboardingContent() {
   })
   const [syncStarted, setSyncStarted] = useState(false)
 
-  // Sync step state with URL so browser back/forward works correctly
+  // Sync step state with URL so browser back/forward works correctly.
+  // set-state-in-effect is intentional here: this mirrors an external store (the URL)
+  // into local state. It's guarded (only 1–5) and idempotent (setState bails when the
+  // value is unchanged), so it cannot cascade or loop. Safe to keep as-is.
   useEffect(() => {
     const s = Number(searchParams.get('step'))
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (s >= 1 && s <= 5) setStep(s as Step)
   }, [searchParams])
 

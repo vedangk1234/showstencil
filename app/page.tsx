@@ -336,7 +336,9 @@ export default function LandingPage() {
           <a href="#how">How it works</a>
         </div>
         <div className="nav-right">
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- /api/auth/signin is a NextAuth API route, not a page; a full-navigation <a> is correct */}
           <a href="/api/auth/signin" className="btn">Sign in</a>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- /api/auth/signin is a NextAuth API route, not a page; a full-navigation <a> is correct */}
           <a href="/api/auth/signin?callbackUrl=/dashboard" className="btn primary">Connect YouTube</a>
         </div>
       </nav>
@@ -477,6 +479,7 @@ export default function LandingPage() {
           <h1 className="hero-h">For YouTubers <em>who want to win.</em></h1>
           <p className="hero-sub">Real-time viral alerts the moment a competitor breaks out. Deep AI breakdowns of every competitor channel — hook patterns, pacing, thumbnails, retention. And a Monday digest that tells you exactly what to make next. Score your gap, study your niche, ship better videos. That&apos;s the loop.</p>
           <div className="hero-cta">
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- /api/auth/signin is a NextAuth API route, not a page; a full-navigation <a> is correct */}
             <a
               href="/api/auth/signin?callbackUrl=/dashboard"
               className="btn-hero"
@@ -678,6 +681,7 @@ export default function LandingPage() {
         <div className="cta-inner">
           <h2 className="cta-h reveal">Close <em>the gap.</em></h2>
           <p className="cta-sub reveal">7 days free. Connect your channel in under a minute. Your first digest ships next Monday.</p>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- /api/auth/signin is a NextAuth API route, not a page; a full-navigation <a> is correct */}
           <a
             href="/api/auth/signin?callbackUrl=/dashboard"
             className="btn-cta reveal"

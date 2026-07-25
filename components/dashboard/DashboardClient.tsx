@@ -499,7 +499,7 @@ export default function DashboardClient({
           {dashboardCompetitors.length === 0 ? (
             <Empty>
               No competitors tracked yet.{' '}
-              <a href="/competitors" className="text-stencil-accent no-underline">Add some →</a>
+              <Link href="/competitors" className="text-stencil-accent no-underline">Add some →</Link>
             </Empty>
           ) : dashboardCompetitors.map(c => {
             const compAvg = c.total_views != null && c.subscriber_count != null && c.subscriber_count > 0
@@ -526,12 +526,12 @@ export default function DashboardClient({
               </div>
             )
           })}
-          <a
+          <Link
             href="/competitors"
             className="font-mono text-[11px] text-stencil-ink3 hover:text-stencil-ink mt-3 pt-3 border-t border-dashed border-stencil-line block no-underline"
           >
             View all competitors →
-          </a>
+          </Link>
         </Col>
 
         <Col title="Subscriber growth" sub="last 30 days">

@@ -4,14 +4,14 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-interface ExpandableCardProps {
+interface ExpandableCardProps
+  extends React.ComponentPropsWithoutRef<typeof motion.div> {
   title: string;
   src: string;
   description: string;
   children?: React.ReactNode;
   className?: string;
   classNameExpanded?: string;
-  [key: string]: any;
 }
 
 export function ExpandableCard({

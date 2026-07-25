@@ -20,8 +20,8 @@ export default function StepWelcome({ onNext }: Props) {
       </h1>
 
       <p className="text-zinc-400 text-base leading-relaxed max-w-lg mb-2">
-        We'll connect to your YouTube channel, find your niche
-        competitors, and show you what they're doing differently.
+        We&apos;ll connect to your YouTube channel, find your niche
+        competitors, and show you what they&apos;re doing differently.
       </p>
 
       <p className="text-zinc-500 text-sm mb-12">

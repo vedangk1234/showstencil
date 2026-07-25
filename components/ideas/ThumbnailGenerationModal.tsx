@@ -128,33 +128,9 @@ export function ThumbnailGenerationModal({
     return () => document.removeEventListener('mousedown', stopProp, { capture: true })
   }, [isOpen])
 
-  // Reset state when modal opens/closes
-  useEffect(() => {
-    if (isOpen) {
-      setStep('choose_source')
-      setCapturedPhoto(null)
-      setUploadedPhoto(null)
-      setCameraError(null)
-      setFileError(null)
-      setJobId(null)
-      setGeneratedUrl(null)
-      setFailError(null)
-      setElapsedSeconds(0)
-      setTimedOut(false)
-    } else {
-      stopCamera()
-      clearPolling()
-    }
-  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Escape key
-  useEffect(() => {
-    if (!isOpen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
-
+  // Cleanup helpers + close handler are declared here — before the effects below
+  // that reference them — so react-compiler's immutability rule (no use-before-declare)
+  // is satisfied. Pure reorder; runtime behavior and hook call order are unchanged.
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop())
@@ -172,6 +148,38 @@ export function ThumbnailGenerationModal({
     clearPolling()
     onClose()
   }, [stopCamera, clearPolling, onClose])
+
+  // Reset all modal state when it opens; tear down camera/polling when it closes.
+  // These setState calls fire only on an isOpen transition (isOpen is the sole dep and
+  // none of the set values are dependencies), so they run once per open/close and cannot
+  // cascade or loop. This is intentional lifecycle reset — suppress the rule for the block.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (isOpen) {
+      setStep('choose_source')
+      setCapturedPhoto(null)
+      setUploadedPhoto(null)
+      setCameraError(null)
+      setFileError(null)
+      setJobId(null)
+      setGeneratedUrl(null)
+      setFailError(null)
+      setElapsedSeconds(0)
+      setTimedOut(false)
+    } else {
+      stopCamera()
+      clearPolling()
+    }
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Escape key
+  useEffect(() => {
+    if (!isOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Camera ────────────────────────────────────────────────────────────────
 
@@ -191,8 +199,12 @@ export function ThumbnailGenerationModal({
     }
   }, [])
 
+  // Drive the camera from the current step. startCamera() synchronously calls
+  // setCameraError(null) at its start, which the rule flags transitively; this is
+  // intentional camera-lifecycle side-effect keyed on step and cannot loop.
   useEffect(() => {
     if (step === 'camera' && !capturedPhoto) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void startCamera()
     }
     if (step !== 'camera') {
@@ -315,10 +327,13 @@ export function ThumbnailGenerationModal({
     }
   }, [ideaId, clearPolling, onSuccess])
 
-  // 90s polling timeout
+  // 90s polling timeout — latch timedOut once elapsed crosses 90s. Guarded by !timedOut
+  // so it fires exactly once per generation run and cannot loop. Kept as a latched state
+  // (rather than derived in render) intentionally, so it survives elapsedSeconds resets.
   useEffect(() => {
     if (step !== 'generating') return
     if (elapsedSeconds >= 90 && !timedOut) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTimedOut(true)
     }
   }, [step, elapsedSeconds, timedOut])

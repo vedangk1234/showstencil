@@ -1,4 +1,5 @@
 import { auth } from '@/auth'
+import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase'
 import { CompetitorAnalysis } from '@/components/competitors/CompetitorAnalysis'
@@ -77,6 +78,10 @@ export default async function CompetitorAnalysisPage({
     ])
 
     return (
+      // False positive in an async Server Component: the try guards the data fetch above,
+      // and this JSX is rendered by the framework (not thrown synchronously here), so the
+      // catch below correctly handles fetch failures. Suppress react-hooks/error-boundaries.
+      // eslint-disable-next-line react-hooks/error-boundaries
       <CompetitorAnalysis
         user={user}
         userSnapshot={userSnapshot ?? null}
@@ -105,7 +110,7 @@ export default async function CompetitorAnalysisPage({
         <p style={{ color: '#555', fontSize: 14, margin: 0, maxWidth: 380 }}>
           We couldn&apos;t load this competitor right now. This is usually temporary — please refresh the page.
         </p>
-        <a
+        <Link
           href="/competitors"
           style={{
             background: '#fff',
@@ -118,7 +123,7 @@ export default async function CompetitorAnalysisPage({
           }}
         >
           Back to competitors
-        </a>
+        </Link>
       </div>
     )
   }
