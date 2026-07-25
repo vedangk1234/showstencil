@@ -18,10 +18,13 @@ async function test() {
       messages: [{ role: 'user', content: 'Say hi' }]
     })
     console.log('SUCCESS:', response.content[0])
-  } catch (err: any) {
-    console.log('FAILED:', err.message)
-    console.log('Status:', err.status)
-    console.log('Error type:', err.constructor.name)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const status = (err as { status?: number }).status
+    const errorType = err instanceof Error ? err.constructor.name : typeof err
+    console.log('FAILED:', message)
+    console.log('Status:', status)
+    console.log('Error type:', errorType)
   }
 }
 

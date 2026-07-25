@@ -31,7 +31,10 @@ export default function StepFirstAnalysis({ result, setResult }: Props) {
   const [progress, setProgress] = useState(0)
   const [done, setDone] = useState(false)
   const [completing, setCompleting] = useState(false)
-  const startTimeRef = useRef<number>(Date.now())
+  // Initialized to 0, not Date.now(), to keep render pure (react-compiler purity rule).
+  // The mount effect below sets startTimeRef.current = Date.now() before the interval
+  // ever reads it, so the initial value is never observed — behavior is unchanged.
+  const startTimeRef = useRef<number>(0)
   const fetchedRef = useRef(false)
 
   // Single progress ticker running from mount

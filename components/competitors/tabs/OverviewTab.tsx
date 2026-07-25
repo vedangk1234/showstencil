@@ -1,5 +1,7 @@
 'use client'
 
+import { useMemo } from 'react'
+
 interface UserVideoRow {
   duration_seconds: number | null
   published_at: string | null
@@ -53,6 +55,16 @@ const NOT_PUBLIC = (
 )
 
 export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVideos }: OverviewTabProps) {
+  // Pin "now" once at mount (useMemo, [] deps) so the 30-day window math is stable across
+  // renders. Reading wall-clock time is inherently impure and there's no render-safe source
+  // for it here (the tab isn't given the time as a prop), so the single Date.now() read is
+  // suppressed. Placed before the early return so the hook runs unconditionally.
+  const nowMs = useMemo(
+    // eslint-disable-next-line react-hooks/purity -- unavoidable wall-clock read for a relative "last N days" window; pinned once per mount
+    () => Date.now(),
+    [],
+  )
+
   if (!userSnapshot) {
     return (
       <div style={{
@@ -80,7 +92,7 @@ export function OverviewTab({ userSnapshot, userVideos, competitor, competitorVi
         )
       : null
 
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000)
   const recentUserVideos = userVideos.filter(
     (v) => v.published_at && new Date(v.published_at) >= thirtyDaysAgo,
   )

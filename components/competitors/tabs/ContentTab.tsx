@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import { getDisplayName } from '@/lib/niches'
 
 interface UserVideoRow {
@@ -23,6 +24,16 @@ function formatDuration(seconds: number | null): string {
 }
 
 export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }: ContentTabProps) {
+  // Pin "now" once at mount (useMemo, [] deps) so the 30/60-day window math is stable
+  // across renders. Reading wall-clock time is inherently impure and there's no render-safe
+  // source for it here (the tab isn't given the time as a prop), so the single Date.now()
+  // read is suppressed. Placed before the early return so the hook runs unconditionally.
+  const nowMs = useMemo(
+    // eslint-disable-next-line react-hooks/purity -- unavoidable wall-clock read for a relative "last N days" window; pinned once per mount
+    () => Date.now(),
+    [],
+  )
+
   if (competitorVideos.length === 0) {
     return (
       <div style={{
@@ -51,7 +62,7 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
       : null)
 
   // ── Upload frequency ─────────────────────────────────────────────────────
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const thirtyDaysAgo = new Date(nowMs - 30 * 24 * 60 * 60 * 1000)
   const uploadFreqDisplay =
     (competitor.upload_frequency_30d as number | null) != null
       ? `${(competitor.upload_frequency_30d as number).toFixed(1)} videos / month`
@@ -68,7 +79,6 @@ export function ContentTab({ competitor, competitorVideos, userVideos, nicheId }
       : null
 
   // ── Posting days ─────────────────────────────────────────────────────────
-  const nowMs = Date.now()
   const thirtyDaysAgoMs = nowMs - 30 * 24 * 60 * 60 * 1000
   const sixtyDaysAgoMs = nowMs - 60 * 24 * 60 * 60 * 1000
 

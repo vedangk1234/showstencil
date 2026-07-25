@@ -69,7 +69,7 @@ export function TrendAlertEmail({
     <Html lang="en" dir="ltr">
       <Head />
       <Preview>
-        Trend alert: "{videoTitle}" just hit {formatNumber(viewCount)} views in your niche
+        Trend alert: &quot;{videoTitle}&quot; just hit {formatNumber(viewCount)} views in your niche
       </Preview>
 
       <Body style={bodyStyle}>

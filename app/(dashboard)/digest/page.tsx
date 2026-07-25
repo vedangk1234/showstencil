@@ -1,4 +1,5 @@
 import { auth } from '@/auth'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getRecentDigests, getUser } from '@/lib/db'
 import { createServiceClient } from '@/lib/supabase'
@@ -25,6 +26,10 @@ export default async function DigestPage() {
     ])
 
     return (
+      // False positive in an async Server Component: the try guards the data fetch above,
+      // and this JSX is rendered by the framework (not thrown synchronously here), so the
+      // catch below correctly handles fetch failures. Suppress react-hooks/error-boundaries.
+      // eslint-disable-next-line react-hooks/error-boundaries
       <DigestListClient
         digests={digests}
         competitors={competitorResult.data ?? []}
@@ -48,7 +53,7 @@ export default async function DigestPage() {
         <p style={{ color: '#555', fontSize: 14, margin: 0, maxWidth: 380 }}>
           We couldn&apos;t load your digests right now. This is usually temporary — please refresh the page.
         </p>
-        <a
+        <Link
           href="/digest"
           style={{
             background: '#fff',
@@ -61,7 +66,7 @@ export default async function DigestPage() {
           }}
         >
           Refresh page
-        </a>
+        </Link>
       </div>
     )
   }

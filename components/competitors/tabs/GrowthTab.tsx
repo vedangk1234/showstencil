@@ -31,6 +31,10 @@ function fmtK(n: number): string {
 
 export function GrowthTab({ userSnapshots, competitor, competitorSnapshots }: GrowthTabProps) {
   const [mounted, setMounted] = useState(false)
+  // One-time mount flag gating Recharts' ResponsiveContainer to avoid an SSR/client
+  // hydration mismatch. set-state-in-effect is the canonical pattern here: empty deps
+  // means it runs exactly once and cannot loop. Safe to keep as-is.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setMounted(true), [])
 
   if (competitorSnapshots.length === 0) {
