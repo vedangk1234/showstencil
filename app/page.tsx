@@ -725,7 +725,6 @@ export default function LandingPage() {
           </div>
         </div>
         <div className="foot-bottom">
-          <span>© 2026 ShowStencil</span>
           <span>Built for creators · made with care</span>
         </div>
         <div style={{

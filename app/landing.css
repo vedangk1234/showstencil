@@ -639,10 +639,16 @@ footer{
 }
 .foot-col a:hover{ color: var(--ink)}
 .foot-bottom{
-  max-width: 1280px; margin: 0 auto;
+  max-width: 1280px;
+  margin: 0 auto;
   padding-top: 24px;
-  display:flex; justify-content:space-between; align-items:center;
-  font-family:var(--mono); font-size:11px; color: var(--ink-3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
 }
 
 /* ============ MOTION ============ */
@@ -658,4 +664,10 @@ footer{
   .ribbon{ grid-template-columns: repeat(2,1fr)}
   .foot-grid{ grid-template-columns: 1fr 1fr}
   .nav-links{ display:none}
+
+  .foot-bottom{
+    padding-top: 18px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
 }

@@ -10,7 +10,9 @@
       "Bash(npx tsx *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(echo \"exit_code=$?\")",
+      "Bash(echo \"EXIT_CODE=$?\")"
     ]
   }
 }
